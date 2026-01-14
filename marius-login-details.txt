@@ -1,0 +1,31 @@
+🎉 CONTRACTOR LOGIN DETAILS CREATED FOR MARIUS
+
+👤 Contractor: Marius Andronache
+📧 Email: mariochitucu@gmail.com
+📱 Phone: 07828696116
+💰 Pay Rate: £25/hour
+📅 Status: APPROVED
+
+🔑 LOGIN CREDENTIALS:
+Username: marius
+Password: marius123
+
+🌐 Login URL: [Your replit app URL]/login
+
+✅ Marius can now:
+- Login to the contractor portal
+- Track work hours with GPS verification
+- Receive job assignments via Telegram
+- Submit work reports and photos
+
+⚠️ ACTION REQUIRED:
+Please manually inform Marius about his login credentials since we don't have his Telegram ID yet.
+He can start working immediately after receiving these details.
+
+📱 Known Telegram IDs in system:
+- Dalwayne: 8016744652
+- Earl: 6792554033
+- Muhammed: 5209713845
+- Admin (James): 7617462316
+
+🔄 Once Marius starts using the system, his Telegram ID will be automatically captured for future notifications.

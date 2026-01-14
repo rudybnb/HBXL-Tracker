@@ -1,0 +1,13 @@
+Name,Flat 2
+Address,Stevenage 
+Post code,SG1 1EH
+Project Type,Fitout
+
+Order Date,Start Date,Build Phase,Labour,Electrics,Description,Quantity
+21/08/2025,21/08/2025,Electrical 1st Fix,Labour,Electrician,Electrician (Hours),14
+21/08/2025,21/08/2025,Electrical 1st Fix,Labour,Electrician,Electrician & Mate (Hours),1
+04/09/2025,04/09/2025,Electrical 1st Fix,Material,Electrics,3 Core & Earth Cable 1mm (100m) (Each),1
+04/09/2025,04/09/2025,Electrical 1st Fix,Material,Electrics,Back Box Metal 1G 16mm (Each),2
+04/09/2025,04/09/2025,Electrical 1st Fix,Material,Electrics,Back Box Metal 1G 25mm (Each),2
+04/09/2025,04/09/2025,Electrical 1st Fix,Material,Electrics,Back Box Metal 2G 25mm (Each),13
+04/09/2025,04/09/2025,Electrical 1st Fix,Material,Electrics,Twin & Earth Cable 6mm (per m) (m),34
