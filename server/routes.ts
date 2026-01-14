@@ -210,6 +210,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Job Files API
+  app.get("/api/jobs/:id/files", async (req, res) => {
+    try {
+      const files = await storage.getJobFiles(req.params.id);
+      res.json(files);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch job files" });
+    }
+  });
+
+  app.post("/api/jobs/:id/files", upload.single('file'), async (req: MulterRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const jobFile = await storage.createJobFile({
+        jobId: req.params.id,
+        filename: req.file.filename || req.file.originalname,
+        originalName: req.file.originalname,
+        fileUrl: `/uploads/${req.file.filename || req.file.originalname}`, // In real app, upload to S3/Blob
+        fileType: req.file.mimetype,
+        uploadedBy: "user"
+      });
+
+      res.status(201).json(jobFile);
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  app.delete("/api/files/:id", async (req, res) => {
+    try {
+      await storage.deleteJobFile(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  });
+
   // CSV Upload endpoint
   app.post("/api/upload-csv", upload.single('csvFile'), async (req: MulterRequest, res) => {
     try {

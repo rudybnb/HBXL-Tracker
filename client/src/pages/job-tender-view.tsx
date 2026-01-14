@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import JobDrawings from "@/components/job-drawings";
 
 interface QSItem {
     element: string;
@@ -14,7 +16,10 @@ interface QSItem {
     rate: number;
     total: number;
     isCalculated: boolean;
+    source?: string;
 }
+
+interface QSSection {
 
 interface QSSection {
     id: string;
@@ -125,69 +130,85 @@ export default function JobTenderView() {
             {/* Content */}
             <div className="max-w-5xl mx-auto py-8 px-4">
 
-                {/* Grand Total Card */}
-                <div className="bg-slate-800 border border-amber-500/30 rounded-lg p-6 mb-8 text-center shadow-lg shadow-amber-900/10">
-                    <h2 className="text-slate-400 uppercase tracking-wider text-sm mb-2">Total Construction Cost (Est)</h2>
-                    <div className="text-5xl font-bold text-amber-400">
-                        £{tender.grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                    </div>
-                    <p className="text-slate-500 text-xs mt-2">*Excludes Prelims & Welfare (HBXL Included)</p>
-                </div>
+                <Tabs defaultValue="tender" className="space-y-6">
+                    <TabsList className="bg-slate-800 border-slate-700">
+                        <TabsTrigger value="tender" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Tender Document</TabsTrigger>
+                        <TabsTrigger value="drawings" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Drawings & Files</TabsTrigger>
+                    </TabsList>
 
-                {/* Sections */}
-                <div className="space-y-6">
-                    {tender.sections.map((section) => (
-                        <div key={section.id} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
-                            <div className="bg-slate-800/80 p-4 border-b border-slate-700 flex justify-between items-center">
-                                <div>
-                                    <h3 className="text-lg font-bold text-white flex items-center">
-                                        <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded mr-3">Section {section.id}</span>
-                                        {section.title}
-                                    </h3>
-                                    <p className="text-xs text-slate-400 mt-1 ml-14">{section.description}</p>
-                                </div>
-                                <div className="text-xl font-semibold text-amber-500">
-                                    £{section.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                </div>
+                    <TabsContent value="tender">
+                        {/* Grand Total Card */}
+                        <div className="bg-slate-800 border border-amber-500/30 rounded-lg p-6 mb-8 text-center shadow-lg shadow-amber-900/10">
+                            <h2 className="text-slate-400 uppercase tracking-wider text-sm mb-2">Total Construction Cost (Est)</h2>
+                            <div className="text-5xl font-bold text-amber-400">
+                                £{tender.grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                             </div>
-
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-slate-900/50 text-slate-400 font-medium border-b border-slate-700">
-                                        <tr>
-                                            <th className="px-6 py-3 text-left">Element</th>
-                                            <th className="px-6 py-3 text-left">Description</th>
-                                            <th className="px-6 py-3 text-right">Qty</th>
-                                            <th className="px-6 py-3 text-right">Unit</th>
-                                            <th className="px-6 py-3 text-right">Rate</th>
-                                            <th className="px-6 py-3 text-right">Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-700/50">
-                                        {section.items.map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-700/30">
-                                                <td className="px-6 py-4 font-medium text-slate-200">
-                                                    {item.element}
-                                                    {item.isCalculated && <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500" title="QS Model Calculated"></span>}
-                                                </td>
-                                                <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={item.description}>{item.description}</td>
-                                                <td className="px-6 py-4 text-right text-slate-300">{item.quantity}</td>
-                                                <td className="px-6 py-4 text-right text-slate-400 text-xs uppercase">{item.unit}</td>
-                                                <td className="px-6 py-4 text-right text-slate-300">£{item.rate.toFixed(2)}</td>
-                                                <td className="px-6 py-4 text-right font-medium text-amber-500">£{item.total.toFixed(2)}</td>
-                                            </tr>
-                                        ))}
-                                        {section.items.length === 0 && (
-                                            <tr>
-                                                <td colSpan={6} className="px-6 py-8 text-center text-slate-500 italic">No items found for this section in CSV or Model.</td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
+                            <p className="text-slate-500 text-xs mt-2">*Excludes Prelims & Welfare (HBXL Included)</p>
                         </div>
-                    ))}
-                </div>
+
+                        {/* Sections */}
+                        <div className="space-y-6">
+                            {tender.sections.map((section) => (
+                                <div key={section.id} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                                    <div className="bg-slate-800/80 p-4 border-b border-slate-700 flex justify-between items-center">
+                                        <div>
+                                            <h3 className="text-lg font-bold text-white flex items-center">
+                                                <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded mr-3">Section {section.id}</span>
+                                                {section.title}
+                                            </h3>
+                                            <p className="text-xs text-slate-400 mt-1 ml-14">{section.description}</p>
+                                        </div>
+                                        <div className="text-xl font-semibold text-amber-500">
+                                            £{section.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-slate-900/50 text-slate-400 font-medium border-b border-slate-700">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left">Element</th>
+                                                    <th className="px-6 py-3 text-left">Description</th>
+                                                    <th className="px-6 py-3 text-right">Qty</th>
+                                                    <th className="px-6 py-3 text-right">Unit</th>
+                                                    <th className="px-6 py-3 text-right">Rate</th>
+                                                    <th className="px-6 py-3 text-right">Total</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-700/50">
+                                                {section.items.map((item, idx) => (
+                                                    <tr key={idx} className="hover:bg-slate-700/30">
+                                                        <td className="px-6 py-4 font-medium text-slate-200">
+                                                            {item.element}
+                                                            {item.isCalculated && <span className="ml-2 inline-block h-2 w-2 rounded-full bg-blue-500" title="QS Model Calculated"></span>}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-slate-400 max-w-xs truncate" title={item.description}>{item.description}</td>
+                                                        <td className="px-6 py-4 text-right text-slate-300">{item.quantity}</td>
+                                                        <td className="px-6 py-4 text-right text-slate-400 text-xs uppercase">{item.unit}</td>
+                                                        <td className="px-6 py-4 text-right text-slate-300">£{item.rate.toFixed(2)}</td>
+                                                        <td className="px-6 py-4 text-right font-medium text-amber-500">£{item.total.toFixed(2)}</td>
+                                                    </tr>
+                                                ))}
+                                                {section.items.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={6} className="px-6 py-8 text-center text-slate-500 italic">No items found for this section in CSV or Model.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="drawings">
+                        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                            <h2 className="text-xl font-bold text-white mb-4">Project Drawings & Files</h2>
+                            <JobDrawings jobId={id!} />
+                        </div>
+                    </TabsContent>
+                </Tabs>
             </div>
         </div>
     );

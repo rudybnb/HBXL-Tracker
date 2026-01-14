@@ -1,12 +1,12 @@
-import { 
-  type Contractor, 
-  type InsertContractor, 
-  type Job, 
-  type InsertJob, 
-  type CsvUpload, 
-  type InsertCsvUpload, 
-  type JobWithContractor, 
-  type ContractorApplication, 
+import {
+  type Contractor,
+  type InsertContractor,
+  type Job,
+  type InsertJob,
+  type CsvUpload,
+  type InsertCsvUpload,
+  type JobWithContractor,
+  type ContractorApplication,
   type InsertContractorApplication,
   type WorkSession,
   type InsertWorkSession,
@@ -132,9 +132,9 @@ export class DatabaseStorage implements IStorage {
       .from(jobs)
       .leftJoin(contractors, eq(jobs.contractorId, contractors.id))
       .where(eq(jobs.id, id));
-    
+
     if (!job) return undefined;
-    
+
     return {
       ...job,
       contractor: job.contractor || undefined
@@ -166,6 +166,20 @@ export class DatabaseStorage implements IStorage {
     return createdJobs;
   }
 
+  // Job Files
+  async getJobFiles(jobId: string): Promise<JobFile[]> {
+    return await db.select().from(jobFiles).where(eq(jobFiles.jobId, jobId));
+  }
+
+  async createJobFile(file: InsertJobFile): Promise<JobFile> {
+    const [jobFile] = await db.insert(jobFiles).values(file).returning();
+    return jobFile;
+  }
+
+  async deleteJobFile(id: string): Promise<void> {
+    await db.delete(jobFiles).where(eq(jobFiles.id, id));
+  }
+
   // CSV Uploads
   async getCsvUploads(): Promise<CsvUpload[]> {
     return db.select().from(csvUploads);
@@ -188,13 +202,13 @@ export class DatabaseStorage implements IStorage {
   async deleteCsvUpload(id: string): Promise<boolean> {
     // First check if there are any jobs associated with this upload
     const associatedJobs = await db.select().from(jobs).where(eq(jobs.uploadId, id));
-    
+
     if (associatedJobs.length > 0) {
       // Delete associated jobs first to maintain referential integrity
       await db.delete(jobs).where(eq(jobs.uploadId, id));
       console.log(`🗑️ Deleted ${associatedJobs.length} jobs associated with upload ${id}`);
     }
-    
+
     // Now delete the CSV upload record
     const result = await db.delete(csvUploads).where(eq(csvUploads.id, id));
     console.log(`🗑️ Deleted CSV upload record ${id}`);
@@ -205,23 +219,23 @@ export class DatabaseStorage implements IStorage {
   async assignJob(assignment: JobAssignment): Promise<Job | undefined> {
     const job = await this.getJob(assignment.jobId);
     const contractor = await this.getContractor(assignment.contractorId);
-    
+
     if (!job || !contractor) return undefined;
-    
+
     const updatedJob = await this.updateJob(assignment.jobId, {
       contractorId: assignment.contractorId,
       status: "assigned",
       dueDate: assignment.dueDate,
       notes: assignment.notes
     });
-    
+
     // Update contractor's active jobs count
     const currentActiveJobs = parseInt(contractor.activeJobs) + 1;
     await this.updateContractor(assignment.contractorId, {
       activeJobs: currentActiveJobs.toString(),
       status: currentActiveJobs >= 3 ? "busy" : "available"
     });
-    
+
     return updatedJob;
   }
 
@@ -269,7 +283,7 @@ export class DatabaseStorage implements IStorage {
           like(jobAssignments.contractorName, `${contractorName}%`)
         )
       });
-      
+
       console.log(`📋 Found ${assignments.length} assignments for contractor: ${contractorName}`);
       return assignments;
     } catch (error) {
@@ -346,10 +360,10 @@ export class DatabaseStorage implements IStorage {
       const diffMs = endTime.getTime() - startTime.getTime();
       const hoursWorked = diffMs / (1000 * 60 * 60);
       updates.totalHours = hoursWorked.toFixed(2); // Convert to hours with 2 decimal places as string
-      
+
       console.log(`🕐 Session Summary: ${updates.totalHours}h worked`);
       console.log(`📍 GPS Distance: ${updates.endLatitude && updates.startLatitude ? 'Tracked' : 'Missing'}`);
-      
+
     } else if (updates.endTime) {
       // If only endTime provided, get the existing session to calculate from startTime
       const existingSession = await db.select().from(workSessions).where(eq(workSessions.id, id)).limit(1);
@@ -359,7 +373,7 @@ export class DatabaseStorage implements IStorage {
         const diffMs = endTime.getTime() - startTime.getTime();
         const hoursWorked = diffMs / (1000 * 60 * 60);
         updates.totalHours = hoursWorked.toFixed(2);
-        
+
         console.log(`🕐 Session Complete: ${updates.totalHours}h worked`);
       }
     }
@@ -373,7 +387,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Admin Clock Monitoring Methods
-  
+
   async getActiveWorkSessions(): Promise<WorkSession[]> {
     return db.select().from(workSessions)
       .where(eq(workSessions.status, "active"))
@@ -390,7 +404,7 @@ export class DatabaseStorage implements IStorage {
     const names = contractorName.split(' ');
     const firstName = names[0];
     const lastName = names.slice(1).join(' ');
-    
+
     const [contractor] = await db.select().from(contractorApplications)
       .where(
         and(
@@ -404,7 +418,7 @@ export class DatabaseStorage implements IStorage {
   async getContractorByPhone(phoneNumber: string): Promise<ContractorApplication | undefined> {
     // Clean the phone number - remove +1, spaces, dashes, etc.
     const cleanPhone = phoneNumber.replace(/[\+\-\s\(\)]/g, '');
-    
+
     const [contractor] = await db.select().from(contractorApplications)
       .where(like(contractorApplications.phone, `%${cleanPhone.slice(-10)}%`)); // Last 10 digits
     return contractor;
@@ -413,17 +427,17 @@ export class DatabaseStorage implements IStorage {
   async getRecentClockActivities(): Promise<any[]> {
     // Get all sessions from the last 24 hours
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    
+
     const recentSessions = await db.select().from(workSessions)
       .orderBy(desc(workSessions.startTime))
       .limit(50); // Get last 50 sessions to ensure we catch recent activity
 
     // Transform to activity format and filter for last 24 hours
     const activities = [];
-    
+
     for (const session of recentSessions) {
       const sessionStartTime = new Date(session.startTime);
-      
+
       // Only include sessions from last 24 hours
       if (sessionStartTime.getTime() >= oneDayAgo.getTime()) {
         // Clock in activity
@@ -434,19 +448,19 @@ export class DatabaseStorage implements IStorage {
           timestamp: session.startTime,
           location: session.jobSiteLocation,
           sessionId: session.id,
-          actualTime: sessionStartTime.toLocaleString('en-GB', { 
+          actualTime: sessionStartTime.toLocaleString('en-GB', {
             timeZone: 'Europe/London',
-            hour: '2-digit', 
+            hour: '2-digit',
             minute: '2-digit',
             second: '2-digit'
           }),
-          fullDateTime: sessionStartTime.toLocaleString('en-GB', { 
+          fullDateTime: sessionStartTime.toLocaleString('en-GB', {
             timeZone: 'Europe/London',
             weekday: 'short',
             year: 'numeric',
             month: 'short',
             day: 'numeric',
-            hour: '2-digit', 
+            hour: '2-digit',
             minute: '2-digit'
           })
         });
@@ -463,19 +477,19 @@ export class DatabaseStorage implements IStorage {
               location: session.jobSiteLocation,
               sessionId: session.id,
               totalHours: session.totalHours,
-              actualTime: sessionEndTime.toLocaleString('en-GB', { 
+              actualTime: sessionEndTime.toLocaleString('en-GB', {
                 timeZone: 'Europe/London',
-                hour: '2-digit', 
+                hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit'
               }),
-              fullDateTime: sessionEndTime.toLocaleString('en-GB', { 
+              fullDateTime: sessionEndTime.toLocaleString('en-GB', {
                 timeZone: 'Europe/London',
                 weekday: 'short',
                 year: 'numeric',
                 month: 'short',
                 day: 'numeric',
-                hour: '2-digit', 
+                hour: '2-digit',
                 minute: '2-digit'
               })
             });
@@ -491,11 +505,11 @@ export class DatabaseStorage implements IStorage {
   async getTodayWorkSessions(): Promise<WorkSession[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     // Get sessions from today onwards
     const allSessions = await db.select().from(workSessions)
       .orderBy(desc(workSessions.startTime));
-    
+
     // Filter for sessions that started today
     const todaySessions = allSessions.filter(session => {
       const sessionDate = new Date(session.startTime);
@@ -506,7 +520,7 @@ export class DatabaseStorage implements IStorage {
     // Calculate total hours for each session
     const sessionsWithHours = todaySessions.map(session => {
       let totalHours = 0;
-      
+
       if (session.endTime) {
         // Completed session - calculate actual hours
         const startTime = new Date(session.startTime);
@@ -520,7 +534,7 @@ export class DatabaseStorage implements IStorage {
         const diffMs = now.getTime() - startTime.getTime();
         totalHours = diffMs / (1000 * 60 * 60); // Convert to hours
       }
-      
+
       return {
         ...session,
         totalHours: totalHours.toFixed(2),
@@ -537,13 +551,13 @@ export class DatabaseStorage implements IStorage {
       const [contractor] = await db.select().from(contractorApplications)
         .where(sql`CONCAT(${contractorApplications.firstName}, ' ', ${contractorApplications.lastName}) = ${contractorName}`)
         .limit(1);
-      
+
       if (contractor?.adminPayRate) {
         const rate = parseFloat(contractor.adminPayRate);
         console.log(`💰 Authentic pay rate for ${contractorName}: £${rate.toFixed(2)}/hour`);
         return rate;
       }
-      
+
       console.log(`⚠️ No pay rate found for ${contractorName} - using system default`);
       return 25.00;
     } catch (error) {
@@ -557,58 +571,58 @@ export class DatabaseStorage implements IStorage {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    
+
     const [session] = await db.select().from(workSessions)
       .where(
         like(workSessions.contractorName, `%${contractorName}%`)
       )
       .orderBy(workSessions.startTime)
       .limit(1);
-    
+
     return session;
   }
 
   async getWorkSessionsForWeek(startDate: Date, endDate: Date): Promise<WorkSession[]> {
     console.log(`🗓️ Fetching work sessions between ${startDate.toISOString()} and ${endDate.toISOString()}`);
-    
+
     // Get all completed sessions without date filtering first, then debug filter
     const allSessions = await db.select().from(workSessions)
       .where(eq(workSessions.status, 'completed'))
       .orderBy(desc(workSessions.startTime));
-    
+
     console.log(`📊 Total completed sessions in database: ${allSessions.length}`);
-    
+
     // Debug: Show dates of all sessions
     allSessions.forEach(session => {
       const sessionDate = new Date(session.startTime);
       console.log(`🔍 Session: ${session.contractorName} on ${sessionDate.toDateString()} (${sessionDate.toISOString()})`);
     });
-    
+
     // Apply date filtering in JavaScript to ensure we catch all sessions
     const weekSessions = allSessions.filter(session => {
       const sessionDate = new Date(session.startTime);
       // Set time to midnight for accurate date comparison
       const sessionDay = new Date(sessionDate);
       sessionDay.setHours(0, 0, 0, 0);
-      
+
       const startDay = new Date(startDate);
       startDay.setHours(0, 0, 0, 0);
-      
+
       const endDay = new Date(endDate);
       endDay.setHours(23, 59, 59, 999);
-      
+
       return sessionDay >= startDay && sessionDay <= endDay;
     });
 
     console.log(`📊 Found ${weekSessions.length} sessions in the specified week range`);
-    
+
     // Debug: List all Friday sessions specifically  
     const fridaySessions = weekSessions.filter(session => {
       const sessionDate = new Date(session.startTime);
       return sessionDate.toDateString().includes('Aug 22 2025');
     });
     console.log(`📅 Friday sessions found: ${fridaySessions.length}`, fridaySessions.map(s => s.contractorName));
-    
+
     return weekSessions;
   }
 
@@ -617,44 +631,44 @@ export class DatabaseStorage implements IStorage {
     // Get authentic pay rate from database - Mandatory Rule #2: DATA INTEGRITY
     const payRate = await this.getContractorPayRate(contractorName);
     const baseRate = payRate || 25.00; // Fallback only if database unavailable
-    
+
     // Check if weekend work for overtime calculation
     const dayOfWeek = startTime.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
     const overtimeMultiplier = isWeekend ? 1.5 : 1.0;
     const hourlyRate = baseRate * overtimeMultiplier;
-    
+
     // Calculate gross earnings
     const grossEarnings = hoursWorked * hourlyRate;
-    
+
     // Calculate punctuality deduction (£0.50/minute after 8:15 AM, max £50)
     const startHour = startTime.getHours();
     const startMinute = startTime.getMinutes();
     const clockInTime = startHour + startMinute / 60;
-    const lateThreshold = 8 + 15/60; // 8:15 AM
-    
+    const lateThreshold = 8 + 15 / 60; // 8:15 AM
+
     let punctualityDeduction = 0;
     if (clockInTime > lateThreshold) {
       const lateMinutes = (clockInTime - lateThreshold) * 60;
       punctualityDeduction = Math.min(lateMinutes * 0.50, 50); // Max £50 deduction
     }
-    
+
     // Calculate CIS deduction - Default to 30% for unregistered contractors
     // TODO: Make this dynamic based on contractor's actual form data
     const cisRate = 0.30; // Dalwayne is "Not CIS Registered (30% deduction)"
     const cisDeduction = grossEarnings * cisRate;
-    
+
     // Calculate net earnings (minimum £100 daily pay)
     const beforeMinimum = grossEarnings - punctualityDeduction - cisDeduction;
     const netEarnings = Math.max(beforeMinimum, 100); // Minimum £100 daily pay
-    
+
     console.log(`💰 Earnings Breakdown:`);
     console.log(`   - Hours: ${hoursWorked.toFixed(2)}h at £${hourlyRate.toFixed(2)}/h${isWeekend ? ' (weekend overtime)' : ''}`);
     console.log(`   - Gross: £${grossEarnings.toFixed(2)}`);
     console.log(`   - Punctuality deduction: £${punctualityDeduction.toFixed(2)}`);
     console.log(`   - CIS deduction: £${cisDeduction.toFixed(2)}`);
     console.log(`   - Net earnings: £${netEarnings.toFixed(2)}`);
-    
+
     return {
       hourlyRate: hourlyRate.toFixed(2),
       grossEarnings: grossEarnings.toFixed(2),
@@ -681,7 +695,7 @@ export class DatabaseStorage implements IStorage {
   async setAdminSetting(setting: InsertAdminSetting): Promise<AdminSetting> {
     // Check if setting already exists
     const existing = await this.getAdminSetting(setting.settingKey);
-    
+
     if (existing) {
       // Update existing setting
       const [updated] = await db
@@ -716,7 +730,7 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(adminSettings.settingKey, key))
       .returning();
-    
+
     console.log("⚙️ Updated admin setting:", key, "to:", value);
     return updated;
   }
@@ -730,12 +744,12 @@ export class DatabaseStorage implements IStorage {
   }> {
     const allJobs = await db.select().from(jobs);
     const allContractors = await db.select().from(contractors);
-    
+
     return {
       totalJobs: allJobs.length,
       pendingJobs: allJobs.filter(job => job.status === "pending").length,
       completedJobs: allJobs.filter(job => job.status === "completed").length,
-      activeContractors: allContractors.filter(contractor => 
+      activeContractors: allContractors.filter(contractor =>
         contractor.status === "available" || contractor.status === "busy"
       ).length
     };
@@ -812,7 +826,7 @@ export class DatabaseStorage implements IStorage {
   async completeInspectionNotification(id: string): Promise<InspectionNotification | undefined> {
     const [notification] = await db
       .update(inspectionNotifications)
-      .set({ 
+      .set({
         inspectionCompleted: true,
         completedAt: new Date()
       })
@@ -880,7 +894,7 @@ export class DatabaseStorage implements IStorage {
           eq(taskProgress.contractorName, contractorName),
           eq(taskProgress.assignmentId, assignmentId)
         ));
-      
+
       console.log(`📋 Retrieved ${progress.length} task progress items for ${contractorName} assignment ${assignmentId}`);
       return progress as TaskProgress[];
     } catch (error) {
@@ -901,7 +915,7 @@ export class DatabaseStorage implements IStorage {
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(taskProgress.id, id))
       .returning();
-    
+
     console.log(`🔄 Updated task progress: ${id}`);
     return progress;
   }
@@ -909,7 +923,7 @@ export class DatabaseStorage implements IStorage {
   async updateTaskCompletion(contractorName: string, assignmentId: string, taskId: string, completed: boolean): Promise<TaskProgress | undefined> {
     const [progress] = await db
       .update(taskProgress)
-      .set({ 
+      .set({
         completed,
         completedAt: completed ? new Date() : null,
         updatedAt: new Date()
@@ -920,7 +934,7 @@ export class DatabaseStorage implements IStorage {
         eq(taskProgress.taskId, taskId)
       ))
       .returning();
-    
+
     console.log(`✅ Task ${taskId} marked as ${completed ? 'completed' : 'incomplete'} for ${contractorName}`);
     return progress;
   }
@@ -937,7 +951,7 @@ export class DatabaseStorage implements IStorage {
       .from(taskInspectionResults)
       .where(eq(taskInspectionResults.contractorName, contractorName))
       .orderBy(desc(taskInspectionResults.inspectedAt));
-    
+
     console.log(`📋 Retrieved ${results.length} task inspection results for ${contractorName}`);
     return results;
   }
@@ -945,13 +959,13 @@ export class DatabaseStorage implements IStorage {
   async markTaskInspectionAsViewed(id: string): Promise<any> {
     const [result] = await db
       .update(taskInspectionResults)
-      .set({ 
+      .set({
         contractorViewed: true,
         contractorViewedAt: new Date()
       })
       .where(eq(taskInspectionResults.id, id))
       .returning();
-    
+
     console.log(`👁️ Marked task inspection ${id} as viewed`);
     return result;
   }
@@ -960,13 +974,13 @@ export class DatabaseStorage implements IStorage {
     // Since we're using admin inspections, update the admin inspection with contractor resolution
     const [result] = await db
       .update(adminInspections)
-      .set({ 
+      .set({
         status: 'contractor_fixed',
         nextActions: fixNotes ? `Contractor fixed: ${fixNotes}` : 'Contractor marked as fixed - awaiting admin re-inspection'
       })
       .where(eq(adminInspections.id, inspectionId))
       .returning();
-    
+
     console.log(`✅ Marked inspection ${inspectionId} as resolved by contractor ${contractorName}`);
     return result;
   }
@@ -976,7 +990,7 @@ export class DatabaseStorage implements IStorage {
       .from(adminInspections)
       .where(eq(adminInspections.status, 'contractor_fixed'))
       .orderBy(desc(adminInspections.createdAt));
-    
+
     console.log(`📋 Retrieved ${fixedInspections.length} contractor-fixed inspections for admin review`);
     return fixedInspections;
   }
@@ -994,13 +1008,13 @@ export class DatabaseStorage implements IStorage {
   async approveContractorFix(inspectionId: string, adminName: string): Promise<any> {
     const [result] = await db
       .update(adminInspections)
-      .set({ 
+      .set({
         status: 'approved',
         nextActions: `Admin approved contractor fix on ${new Date().toISOString()}`
       })
       .where(eq(adminInspections.id, inspectionId))
       .returning();
-    
+
     console.log(`✅ Admin ${adminName} approved contractor fix for inspection ${inspectionId}`);
     return result;
   }
@@ -1010,19 +1024,19 @@ export class DatabaseStorage implements IStorage {
     const assignments = await db.select()
       .from(jobAssignments)
       .where(eq(jobAssignments.contractorName, contractorName));
-    
+
     if (assignments.length === 0) {
       return [];
     }
-    
+
     const assignmentIds = assignments.map(a => a.id);
-    
+
     // Get admin inspections for these assignments
     const inspections = await db.select()
       .from(adminInspections)
       .where(inArray(adminInspections.assignmentId, assignmentIds))
       .orderBy(desc(adminInspections.createdAt));
-    
+
     console.log(`📋 Retrieved ${inspections.length} admin inspections for contractor ${contractorName}`);
     return inspections;
   }
@@ -1085,13 +1099,13 @@ export class DatabaseStorage implements IStorage {
 
   async getProjectCashflowWeekly(projectId?: string): Promise<any[]> {
     console.log("📊 Fetching weekly cashflow data", projectId ? `for project: ${projectId}` : "for all projects");
-    
+
     if (projectId) {
       return await db.select().from(projectCashflowWeekly)
         .where(eq(projectCashflowWeekly.projectId, projectId))
         .orderBy(desc(projectCashflowWeekly.weekStartDate));
     }
-    
+
     return await db.select().from(projectCashflowWeekly)
       .orderBy(desc(projectCashflowWeekly.weekStartDate));
   }
@@ -1114,7 +1128,7 @@ export class DatabaseStorage implements IStorage {
 
   async getMaterialPurchases(projectId?: string, weekStart?: string): Promise<any[]> {
     console.log("🛒 Fetching material purchases", projectId ? `for project: ${projectId}` : "for all projects");
-    
+
     if (projectId && weekStart) {
       return await db.select().from(materialPurchases)
         .where(and(
@@ -1127,7 +1141,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(materialPurchases.projectId, projectId))
         .orderBy(desc(materialPurchases.createdAt));
     }
-    
+
     return await db.select().from(materialPurchases)
       .orderBy(desc(materialPurchases.createdAt));
   }
@@ -1140,7 +1154,7 @@ export class DatabaseStorage implements IStorage {
 
   async calculateWeeklyLabourCosts(projectId: string, weekStart: string, weekEnd: string): Promise<number> {
     console.log("💼 Calculating weekly labour costs for project:", projectId, "week:", weekStart, "to", weekEnd);
-    
+
     // Get work sessions within the week timeframe
     const sessions = await db.select()
       .from(workSessions)
@@ -1156,14 +1170,14 @@ export class DatabaseStorage implements IStorage {
     for (const session of sessions) {
       if (session.totalHours && session.contractorName) {
         const payRate = await this.getContractorPayRate(session.contractorName);
-        
+
         // Parse total hours (format: "08:11:19" -> decimal hours)
         const timeParts = session.totalHours.split(':');
         const hours = parseInt(timeParts[0]) + (parseInt(timeParts[1]) / 60) + (parseInt(timeParts[2]) / 3600);
-        
+
         const sessionCost = hours * payRate;
         totalLabourCost += sessionCost;
-        
+
         console.log(`  💰 ${session.contractorName}: ${hours.toFixed(2)}h × £${payRate}/h = £${sessionCost.toFixed(2)}`);
       }
     }
@@ -1173,7 +1187,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ===== B'elanna Business PA Implementation =====
-  
+
   // Calendar Management
   async createCalendarEvent(insertEvent: InsertCalendarEvent): Promise<CalendarEvent> {
     const [event] = await db.insert(calendarEvents).values(insertEvent).returning();
@@ -1194,7 +1208,7 @@ export class DatabaseStorage implements IStorage {
         .where(sql`${calendarEvents.eventDate} >= ${dateFrom}`)
         .orderBy(calendarEvents.eventDate, calendarEvents.eventTime);
     }
-    
+
     return db.select().from(calendarEvents)
       .orderBy(calendarEvents.eventDate, calendarEvents.eventTime);
   }
@@ -1215,26 +1229,26 @@ export class DatabaseStorage implements IStorage {
   async checkAvailability(date: string, time: string, durationMinutes: number = 30): Promise<boolean> {
     // Get events for the specified date
     const dayEvents = await this.getDayEvents(date);
-    
+
     // Parse the requested time
     const [requestedHour, requestedMinute] = time.split(':').map(Number);
     const requestedStartMinutes = requestedHour * 60 + requestedMinute;
     const requestedEndMinutes = requestedStartMinutes + durationMinutes;
-    
+
     // Check for conflicts
     for (const event of dayEvents) {
       if (event.status === 'cancelled') continue;
-      
+
       const [eventHour, eventMinute] = event.eventTime.split(':').map(Number);
       const eventStartMinutes = eventHour * 60 + eventMinute;
       const eventEndMinutes = eventStartMinutes + parseInt(event.durationMinutes);
-      
+
       // Check for overlap
       if (requestedStartMinutes < eventEndMinutes && requestedEndMinutes > eventStartMinutes) {
         return false; // Conflict found
       }
     }
-    
+
     return true; // Available
   }
 
@@ -1243,7 +1257,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(calendarEvents.eventDate, date))
       .orderBy(calendarEvents.eventTime);
   }
-  
+
   // Email Management
   async createEmailRecord(insertEmail: InsertEmailRecord): Promise<EmailRecord> {
     const [email] = await db.insert(emailRecords).values(insertEmail).returning();
@@ -1261,7 +1275,7 @@ export class DatabaseStorage implements IStorage {
     const [email] = await db.select().from(emailRecords).where(eq(emailRecords.id, id));
     return email;
   }
-  
+
   // Meeting Scheduling
   async createMeeting(insertMeeting: InsertMeeting): Promise<Meeting> {
     const [meeting] = await db.insert(meetings).values(insertMeeting).returning();
@@ -1282,7 +1296,7 @@ export class DatabaseStorage implements IStorage {
         .where(sql`${meetings.meetingDate} >= ${dateFrom}`)
         .orderBy(meetings.meetingDate, meetings.meetingTime);
     }
-    
+
     return db.select().from(meetings)
       .orderBy(meetings.meetingDate, meetings.meetingTime);
   }
@@ -1354,7 +1368,7 @@ export class DatabaseStorage implements IStorage {
   async getJobFinancials(jobId: string): Promise<FinancialSummary | undefined> {
     try {
       const items = await this.getJobCostItems(jobId);
-      
+
       if (items.length === 0) {
         // Check if job has financial_summary stored
         const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
@@ -1384,7 +1398,7 @@ export class DatabaseStorage implements IStorage {
           const parsed = parseFloat(cleaned);
           total = isNaN(parsed) ? 0 : parsed;
         }
-        
+
         // Normalize category to uppercase for consistent matching
         const category = typeof item.category === 'string' ? item.category.toUpperCase() : item.category;
         switch (category) {

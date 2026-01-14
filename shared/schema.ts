@@ -40,7 +40,7 @@ export const jobs = pgTable("jobs", {
   telegramNotified: text("telegram_notified").default("false"),
   latitude: text("latitude"), // GPS latitude for work site
   longitude: text("longitude"), // GPS longitude for work site
-  
+
   // Manus-n8n Integration - Enhanced Financial Fields
   externalCode: text("external_code"), // e.g., "HBXL-IMPORT" for n8n imports
   clientName: text("client_name"), // e.g., "Freddy Jackson"
@@ -48,7 +48,7 @@ export const jobs = pgTable("jobs", {
   address: text("address"), // Full address (separate from location for precision)
   postcode: text("postcode"), // e.g., "DA7 4RW"
   quotedAmount: text("quoted_amount"), // Total quoted value in pence
-  
+
   // Financial Summary (JSON with category totals)
   financialSummary: text("financial_summary"), // JSON: {labour: 0, material: 0, plant: 0, subcontractor: 0, total: 0}
 });
@@ -66,6 +66,17 @@ export const jobCostItems = pgTable("job_cost_items", {
   total: text("total").notNull().default("0"), // Total cost in pence (qty * rate)
   supplier: text("supplier"), // Supplier name if applicable
   sourceMetadata: text("source_metadata"), // JSON for additional HBXL data
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const jobFiles = pgTable("job_files", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").notNull().references(() => jobs.id),
+  filename: text("filename").notNull(),
+  originalName: text("original_name").notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileType: text("file_type").notNull(), // "image/png", "application/pdf"
+  uploadedBy: text("uploaded_by").default("user"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -88,45 +99,45 @@ export const contractorApplications = pgTable("contractor_applications", {
   fullAddress: text("full_address").notNull(),
   city: text("city").notNull(),
   postcode: text("postcode").notNull(),
-  
+
   // Right to Work & Documentation
   hasRightToWork: text("has_right_to_work").notNull().default("false"),
   passportNumber: text("passport_number").notNull(),
   passportPhotoUploaded: text("passport_photo_uploaded").notNull().default("false"),
   hasPublicLiability: text("has_public_liability").notNull().default("false"),
-  
+
   // CIS & Tax Information
   cisStatus: text("cis_status").notNull(),
   utrNumberDetails: text("utr_number_details").notNull(),
   isCisRegistered: text("is_cis_registered").notNull().default("false"),
   hasValidCscs: text("has_valid_cscs").notNull().default("false"),
-  
+
   // Banking Details
   bankName: text("bank_name").notNull(),
   accountHolderName: text("account_holder_name").notNull(),
   sortCode: text("sort_code").notNull(),
   accountNumber: text("account_number").notNull(),
-  
+
   // Emergency Contact
   emergencyName: text("emergency_name").notNull(),
   emergencyPhone: text("emergency_phone").notNull(),
   relationship: text("relationship").notNull(),
-  
+
   // Trade & Tools
   primaryTrade: text("primary_trade").notNull(),
   yearsExperience: text("years_experience").notNull(),
   hasOwnTools: text("has_own_tools").notNull().default("false"),
   toolsList: text("tools_list"),
-  
+
   // Admin-only fields
   adminCisVerification: text("admin_cis_verification"), // Admin fills CIS verification details
   adminPayRate: text("admin_pay_rate"), // Admin sets pay rate
   adminNotes: text("admin_notes"), // Admin internal notes
-  
+
   // Login credentials (set by admin when approving contractor)
   username: text("username"), // Unique login username
   password: text("password"), // Hashed password
-  
+
   // Metadata
   status: text("status").notNull().default("pending"),
   submittedAt: timestamp("submitted_at").defaultNow(),
@@ -141,7 +152,7 @@ export const workSessions = pgTable("work_sessions", {
   totalHours: text("total_hours"), // e.g., "08:11:19"
   startLatitude: text("start_latitude"),
   startLongitude: text("start_longitude"),
-  endLatitude: text("end_latitude"), 
+  endLatitude: text("end_latitude"),
   endLongitude: text("end_longitude"),
   status: sessionStatusEnum("status").default("active"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -199,6 +210,11 @@ export const jobImportPayloadSchema = z.object({
     total: z.number(),
     supplier: z.string().optional(),
   })),
+});
+
+export const insertJobFileSchema = createInsertSchema(jobFiles).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const insertCsvUploadSchema = createInsertSchema(csvUploads).omit({
@@ -391,35 +407,35 @@ export const projectCashflowWeekly = pgTable("project_cashflow_weekly", {
   weekStartDate: text("week_start_date").notNull(), // YYYY-MM-DD format
   weekEndDate: text("week_end_date").notNull(),
   weekNumber: text("week_number").notNull(), // Week 1, Week 2, etc.
-  
+
   // Forecasted spend (entered by accountant)
   forecastedLabourCost: text("forecasted_labour_cost").default("0").notNull(),
   forecastedMaterialCost: text("forecasted_material_cost").default("0").notNull(),
   forecastedTotalSpend: text("forecasted_total_spend").default("0").notNull(),
-  
+
   // Actual spend (calculated from authentic sources)
   actualLabourCost: text("actual_labour_cost").default("0").notNull(), // From work_sessions
   actualMaterialCost: text("actual_material_cost").default("0").notNull(), // From material_purchases
   actualTotalSpend: text("actual_total_spend").default("0").notNull(),
-  
+
   // Budget tracking
   cumulativeSpend: text("cumulative_spend").default("0").notNull(),
   remainingBudget: text("remaining_budget").default("0").notNull(),
   projectCompletionPercent: text("project_completion_percent").default("0").notNull(),
   budgetUsedPercent: text("budget_used_percent").default("0").notNull(),
-  
+
   // Variance analysis
   labourVariance: text("labour_variance").default("0").notNull(), // actual - forecasted
   materialVariance: text("material_variance").default("0").notNull(),
   totalVariance: text("total_variance").default("0").notNull(),
-  
+
   // Data sources and validation
   labourDataSource: text("labour_data_source").default("work_sessions").notNull(), // "work_sessions"
   materialDataSource: text("material_data_source").default("manual").notNull(), // "uploaded_invoices", "manual", "none"
   dataValidated: boolean("data_validated").default(false).notNull(),
   validatedBy: text("validated_by"),
   validatedAt: timestamp("validated_at"),
-  
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -485,7 +501,7 @@ export const materialPurchases = pgTable("material_purchases", {
   projectId: text("project_id").notNull(),
   projectName: text("project_name").notNull(),
   purchaseWeek: text("purchase_week").notNull(), // YYYY-MM-DD of week start
-  
+
   // Purchase details - AUTHENTIC DATA ONLY
   supplierName: text("supplier_name").notNull(),
   invoiceNumber: text("invoice_number").notNull(),
@@ -495,12 +511,12 @@ export const materialPurchases = pgTable("material_purchases", {
   unitCost: text("unit_cost").notNull(),
   totalCost: text("total_cost").notNull(),
   category: text("category").notNull(), // "materials", "tools", "equipment", "consumables"
-  
+
   // Data source validation
   dataSource: text("data_source").notNull().default("uploaded_invoice"), // "uploaded_invoice", "csv_import", "manual_entry"
   invoiceFileUrl: text("invoice_file_url"), // URL to uploaded invoice PDF/image
   uploadedBy: text("uploaded_by").notNull(),
-  
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -534,31 +550,31 @@ export const projectMaster = pgTable("project_master", {
   projectName: text("project_name").notNull().unique(),
   clientName: text("client_name").notNull(),
   projectType: text("project_type").notNull(), // "labour_only", "labour_materials", "materials_only"
-  
+
   // Project timeline
   startDate: text("start_date").notNull(),
   estimatedEndDate: text("estimated_end_date").notNull(),
   actualEndDate: text("actual_end_date"),
-  
+
   // Budget information - AUTHENTIC DATA ONLY
   totalBudget: text("total_budget").notNull(),
   quotedPrice: text("quoted_price").notNull(),
   labourBudget: text("labour_budget").notNull(),
   materialBudget: text("material_budget").notNull(),
-  
+
   // Enhanced financial tracking from CSV uploads
   weeklyBreakdown: text("weekly_breakdown"), // JSON of weekly cash flow data
   supplierBreakdown: text("supplier_breakdown"), // JSON of supplier payment schedules
   resourceBreakdown: text("resource_breakdown"), // JSON of detailed resource tracking
-  
+
   // Current status
   status: text("status").default("active").notNull(), // "planning", "active", "completed", "on_hold"
   completionPercent: text("completion_percent").default("0").notNull(),
-  
+
   // Data source validation
   budgetDataSource: text("budget_data_source").notNull(), // "contract_csv", "quote_upload", "manual_entry"
   createdBy: text("created_by").notNull(),
-  
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -633,6 +649,8 @@ export interface JobWithContractor extends Job {
 // Manus-n8n Integration Types
 export type InsertJobCostItem = z.infer<typeof insertJobCostItemSchema>;
 export type JobCostItem = typeof jobCostItems.$inferSelect;
+export type InsertJobFile = z.infer<typeof insertJobFileSchema>;
+export type JobFile = typeof jobFiles.$inferSelect;
 export type JobImportPayload = z.infer<typeof jobImportPayloadSchema>;
 
 // Financial Summary Type
