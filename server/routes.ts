@@ -296,217 +296,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
 
         if (enhancedFormatIndex !== -1) {
-          // ENHANCED FORMAT PARSING - for accounting integration
-          const resources: any[] = [];
-          let totalLabourCost = 0;
-          let totalMaterialCost = 0;
-          const phaseTaskData: { [key: string]: any[] } = {};
-          const weeklyBreakdown: { [key: string]: { labour: number; material: number; total: number } } = {};
-          let phases: string[] = [];
+          // ENHANCED FORMAT PARSING - using shared parser logic
+          console.log('🎯 Using ENHANCED CSV parsing (Imported Function)');
 
-          console.log('🎯 Using ENHANCED CSV parsing for accounting format');
-          console.log('🔍 Enhanced format index:', enhancedFormatIndex);
-          console.log('🔍 Lines to process:', lines.length - enhancedFormatIndex - 1);
+          const enhancedData = parseEnhancedCSV(lines);
 
-          // FIRST PASS: Extract ALL phases from Build Phase column (match frontend logic)
-          const headerLine = lines[enhancedFormatIndex];
-          const headers = headerLine.split(',').map(h => h.trim());
-          const buildPhaseColumnIndex = headers.findIndex(h =>
-            h.toLowerCase().includes('build phase') || h.toLowerCase() === 'phase'
-          );
+          if (enhancedData) {
+            const phases = Object.keys(enhancedData.phases);
 
-          console.log('🔍 Phase column detection:', {
-            headerLine,
-            headers,
-            buildPhaseColumnIndex,
-            foundHeader: headers[buildPhaseColumnIndex]
-          });
-
-          const phaseSet = new Set<string>();
-          if (buildPhaseColumnIndex >= 0) {
-            for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
-              const line = lines[i];
-              if (!line || line.trim() === '') continue;
-
-              const parts = line.split(',').map(p => p.trim());
-              if (parts.length <= buildPhaseColumnIndex) continue;
-
-              const buildPhase = parts[buildPhaseColumnIndex] || '';
-              if (buildPhase && buildPhase.trim() !== '' &&
-                buildPhase.toLowerCase() !== 'material' &&
-                buildPhase.toLowerCase() !== 'labour') {
-                phaseSet.add(buildPhase);
-                console.log('✅ Found phase:', buildPhase);
-              }
-            }
-          }
-          phases = Array.from(phaseSet);
-          console.log('🎯 Extracted phases from Build Phase column:', phases);
-
-          // Initialize phaseTaskData for ALL extracted phases (even if they have no tasks)
-          phases.forEach(phase => {
-            if (!phaseTaskData[phase]) {
-              phaseTaskData[phase] = [];
-            }
-          });
-
-          // SECOND PASS: Process resources for task data
-          for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
-            const line = lines[i];
-            if (!line || line.trim() === '') continue;
-
-            const parts = line.split(',').map(p => p.trim());
-            // Allow processing of rows with at least 3 columns (to reach buildPhase)
-            if (parts.length < 3) {
-              console.log(`❌ Skipping line ${i} - only ${parts.length} columns (need at least 3)`);
-              continue;
-            }
-
-            const resource: any = {
-              orderDate: parts[0] || '',
-              requiredDate: parts[1] || '',
-              buildPhase: parts[2] || 'General',
-              resourceType: parts[3] || '', // Labour or Material
-              description: parts[4] || '', // Description in column 5 for 6-column format
-              quantity: parseInt(parts[5]) || 0, // Quantity in column 6 for 6-column format
-              supplier: parts[6] || 'Not specified' // Supplier might be in column 7 if available
-            };
-
-            // Process ALL resources with valid descriptions (HBXL format often doesn't include prices)
-            if (resource.description && resource.description.trim() !== '') {
-              // Extract price using regex - MANDATORY RULE: authentic data only
-              const priceMatch = resource.description.match(/£(\d+\.?\d*)/);
-              const unitMatch = resource.description.match(/£\d+\.?\d*\/(\w+)/);
-
-              // Set pricing info if available
-              if (priceMatch && resource.quantity > 0) {
-                resource.unitPrice = parseFloat(priceMatch[1]);
-                resource.unit = unitMatch ? unitMatch[1] : 'Each';
-                resource.totalCost = resource.unitPrice * resource.quantity;
-
-                // Track costs by type for accounting
-                if (resource.resourceType.toLowerCase() === 'labour') {
-                  totalLabourCost += resource.totalCost;
-                } else if (resource.resourceType.toLowerCase() === 'material') {
-                  totalMaterialCost += resource.totalCost;
-                }
-
-                // Weekly cash flow breakdown
-                if (resource.orderDate) {
-                  if (!weeklyBreakdown[resource.orderDate]) {
-                    weeklyBreakdown[resource.orderDate] = { labour: 0, material: 0, total: 0 };
-                  }
-                  const costType = resource.resourceType.toLowerCase();
-                  if (costType === 'labour') {
-                    weeklyBreakdown[resource.orderDate].labour += resource.totalCost;
-                    weeklyBreakdown[resource.orderDate].total += resource.totalCost;
-                  } else if (costType === 'material') {
-                    weeklyBreakdown[resource.orderDate].material += resource.totalCost;
-                    weeklyBreakdown[resource.orderDate].total += resource.totalCost;
-                  }
-                }
-              } else {
-                // No price data - normal for HBXL format
-                resource.unitPrice = 0;
-                resource.unit = resource.resourceType.toLowerCase() === 'labour' ? 'Hours' : 'Each';
-                resource.totalCost = 0;
-              }
-
-              // Build phase task structure - MANDATORY RULE: use only authentic CSV data
-              let phaseName = resource.buildPhase && resource.buildPhase.trim() !== '' &&
-                resource.buildPhase.toLowerCase() !== 'material' &&
-                resource.buildPhase.toLowerCase() !== 'labour' ?
-                resource.buildPhase : 'General Works';
-
-              if (!phaseTaskData[phaseName]) {
-                phaseTaskData[phaseName] = [];
-              }
-
-              // Create meaningful task descriptions from actual CSV data
-              let taskName = resource.description.replace(/£.*/, '').trim();
-              let taskDescription;
-
-              if (resource.unitPrice > 0) {
-                // Has pricing information
-                taskDescription = `${taskName} (${resource.quantity} ${resource.unit}) - ${resource.supplier} - £${resource.totalCost.toFixed(2)}`;
-              } else {
-                // No pricing (typical HBXL format)
-                taskDescription = `${taskName} (${resource.quantity} ${resource.unit}) - ${resource.supplier}`;
-              }
-
-              phaseTaskData[phaseName].push({
-                task: taskName,
-                description: taskDescription,
-                quantity: resource.quantity,
-                unitPrice: resource.unitPrice,
-                totalCost: resource.totalCost,
-                supplier: resource.supplier,
-                orderDate: resource.orderDate,
-                resourceType: resource.resourceType,
-                unit: resource.unit,
-                costBreakdown: resource.unitPrice > 0 ? `${resource.quantity} × £${resource.unitPrice} = £${resource.totalCost.toFixed(2)}` : 'Price not specified in CSV'
-              });
-
-              // Add phase to phases array if not already present
-              if (!phases.includes(phaseName)) {
-                phases.push(phaseName);
-              }
-            }
-
-            resources.push(resource);
-          }
-
-          // Remove duplicate phases
-          phases = phases.filter((p, i, arr) => arr.indexOf(p) === i);
-
-          console.log('🎯 Enhanced parsing results:', {
-            phases: phases,
-            resourceCount: resources.length,
-            totalLabourCost,
-            totalMaterialCost,
-            grandTotal: totalLabourCost + totalMaterialCost,
-            weeklyBreakdown,
-            detectedPhases: Object.keys(phaseTaskData)
-          });
-
-          // Debug: Show detailed phase task data
-          console.log('🔍 BUILD PHASES AND SUB-TASKS EXTRACTED:');
-          Object.keys(phaseTaskData).forEach(phase => {
-            console.log(`📋 Phase: ${phase} (${phaseTaskData[phase].length} tasks)`);
-            phaseTaskData[phase].forEach((task, index) => {
-              console.log(`  ├─ ${index + 1}. ${task.task} (${task.resourceType})`);
-              console.log(`  │   Quantity: ${task.quantity} ${task.unit}`);
-              console.log(`  │   Cost: £${task.totalCost?.toFixed(2) || '0.00'}`);
-              console.log(`  │   Supplier: ${task.supplier}`);
+            console.log('🎯 Enhanced parsing results:', {
+              phases: phases,
+              totalLabourCost: enhancedData.financials.totalLabour,
+              grandTotal: enhancedData.financials.grandTotal
             });
-          });
 
-          // Store enhanced data for accounting integration
-          const enhancedJobData = JSON.stringify({
-            phases: phaseTaskData,
-            financials: {
-              totalLabour: totalLabourCost,
-              totalMaterial: totalMaterialCost,
-              grandTotal: totalLabourCost + totalMaterialCost,
-              weeklyBreakdown
-            },
-            resources: resources.filter(r => r.unitPrice) // Only resources with valid pricing
-          });
+            await storage.createJob({
+              title: jobName,
+              description: jobType,
+              location: `${jobAddress}, ${jobPostcode}`,
+              status: "pending",
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              notes: `Project Type: ${jobType}`,
+              phases: phases.join(', ') || "Data Missing from CSV",
+              uploadId: csvUpload.id,
+              phaseTaskData: JSON.stringify(enhancedData)
+            });
 
-          await storage.createJob({
-            title: jobName,
-            description: jobType,
-            location: `${jobAddress}, ${jobPostcode}`,
-            status: "pending",
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            notes: `Project Type: ${jobType}`,
-            phases: phases.join(', ') || "Data Missing from CSV",
-            uploadId: csvUpload.id,
-            phaseTaskData: enhancedJobData
-          });
-
-          jobsCreated++;
-
+            jobsCreated++;
+          }
         } else {
           // ORIGINAL FORMAT PARSING - maintain existing functionality
           // Look for "Build Phase" line which indicates start of data section

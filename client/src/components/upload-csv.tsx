@@ -187,33 +187,40 @@ export default function UploadCsv() {
           }
         }
 
-        // Parse phases from enhanced CSV data - find Build Phase column dynamically
-        const phaseSet = new Set<string>();
-        const headerLine = lines[enhancedFormatIndex];
-        const headers = headerLine.split(',').map(h => h.trim());
-        const buildPhaseColumnIndex = headers.findIndex(h =>
-          h.toLowerCase().includes('build phase') || h.toLowerCase().includes('phase')
+        // Parse phases/rooms from enhanced CSV data - find Build Phase OR Room column dynamically
+        const enhancedHeaders = headerLine.split(',').map(h => h.trim().toLowerCase());
+
+        let targetColumnIndex = enhancedHeaders.findIndex(h =>
+          h.includes('room') || h.includes('location') || h.includes('area')
         );
 
-        console.log('🔍 Phase column detection:', {
+        const isRoom = targetColumnIndex >= 0;
+
+        if (!isRoom) {
+          targetColumnIndex = enhancedHeaders.findIndex(h =>
+            h.includes('build phase') || h.includes('phase')
+          );
+        }
+
+        console.log('🔍 Grouping column detection:', {
           headerLine,
-          headers,
-          buildPhaseColumnIndex,
-          foundHeader: headers[buildPhaseColumnIndex]
+          isRoom,
+          targetColumnIndex,
+          foundHeader: enhancedHeaders[targetColumnIndex]
         });
 
-        if (buildPhaseColumnIndex >= 0) {
+        if (targetColumnIndex >= 0) {
           for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
             const line = lines[i];
             if (!line || line.trim() === '') continue;
 
             const parts = line.split(',').map(p => p.trim());
-            if (parts.length <= buildPhaseColumnIndex) continue;
+            if (parts.length <= targetColumnIndex) continue;
 
-            const buildPhase = parts[buildPhaseColumnIndex] || '';
-            if (buildPhase && buildPhase.trim() !== '' && buildPhase.toLowerCase() !== 'material' && buildPhase.toLowerCase() !== 'labour') {
-              phaseSet.add(buildPhase);
-              console.log('✅ Found phase:', buildPhase);
+            const value = parts[targetColumnIndex] || '';
+            if (value && value.trim() !== '' && value.toLowerCase() !== 'material' && value.toLowerCase() !== 'labour') {
+              phaseSet.add(value);
+              console.log(`✅ Found ${isRoom ? 'room' : 'phase'}:`, value);
             }
           }
         }
@@ -423,8 +430,8 @@ export default function UploadCsv() {
 
       <div
         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${dragActive
-            ? "border-amber-400 bg-amber-900/10"
-            : "border-slate-600 hover:border-slate-500"
+          ? "border-amber-400 bg-amber-900/10"
+          : "border-slate-600 hover:border-slate-500"
           }`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -581,71 +588,71 @@ export default function UploadCsv() {
                     </div>
 
                     {/* Work Phases Section */}
-                    <div className="bg-blue-50 rounded-lg p-4">
-                      <h5 className="text-blue-800 font-semibold mb-2">
-                        Extracted HBXL Work Phases ({csvPreview.jobPreview[0].buildPhases.length})
-                      </h5>
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        {csvPreview.jobPreview[0].buildPhases.map((phase, phaseIndex) => (
-                          <span key={phaseIndex} className="bg-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm">
-                            {phase}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="text-blue-700 text-sm">
-                        These real work phases will be available for time tracking once the job is approved and goes live.
+                    <h5 className="text-blue-800 font-semibold mb-2">
+                      Extracted Work Areas (Rooms) ({csvPreview.jobPreview[0].buildPhases.length})
+                    </h5>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {csvPreview.jobPreview[0].buildPhases.map((phase, phaseIndex) => (
+                        <span key={phaseIndex} className="bg-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm">
+                          {phase}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-blue-700 text-sm">
+                      These real work phases will be available for time tracking once the job is approved and goes live.
+                    </p>
+                  </div>
+
+                  {/* Additional jobs indicator */}
+                  {csvPreview.jobPreview.length > 1 && (
+                    <div className="mt-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                      <p className="text-blue-800 text-sm font-medium">
+                        + {csvPreview.jobPreview.length - 1} more job{csvPreview.jobPreview.length > 2 ? 's' : ''} will be created from this CSV
+                      </p>
+                      <p className="text-blue-600 text-xs mt-1">
+                        All jobs will be saved to the database and persist after system reboot
                       </p>
                     </div>
-
-                    {/* Additional jobs indicator */}
-                    {csvPreview.jobPreview.length > 1 && (
-                      <div className="mt-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
-                        <p className="text-blue-800 text-sm font-medium">
-                          + {csvPreview.jobPreview.length - 1} more job{csvPreview.jobPreview.length > 2 ? 's' : ''} will be created from this CSV
-                        </p>
-                        <p className="text-blue-600 text-xs mt-1">
-                          All jobs will be saved to the database and persist after system reboot
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                  )}
+                </div>
                 </div>
               )}
-            </div>
+          </div>
 
-            {/* Footer Buttons */}
-            <div className="p-4 border-t border-slate-200 flex space-x-4">
-              <Button
-                onClick={handleCancelPreview}
-                variant="outline"
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  setShowPreview(false);
-                  handleUpload();
-                }}
-                disabled={uploadMutation.isPending}
-                className="bg-green-600 hover:bg-green-700 text-white flex-1"
-              >
-                {uploadMutation.isPending ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                    Creating Jobs...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Approve & Create Jobs
-                  </>
-                )}
-              </Button>
-            </div>
+          {/* Footer Buttons */}
+          <div className="p-4 border-t border-slate-200 flex space-x-4">
+            <Button
+              onClick={handleCancelPreview}
+              variant="outline"
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setShowPreview(false);
+                handleUpload();
+              }}
+              disabled={uploadMutation.isPending}
+              className="bg-green-600 hover:bg-green-700 text-white flex-1"
+            >
+              {uploadMutation.isPending ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                  Creating Jobs...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  Approve & Create Jobs
+                </>
+              )}
+            </Button>
           </div>
         </div>
-      )}
-    </div>
+        </div>
+  )
+}
+    </div >
   );
 }
