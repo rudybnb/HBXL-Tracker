@@ -43,7 +43,7 @@ export default function Dashboard() {
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <h1 className="text-2xl font-bold text-primary-700">
-                  <i className="fas fa-tasks mr-2"></i>ERdesignandbuild
+                  <i className="fas fa-tasks mr-2"></i>Sculpt Projects
                 </h1>
               </div>
               <div className="hidden md:block">

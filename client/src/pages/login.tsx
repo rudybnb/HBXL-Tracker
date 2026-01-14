@@ -15,11 +15,11 @@ export default function Login() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // FORCE CLEAR ALL DATA ON EVERY LOGIN ATTEMPT
     localStorage.clear();
     sessionStorage.clear();
-    
+
     // Check admin credentials first
     if (username === "admin" && password === "admin123") {
       localStorage.setItem('userRole', 'admin');
@@ -33,7 +33,7 @@ export default function Login() {
       });
       return;
     }
-    
+
     // Check contractor credentials from database
     try {
       const response = await fetch('/api/contractor-login', {
@@ -43,10 +43,10 @@ export default function Login() {
         },
         body: JSON.stringify({ username, password }),
       });
-      
+
       if (response.ok) {
         const contractor = await response.json();
-        
+
         // Successful contractor login
         localStorage.setItem('userRole', 'contractor');
         localStorage.setItem('isLoggedIn', 'true');
@@ -58,7 +58,7 @@ export default function Login() {
           title: "Login Successful",
           description: `Welcome back, ${contractor.firstName}!`,
         });
-        
+
       } else {
         // Fallback to legacy contractor login
         if (username === "contractor" && password === "contractor123") {
@@ -99,27 +99,27 @@ export default function Login() {
         backgroundImage: `radial-gradient(circle at 2px 2px, rgba(203, 213, 224, 0.15) 1px, transparent 0)`,
         backgroundSize: '40px 40px'
       }}></div>
-      
+
       <div className="relative w-full max-w-6xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-          
+
           {/* Left side - Branding */}
           <div className="text-left space-y-8">
             <div className="space-y-4">
               <div className="flex items-center space-x-3">
                 <div className="w-16 h-16 bg-gradient-to-br from-amber-600 to-yellow-600 rounded-xl flex items-center justify-center shadow-2xl">
                   <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
                   </svg>
                 </div>
                 <div>
-                  <h1 className="text-4xl font-bold text-white">ERdesignandbuild</h1>
+                  <h1 className="text-4xl font-bold text-white">Sculpt Projects</h1>
                   <p className="text-amber-400 font-medium">GPS Time Tracking & Job Management</p>
                 </div>
               </div>
             </div>
           </div>
-          
+
           {/* Right side - Login Form */}
           <div className="flex justify-center lg:justify-end">
             <Card className="w-full max-w-md bg-slate-700 border-slate-600 shadow-2xl">
@@ -129,7 +129,7 @@ export default function Login() {
                   Sign in to access your dashboard
                 </CardDescription>
               </CardHeader>
-              
+
               <CardContent className="space-y-6">
                 <form onSubmit={handleLogin} className="space-y-5">
                   <div className="space-y-2">
@@ -144,7 +144,7 @@ export default function Login() {
                       required
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="password" className="text-slate-200 font-medium">Password</Label>
                     <div className="relative">
@@ -170,12 +170,12 @@ export default function Login() {
                       </button>
                     </div>
                   </div>
-                  
-                  <Button 
-                    type="submit" 
+
+                  <Button
+                    type="submit"
                     className="w-full bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 text-white font-medium h-12 text-base shadow-lg transition-all duration-200"
                   >
-Sign In
+                    Sign In
                   </Button>
                 </form>
               </CardContent>

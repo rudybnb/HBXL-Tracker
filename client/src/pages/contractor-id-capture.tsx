@@ -39,7 +39,7 @@ export default function ContractorIdCapture() {
   };
 
   const handleCopyFormMessage = () => {
-    const formMessage = `🔨 ERdesignandbuild Contractor Application
+    const formMessage = `🔨 Sculpt Projects Contractor Application
 
 Hi ${contractorName || '[Contractor Name]'},
 
@@ -56,7 +56,7 @@ Please complete your contractor application form by providing:
 Reply with your completed information or visit our application portal.
 
 Best regards,
-ERdesignandbuild Team`;
+Sculpt Projects Team`;
 
     navigator.clipboard.writeText(formMessage);
     toast({
@@ -126,7 +126,7 @@ ERdesignandbuild Team`;
                   <div className="flex items-center space-x-3">
                     <div className="w-8 h-8 bg-yellow-600 rounded-full flex items-center justify-center">
                       <span className="text-black font-bold text-xs">
-                        {contractor.name.split(' ').map(n => n[0]).join('').slice(0,2)}
+                        {contractor.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                       </span>
                     </div>
                     <div>
@@ -232,15 +232,15 @@ ERdesignandbuild Team`;
             </div>
 
             <div className="flex space-x-3">
-              <Button 
+              <Button
                 onClick={handleSaveContractor}
                 className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-black"
               >
                 <User className="h-4 w-4 mr-2" />
                 Save Contractor
               </Button>
-              
-              <Button 
+
+              <Button
                 onClick={handleCopyFormMessage}
                 variant="outline"
                 className="flex-1 border-slate-600 hover:bg-slate-700"
@@ -265,12 +265,12 @@ ERdesignandbuild Team`;
                 <h4 className="font-medium text-white mb-2">Method 1: Ask the Contractor</h4>
                 <p>Ask them to search for "@userinfobot" on Telegram and send /start. The bot will reply with their user ID.</p>
               </div>
-              
+
               <div className="bg-slate-700 p-3 rounded">
                 <h4 className="font-medium text-white mb-2">Method 2: Username Method</h4>
                 <p>If they have a username (like @john_contractor), you can use that instead of the numeric ID.</p>
               </div>
-              
+
               <div className="bg-slate-700 p-3 rounded">
                 <h4 className="font-medium text-white mb-2">Method 3: Phone Contact</h4>
                 <p>Start with their phone number for initial contact, then get Telegram ID for future automated messages.</p>

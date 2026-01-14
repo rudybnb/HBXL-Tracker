@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +11,7 @@ interface JobsTableProps {
 }
 
 export default function JobsTable({ onAssignJob }: JobsTableProps) {
+  const [_, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -159,6 +161,14 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
                     className="text-slate-600 hover:text-slate-900"
                   >
                     {job.status === 'completed' ? 'Report' : 'Edit'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setLocation(`/jobs/${job.id}/tender`)}
+                    className="text-amber-600 hover:text-amber-900"
+                  >
+                    QS Tender
                   </Button>
                 </td>
               </tr>
