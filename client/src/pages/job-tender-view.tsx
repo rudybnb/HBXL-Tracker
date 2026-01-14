@@ -20,8 +20,6 @@ interface QSItem {
 }
 
 interface QSSection {
-
-interface QSSection {
     id: string;
     title: string;
     description: string;
