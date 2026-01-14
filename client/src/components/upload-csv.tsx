@@ -588,71 +588,72 @@ export default function UploadCsv() {
                     </div>
 
                     {/* Work Phases Section */}
-                    <h5 className="text-blue-800 font-semibold mb-2">
-                      Extracted Work Areas (Rooms) ({csvPreview.jobPreview[0].buildPhases.length})
-                    </h5>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {csvPreview.jobPreview[0].buildPhases.map((phase, phaseIndex) => (
-                        <span key={phaseIndex} className="bg-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm">
-                          {phase}
-                        </span>
-                      ))}
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <h5 className="text-blue-800 font-semibold mb-2">
+                        Extracted Work Areas (Rooms) ({csvPreview.jobPreview[0].buildPhases.length})
+                      </h5>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {csvPreview.jobPreview[0].buildPhases.map((phase, phaseIndex) => (
+                          <span key={phaseIndex} className="bg-blue-200 text-blue-800 px-3 py-1 rounded-full text-sm">
+                            {phase}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-blue-700 text-sm">
+                        These real work phases will be available for time tracking once the job is approved and goes live.
+                      </p>
                     </div>
-                    <p className="text-blue-700 text-sm">
-                      These real work phases will be available for time tracking once the job is approved and goes live.
-                    </p>
+
+                    {/* Additional jobs indicator */}
+                    {csvPreview.jobPreview.length > 1 && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                        <p className="text-blue-800 text-sm font-medium">
+                          + {csvPreview.jobPreview.length - 1} more job{csvPreview.jobPreview.length > 2 ? 's' : ''} will be created from this CSV
+                        </p>
+                        <p className="text-blue-600 text-xs mt-1">
+                          All jobs will be saved to the database and persist after system reboot
+                        </p>
+                      </div>
+                    )}
                   </div>
-
-                  {/* Additional jobs indicator */}
-                  {csvPreview.jobPreview.length > 1 && (
-                    <div className="mt-4 p-3 bg-blue-50 rounded-lg border-l-4 border-blue-500">
-                      <p className="text-blue-800 text-sm font-medium">
-                        + {csvPreview.jobPreview.length - 1} more job{csvPreview.jobPreview.length > 2 ? 's' : ''} will be created from this CSV
-                      </p>
-                      <p className="text-blue-600 text-xs mt-1">
-                        All jobs will be saved to the database and persist after system reboot
-                      </p>
-                    </div>
-                  )}
-                </div>
                 </div>
               )}
-          </div>
+            </div>
 
-          {/* Footer Buttons */}
-          <div className="p-4 border-t border-slate-200 flex space-x-4">
-            <Button
-              onClick={handleCancelPreview}
-              variant="outline"
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                setShowPreview(false);
-                handleUpload();
-              }}
-              disabled={uploadMutation.isPending}
-              className="bg-green-600 hover:bg-green-700 text-white flex-1"
-            >
-              {uploadMutation.isPending ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  Creating Jobs...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Approve & Create Jobs
-                </>
-              )}
-            </Button>
+            {/* Footer Buttons */}
+            <div className="p-4 border-t border-slate-200 flex space-x-4">
+              <Button
+                onClick={handleCancelPreview}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowPreview(false);
+                  handleUpload();
+                }}
+                disabled={uploadMutation.isPending}
+                className="bg-green-600 hover:bg-green-700 text-white flex-1"
+              >
+                {uploadMutation.isPending ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Creating Jobs...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    Approve & Create Jobs
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
-        </div>
-  )
-}
+      )
+      }
     </div >
   );
 }
