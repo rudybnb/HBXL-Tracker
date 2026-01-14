@@ -390,9 +390,33 @@ export default function UploadCsv() {
 
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+
+      {/* Drawing Upload Info Card */}
+      <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4 mb-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10">
+          <FileText className="h-24 w-24 text-blue-400" />
+        </div>
+        <div className="flex items-start space-x-4 relative z-10">
+          <div className="bg-blue-900/30 p-2 rounded-lg">
+            <FileText className="h-6 w-6 text-blue-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-medium text-white mb-1">Looking to upload drawings & plans?</h3>
+            <p className="text-slate-400 text-sm mb-3">
+              Drawings must be attached to a specific job. First import your schedule below, then go to the Job's QS Tender tab.
+            </p>
+            <Link href="/job-assignments">
+              <Button variant="outline" size="sm" className="h-8 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700 text-xs">
+                Go to Job Assignments
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+
       <div className="mb-4">
         <div className="flex items-center space-x-2 mb-2">
-          <h3 className="text-lg font-semibold text-amber-400">Upload Job CSV File</h3>
+          <h3 className="text-lg font-semibold text-amber-400">Smart Job Import</h3>
           <ContextualTooltip
             id="csv-upload-header"
             title="CSV Upload Process"

@@ -67,7 +67,9 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
     type: headers.findIndex(h => h.includes('resource type') || h.includes('type')),
     supplier: headers.findIndex(h => h.includes('supplier') || h.includes('merchant')),
     desc: headers.findIndex(h => h.includes('description') || h === 'desc'),
-    qty: headers.findIndex(h => h.includes('quantity') || h === 'qty')
+    qty: headers.findIndex(h => h.includes('quantity') || h === 'qty'),
+    unitCost: headers.findIndex(h => h.includes('unit cost') || h.includes('rate') || h.includes('price')),
+    totalCost: headers.findIndex(h => h.includes('total') || h.includes('amount') || (h.includes('cost') && !h.includes('unit')))
   };
 
   console.log('🔍 Dynamic Column Mapping:', colMap);
@@ -91,14 +93,33 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
       quantity: colMap.qty > -1 ? parseInt(parts[colMap.qty]) : (parseInt(parts[7]) || 0)
     };
 
-    // Extract price using regex - MANDATORY RULE: authentic data only
+    // Extract price from column OR description
     const priceMatch = resource.description.match(/£(\d+\.?\d*)/);
     const unitMatch = resource.description.match(/£\d+\.?\d*\/(\w+)/);
 
-    if (priceMatch && resource.quantity > 0) {
+    // Prioritize column data, fallback to regex extraction
+    if (colMap.unitCost > -1) {
+      const rawPrice = parts[colMap.unitCost].replace(/[£,]/g, '');
+      resource.unitPrice = parseFloat(rawPrice) || 0;
+    } else if (priceMatch) {
       resource.unitPrice = parseFloat(priceMatch[1]);
-      resource.unit = unitMatch ? unitMatch[1] : 'Each';
+    } else {
+      resource.unitPrice = 0;
+    }
+
+    // Determine unit
+    resource.unit = unitMatch ? unitMatch[1] : 'Each';
+
+    // Calculate total if not provided
+    if (colMap.totalCost > -1) {
+      const rawTotal = parts[colMap.totalCost].replace(/[£,]/g, '');
+      resource.totalCost = parseFloat(rawTotal) || (resource.unitPrice * resource.quantity);
+    } else {
       resource.totalCost = resource.unitPrice * resource.quantity;
+    }
+
+    // Valid if we have a cost OR it's a valid item with quantity
+    if ((resource.totalCost > 0 || resource.unitPrice > 0) && resource.quantity > 0) {
 
       // Track costs by type for accounting
       if (resource.resourceType.toLowerCase() === 'labour') {

@@ -29,7 +29,14 @@ interface MulterRequest extends ExpressRequest {
 import { parse } from "csv-parse";
 import { parseEnhancedCSV } from "./enhanced-csv-parser";
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+
+const mt = multer({ storage: multer.memoryStorage() });
+const upload = mt; // Alias for backward compatibility if needed, or just use mt
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Stats endpoint
@@ -228,12 +235,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const jobFile = await storage.createJobFile({
         jobId: req.params.id,
-        filename: req.file.filename || req.file.originalname,
+        filename: req.file.originalname,
         originalName: req.file.originalname,
-        fileUrl: `/uploads/${req.file.filename || req.file.originalname}`, // In real app, upload to S3/Blob
+        fileUrl: `/uploads/${req.file.originalname}`,
         fileType: req.file.mimetype,
         uploadedBy: "user"
       });
+
+      // Write file to disk
+      const filePath = path.join(uploadsDir, req.file.originalname);
+      fs.writeFileSync(filePath, req.file.buffer);
 
       res.status(201).json(jobFile);
     } catch (error) {
@@ -2313,6 +2324,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to backup task progress" });
     }
   });
+
+  // Serve uploaded files
+  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
   const httpServer = createServer(app);
 
