@@ -14,7 +14,7 @@ interface SessionRequest extends Express.Request {
 }
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, extractedElements, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, extractedElements, rooms, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
 import multer from "multer";
@@ -23,7 +23,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as XLSX from "xlsx";
 import { db } from "./db";
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 
 interface MulterRequest extends ExpressRequest {
   file?: Express.Multer.File;
@@ -383,28 +383,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             console.log(`🔍 Calling extractFromImage with path: ${filePath}`);
             const result = await agent.extractFromImage(filePath);
-            console.log(`📊 Extraction result:`, { success: result.success, elementCount: result.elements?.length, error: result.error });
+            console.log(`📊 Extraction result:`, { success: result.success, roomCount: result.rooms?.length, error: result.error });
 
-            if (result.success && result.elements.length > 0) {
-              // Store extracted elements
-              for (const element of result.elements) {
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: element.elementType,
-                  elementCode: element.elementCode,
-                  description: element.description,
-                  dimensions: element.dimensions,
-                  quantity: String(element.quantity),
-                  unit: element.unit || 'nr',
-                  rate: String(element.rate || 0),
-                  total: String(element.total || 0),
-                  roomName: element.roomName || element.location,
-                  location: element.location,
-                  material: element.material,
-                  notes: element.notes,
-                  rawJson: JSON.stringify(element)
-                });
+            if (result.success && result.rooms && result.rooms.length > 0) {
+              // Store extracted rooms (costs come from HBXL CSV, not AI)
+              for (const room of result.rooms) {
+                // Check if room already exists for this job
+                const existing = await db.select()
+                  .from(rooms)
+                  .where(and(
+                    eq(rooms.jobId, req.params.id),
+                    eq(rooms.name, room.name)
+                  ))
+                  .limit(1);
+
+                if (existing.length === 0) {
+                  await db.insert(rooms).values({
+                    jobId: req.params.id,
+                    name: room.name,
+                    floor: room.floor || 'Ground',
+                    status: 'not_started'
+                  });
+                  console.log(`   📍 Created room: ${room.name} (${room.dimensions || 'no dimensions'})`);
+                } else {
+                  console.log(`   📍 Room exists: ${room.name}`);
+                }
               }
 
               // Update status to completed
@@ -412,7 +415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 .set({ extractionStatus: 'completed' })
                 .where(eq(jobFiles.id, jobFile.id));
 
-              console.log(`✅ Extracted ${result.elements.length} elements from ${uniqueFilename}`);
+              console.log(`✅ Identified ${result.rooms.length} rooms from ${uniqueFilename}`);
             } else {
               // Update status to failed
               const errorMsg = result.error || 'No elements found in image';
@@ -521,49 +524,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`🔍 Starting AI extraction...`);
       const agent = await import('./drawing-extraction-agent');
       const result = await agent.extractFromImage(filePath);
-      console.log(`📊 Extraction result:`, { success: result.success, elements: result.elements?.length, error: result.error });
+      console.log(`📊 Extraction result:`, { success: result.success, rooms: result.rooms?.length, error: result.error });
 
-      if (result.success && result.elements.length > 0) {
-        // Clear old elements for this file
-        await db.delete(extractedElements).where(eq(extractedElements.fileId, file.id));
+      if (result.success && result.rooms && result.rooms.length > 0) {
+        // Store extracted rooms (costs come from HBXL CSV, not AI)
+        console.log(`💾 Saving ${result.rooms.length} rooms for job ${file.jobId}`);
+        let roomsCreated = 0;
+        for (const room of result.rooms) {
+          // Check if room already exists for this job
+          const existing = await db.select()
+            .from(rooms)
+            .where(and(
+              eq(rooms.jobId, file.jobId),
+              eq(rooms.name, room.name)
+            ))
+            .limit(1);
 
-        // Store new extracted elements
-        console.log(`💾 Saving ${result.elements.length} elements for job ${file.jobId}, file ${file.id}`);
-        for (const element of result.elements) {
-          await db.insert(extractedElements).values({
-            jobId: file.jobId,
-            fileId: file.id,
-            elementType: element.elementType,
-            elementCode: element.elementCode,
-            description: element.description,
-            dimensions: element.dimensions,
-            quantity: String(element.quantity),
-            unit: element.unit || 'nr',
-            rate: String(element.rate || 0),
-            total: String(element.total || 0),
-            roomName: element.roomName || element.location,
-            location: element.location,
-            material: element.material,
-            notes: element.notes,
-            rawJson: JSON.stringify(element)
-          });
+          if (existing.length === 0) {
+            await db.insert(rooms).values({
+              jobId: file.jobId,
+              name: room.name,
+              floor: room.floor || 'Ground',
+              status: 'not_started'
+            });
+            roomsCreated++;
+            console.log(`   📍 Created room: ${room.name}`);
+          } else {
+            console.log(`   📍 Room exists: ${room.name}`);
+          }
         }
-        console.log(`✅ Successfully saved ${result.elements.length} elements to database`);
+        console.log(`✅ Created ${roomsCreated} new rooms for job`);
 
         await db.update(jobFiles)
           .set({ extractionStatus: 'completed' })
           .where(eq(jobFiles.id, file.id));
 
-        res.json({ success: true, elementsExtracted: result.elements.length });
+        res.json({ success: true, roomsIdentified: result.rooms.length, roomsCreated });
       } else {
         await db.update(jobFiles)
           .set({
             extractionStatus: 'failed',
-            extractionError: result.error || 'No elements found'
+            extractionError: result.error || 'No rooms found'
           })
           .where(eq(jobFiles.id, file.id));
 
-        res.json({ success: false, error: result.error || 'No elements found' });
+        res.json({ success: false, error: result.error || 'No rooms found' });
       }
     } catch (error) {
       console.error("Manual extraction error:", error);

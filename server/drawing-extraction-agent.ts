@@ -25,117 +25,78 @@ function getOpenAIClient(): OpenAI {
     return openai;
 }
 
-export interface ExtractedElement {
-    elementType: string;      // "door", "window", "wall", "floor", "ceiling", "roof", "structural", "electrical", "plumbing"
-    elementCode: string | null; // "D01", "W03", "W-BATH-01"
-    description: string;      // "Internal Fire Door Type B"
-    dimensions: string | null; // "900x2100mm"
-    quantity: number;         // 2
-    unit: string;             // "sqm", "nr", "lm"
-    rate: number;             // £45.00
-    total: number;            // £1012.50
-    location: string | null;  // "Bathroom" or "First Floor" (deprecated, use roomName)
-    roomName: string;         // "Lounge", "Bathroom"
-    material: string | null;  // "Softwood", "uPVC", etc.
-    notes: string | null;     // Any additional notes from drawing
+// Room extracted from drawing (no costs - costs come from HBXL CSV)
+export interface ExtractedRoom {
+    name: string;             // "Lounge", "Bathroom", "Kitchen"
+    floor: string;            // "Ground", "First", "Second"
+    dimensions: string | null; // "4850mm x 3600mm"
+    area: number | null;      // 17.46 sqm
+    elements: string[];       // ["D01", "W01", "WC", "Basin"]
 }
 
+// Legacy interface kept for backward compatibility
+export interface ExtractedElement {
+    elementType: string;
+    elementCode: string | null;
+    description: string;
+    dimensions: string | null;
+    quantity: number;
+    unit: string;
+    rate: number;
+    total: number;
+    location: string | null;
+    roomName: string;
+    material: string | null;
+    notes: string | null;
+}
 
 export interface ExtractionResult {
     success: boolean;
-    elements: ExtractedElement[];
+    rooms: ExtractedRoom[];      // New: rooms from AI
+    elements: ExtractedElement[]; // Legacy: kept for compatibility
     rawResponse: string;
     error?: string;
 }
 
-const EXTRACTION_PROMPT = `You are a construction Quantity Surveyor analyzing architectural drawings.
-Examine this drawing carefully and extract construction elements GROUPED BY ROOM.
 
-**STEP 1: Identify all ROOMS in the drawing**
-Look for room labels like "Lounge", "Bathroom", "Kitchen", "Bedroom", etc.
-If no room labels visible, infer rooms from the layout.
+const EXTRACTION_PROMPT = `You are analyzing a construction floor plan drawing.
+Your job is to IDENTIFY ROOMS and their DIMENSIONS only.
 
-**STEP 2: For each ROOM, list the ELEMENTS that belong to it**
-Include: doors, windows, walls, floor areas, fixtures, finishes.
+**DO NOT:**
+- Generate costs or rates
+- Make up prices
+- Estimate quantities
 
-**STEP 3: Calculate measurements from the drawing dimensions**
-- Floor area: Calculate from room dimensions (length × width) in sqm
-- Doors: Width in mm (e.g., "930mm")
-- Windows: Width in mm (e.g., "1200mm")
-- Walls: Calculate area from dimensions if possible
+**DO:**
+- Identify all room names visible in the drawing (e.g., "Lounge", "Bathroom", "Kitchen", "Bedroom")
+- Extract room dimensions if shown (in mm or m)
+- Calculate approximate floor area from dimensions
+- Note any visible element codes (D01, W01, etc.) and which room they belong to
 
-**STEP 4: Apply standard QS rates**
-Use these typical UK rates:
-- Floor finish: £45/sqm
-- Internal door supply & fit: £350/nr
-- External door supply & fit: £650/nr
-- Window supply & fit: £400/sqm (use width × 1.2m height estimate)
-- Wall finish (paint): £18/sqm
-- Wall tiling: £65/sqm
-- WC install: £450/nr
-- Basin install: £350/nr
-- Shower install: £800/nr
-- Bath install: £500/nr
+**Look for:**
+- Room labels/names written on the drawing
+- Dimension text (e.g., "4850", "3600mm", "2.4m")
+- Door and window symbols with codes
+- Bathroom fixtures (WC, basin, shower symbols)
 
-IMPORTANT:
-- Group ALL elements by their ROOM
-- Calculate areas from dimensions shown in drawing
-- Include element codes if visible (D01, W01, etc.)
-
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON:
 {
   "rooms": [
     {
-      "roomName": "Lounge",
+      "name": "Lounge",
       "floor": "Ground",
-      "roomArea": 22.5,
-      "elements": [
-        {
-          "elementType": "floor",
-          "elementCode": null,
-          "description": "Floor finish",
-          "quantity": 22.5,
-          "unit": "sqm",
-          "rate": 45,
-          "total": 1012.50,
-          "dimensions": "5000mm x 4500mm",
-          "notes": "Standard finish"
-        },
-        {
-          "elementType": "door",
-          "elementCode": "D01",
-          "description": "Internal door",
-          "quantity": 1,
-          "unit": "nr",
-          "rate": 350,
-          "total": 350,
-          "dimensions": "930mm wide",
-          "notes": "Standard swing door"
-        }
-      ],
-      "roomTotal": 1362.50
+      "dimensions": "4850mm x 3600mm",
+      "area": 17.46,
+      "elements": ["D01", "W01"]
     },
     {
-      "roomName": "Bathroom",
+      "name": "Bathroom", 
       "floor": "Ground",
-      "roomArea": 4.5,
-      "elements": [
-        {
-          "elementType": "fixture",
-          "elementCode": "F01",
-          "description": "WC install",
-          "quantity": 1,
-          "unit": "nr",
-          "rate": 450,
-          "total": 450,
-          "dimensions": null,
-          "notes": "Standard WC"
-        }
-      ],
-      "roomTotal": 450
+      "dimensions": "2980mm x 2485mm",
+      "area": 7.41,
+      "elements": ["D02", "WC", "Basin", "Shower"]
     }
-  ],
-  "projectTotal": 1812.50
+  ]
 }`;
 
 
@@ -204,63 +165,38 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             }
 
             const parsed = JSON.parse(jsonMatch[0]);
-            const elements: ExtractedElement[] = [];
+            const rooms: ExtractedRoom[] = [];
 
-            // Handle new room-based format
+            // Parse rooms from AI response (room-only format, no costs)
             if (parsed.rooms && Array.isArray(parsed.rooms)) {
-                for (const room of parsed.rooms) {
-                    const roomName = room.roomName || 'Unknown Room';
-                    for (const e of room.elements || []) {
-                        elements.push({
-                            elementType: e.elementType || 'other',
-                            elementCode: e.elementCode || null,
-                            description: e.description || 'Unknown element',
-                            dimensions: e.dimensions || null,
-                            quantity: typeof e.quantity === 'number' ? e.quantity : 1,
-                            unit: e.unit || 'nr',
-                            rate: typeof e.rate === 'number' ? e.rate : 0,
-                            total: typeof e.total === 'number' ? e.total : 0,
-                            location: roomName,  // For backward compatibility
-                            roomName: roomName,
-                            material: e.material || null,
-                            notes: e.notes || null
-                        });
-                    }
-                }
-            }
-            // Fallback: Handle old flat format
-            else if (parsed.elements && Array.isArray(parsed.elements)) {
-                for (const e of parsed.elements) {
-                    elements.push({
-                        elementType: e.elementType || 'other',
-                        elementCode: e.elementCode || null,
-                        description: e.description || 'Unknown element',
-                        dimensions: e.dimensions || null,
-                        quantity: typeof e.quantity === 'number' ? e.quantity : 1,
-                        unit: e.unit || 'nr',
-                        rate: typeof e.rate === 'number' ? e.rate : 0,
-                        total: typeof e.total === 'number' ? e.total : 0,
-                        location: e.location || null,
-                        roomName: e.location || 'General',
-                        material: e.material || null,
-                        notes: e.notes || null
+                for (const r of parsed.rooms) {
+                    rooms.push({
+                        name: r.name || r.roomName || 'Unknown Room',
+                        floor: r.floor || 'Ground',
+                        dimensions: r.dimensions || null,
+                        area: typeof r.area === 'number' ? r.area : (typeof r.roomArea === 'number' ? r.roomArea : null),
+                        elements: Array.isArray(r.elements) ? r.elements : []
                     });
                 }
             }
 
-            console.log(`✅ Extracted ${elements.length} elements from drawing`);
+            console.log(`✅ Identified ${rooms.length} rooms from drawing`);
+            for (const room of rooms) {
+                console.log(`   📍 ${room.name}: ${room.dimensions || 'no dimensions'}, ${room.area ? room.area + ' sqm' : 'no area'}`);
+            }
 
             return {
                 success: true,
-                elements,
+                rooms,
+                elements: [], // Legacy: empty - costs come from CSV now
                 rawResponse: content
             };
-
 
         } catch (parseError) {
             console.error('❌ Failed to parse extraction response:', parseError);
             return {
                 success: false,
+                rooms: [],
                 elements: [],
                 rawResponse: content,
                 error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
@@ -271,6 +207,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         console.error('❌ Extraction error:', error);
         return {
             success: false,
+            rooms: [],
             elements: [],
             rawResponse: '',
             error: error instanceof Error ? error.message : String(error)
