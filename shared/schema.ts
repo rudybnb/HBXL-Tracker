@@ -100,6 +100,81 @@ export const extractedElements = pgTable("extracted_elements", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ============================================================================
+// ROOM-BASED COMMERCIAL MODEL (AGENTS.md Compliant)
+// Hierarchy: JOB -> ROOM -> ELEMENT -> PAYABLE_ITEM
+// HBXL phases are mapped to rooms using QS allocation rules
+// ============================================================================
+
+// Room status enum for tracking room completion
+export const roomStatusEnum = pgEnum("room_status", ["not_started", "in_progress", "complete"]);
+
+// Room Register - Defines rooms within a job (per AGENTS.md 4.2)
+export const rooms = pgTable("rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").notNull().references(() => jobs.id),
+  name: text("name").notNull(),        // e.g., "Bathroom", "Lounge", "External"
+  floor: text("floor"),                 // e.g., "Ground Floor", "First Floor"
+  notes: text("notes"),
+  status: roomStatusEnum("status").notNull().default("not_started"),
+  totalValue: text("total_value").default("0"), // Sum of all payable items in pence
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Elements within rooms - informational groupings, NOT assignable (per AGENTS.md 6)
+export const roomElements = pgTable("room_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id),
+  name: text("name").notNull(),         // e.g., "Wall Construction", "Sanitaryware", "Tiling"
+  measurementSummary: text("measurement_summary"), // e.g., "21.6 sqm"
+  subtotal: text("subtotal").default("0"), // Sum of payable items in pence
+  hbxlSourcePhase: text("hbxl_source_phase"), // Traceability: original HBXL phase
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Payable Items - THE assignable level (per AGENTS.md 7)
+// Assignment is allowed ONLY at this level
+export const payableItems = pgTable("payable_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull().references(() => roomElements.id),
+  description: text("description").notNull(),
+  quantity: text("quantity").notNull(),
+  unit: text("unit").notNull(),
+  rate: text("rate").notNull(),         // In pence
+  total: text("total").notNull(),       // In pence
+
+  // Assignment fields (only allowed at this level per AGENTS.md 8)
+  assignedContractorId: varchar("assigned_contractor_id").references(() => contractors.id),
+  assignedContractorName: text("assigned_contractor_name"),
+  assignedDate: timestamp("assigned_date"),
+
+  // Status - derived from work, not manual (per AGENTS.md 7)
+  status: roomStatusEnum("status").notNull().default("not_started"),
+
+  // Traceability (per AGENTS.md 11)
+  hbxlSourcePhase: text("hbxl_source_phase"),    // Original HBXL phase
+  hbxlOriginalQty: text("hbxl_original_qty"),    // Original HBXL Quantity
+  roomAllocationPercent: text("room_allocation_percent").default("100"), // Allocation %
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Insert schemas for Room-based model
+export const insertRoomSchema = createInsertSchema(rooms).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertRoomElementSchema = createInsertSchema(roomElements).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPayableItemSchema = createInsertSchema(payableItems).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const csvUploads = pgTable("csv_uploads", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   filename: text("filename").notNull(),
@@ -687,3 +762,11 @@ export interface JobWithFinancials extends Job {
   costItems?: JobCostItem[];
   financialBreakdown?: FinancialSummary;
 }
+
+// Room-Based Commercial Model Types (AGENTS.md)
+export type InsertRoom = z.infer<typeof insertRoomSchema>;
+export type Room = typeof rooms.$inferSelect;
+export type InsertRoomElement = z.infer<typeof insertRoomElementSchema>;
+export type RoomElement = typeof roomElements.$inferSelect;
+export type InsertPayableItem = z.infer<typeof insertPayableItemSchema>;
+export type PayableItem = typeof payableItems.$inferSelect;

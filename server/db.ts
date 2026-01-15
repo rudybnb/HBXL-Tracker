@@ -107,8 +107,66 @@ export async function initManusSchema(): Promise<void> {
       );
     `);
 
+    // Create room_status enum for Room-Based Commercial Model
+    await db.execute(sql`
+      DO $$ BEGIN
+        CREATE TYPE room_status AS ENUM ('not_started', 'in_progress', 'complete');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$
+    `);
+
+    // Create rooms table (AGENTS.md Room Register)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rooms (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        job_id VARCHAR(36) NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        floor TEXT,
+        notes TEXT,
+        status room_status NOT NULL DEFAULT 'not_started',
+        total_value TEXT DEFAULT '0',
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `);
+
+    // Create room_elements table (Elements within rooms)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS room_elements (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        room_id VARCHAR(36) NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        measurement_summary TEXT,
+        subtotal TEXT DEFAULT '0',
+        hbxl_source_phase TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `);
+
+    // Create payable_items table (Assignable level per AGENTS.md)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS payable_items (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        element_id VARCHAR(36) NOT NULL REFERENCES room_elements(id) ON DELETE CASCADE,
+        description TEXT NOT NULL,
+        quantity TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        rate TEXT NOT NULL,
+        total TEXT NOT NULL,
+        assigned_contractor_id VARCHAR(36) REFERENCES contractors(id),
+        assigned_contractor_name TEXT,
+        assigned_date TIMESTAMP,
+        status room_status NOT NULL DEFAULT 'not_started',
+        hbxl_source_phase TEXT,
+        hbxl_original_qty TEXT,
+        room_allocation_percent TEXT DEFAULT '100',
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      )
+    `);
+
     console.log('✅ Manus-n8n schema initialized successfully');
+    console.log('✅ Room-Based Commercial Model tables created');
   } catch (error) {
-    console.log('⚠️ Some Manus-n8n schema elements may already exist:', error);
+    console.log('⚠️ Some schema elements may already exist:', error);
   }
 }
