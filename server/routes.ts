@@ -528,10 +528,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(500).json({ error: "Failed to process CSV jobs" });
       }
     } catch (error) {
+      // Robust error serialization for logging and response
+      const errorDetails = error instanceof Error || (typeof error === 'object' && error !== null) ? {
+        message: (error as any).message || "Unknown error",
+        name: (error as any).name || "UnknownError",
+        stack: (error as any).stack,
+        // Spread any other properties
+        ...(error as any)
+      } : String(error);
+
       console.error("Error uploading CSV:", error);
       res.status(500).json({
         error: "Failed to upload CSV file",
-        details: error instanceof Error ? error.message : JSON.stringify(error),
+        details: typeof errorDetails === 'object' ? JSON.stringify(errorDetails) : String(errorDetails),
+        // Keep stack for top-level if simple Error
         stack: error instanceof Error ? error.stack : undefined
       });
     }
