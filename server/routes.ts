@@ -461,9 +461,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get extracted elements for a job
   app.get("/api/jobs/:id/elements", async (req, res) => {
     try {
+      console.log(`🔍 Fetching elements for job: ${req.params.id}`);
       const elements = await db.select()
         .from(extractedElements)
         .where(eq(extractedElements.jobId, req.params.id));
+      console.log(`📊 Found ${elements.length} elements for job ${req.params.id}`);
       res.json(elements);
     } catch (error) {
       console.error("Error fetching elements:", error);
@@ -522,6 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await db.delete(extractedElements).where(eq(extractedElements.fileId, file.id));
 
         // Store new extracted elements
+        console.log(`💾 Saving ${result.elements.length} elements for job ${file.jobId}, file ${file.id}`);
         for (const element of result.elements) {
           await db.insert(extractedElements).values({
             jobId: file.jobId,
@@ -537,6 +540,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             rawJson: JSON.stringify(element)
           });
         }
+        console.log(`✅ Successfully saved ${result.elements.length} elements to database`);
 
         await db.update(jobFiles)
           .set({ extractionStatus: 'completed' })
