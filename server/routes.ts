@@ -257,7 +257,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const files = await storage.getJobFiles(req.params.id);
       res.json(files);
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch job files" });
+      console.error("Error fetching files:", error);
+      res.status(500).json({
+        error: "Failed to fetch job files",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
@@ -283,7 +287,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(jobFile);
     } catch (error) {
       console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to upload file" });
+      res.status(500).json({
+        error: "Upload failed",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
@@ -292,7 +299,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteJobFile(req.params.id);
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: "Failed to delete file" });
+      console.error("Delete error:", error);
+      res.status(500).json({
+        error: "Failed to delete file",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
@@ -5394,88 +5405,7 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
     }
   });
 
-  // Job Files Endpoints
 
-  // Get files for a job
-  app.get("/api/jobs/:id/files", async (req, res) => {
-    try {
-      if (!req.params.id) {
-        return res.status(400).json({ error: "Job ID is required" });
-      }
-
-      const files = await db.select().from(jobFiles).where(eq(jobFiles.jobId, req.params.id));
-      res.json(files);
-    } catch (error) {
-      console.error("Error fetching files:", error);
-      res.status(500).json({ error: "Failed to fetch files" });
-    }
-  });
-
-  // Upload file to job
-  app.post("/api/jobs/:id/files", upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
-
-      if (!req.params.id) {
-        return res.status(400).json({ error: "Job ID is required" });
-      }
-
-      const jobId = req.params.id;
-      const file = req.file;
-      const originalName = file.originalname;
-      const fileType = file.mimetype;
-
-      // Generate unique filename
-      const uniqueFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(originalName)}`;
-      const filePath = path.join(uploadsDir, uniqueFilename);
-
-      // Write file to disk
-      fs.writeFileSync(filePath, file.buffer);
-
-      const fileUrl = `/uploads/${uniqueFilename}`;
-
-      const [record] = await db.insert(jobFiles).values({
-        jobId,
-        filename: uniqueFilename,
-        originalName,
-        fileUrl,
-        fileType,
-      }).returning();
-
-      res.json(record);
-    } catch (error) {
-      console.error("Upload error:", error);
-      res.status(500).json({
-        error: "Upload failed",
-        details: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  // Delete file
-  app.delete("/api/files/:id", async (req, res) => {
-    try {
-      if (!req.params.id) {
-        return res.status(400).json({ error: "File ID is required" });
-      }
-
-      const [file] = await db.delete(jobFiles).where(eq(jobFiles.id, req.params.id)).returning();
-
-      if (file) {
-        const filePath = path.join(uploadsDir, file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Delete error:", error);
-      res.status(500).json({ error: "Failed to delete file" });
-    }
-  });
 
   return httpServer;
 }
