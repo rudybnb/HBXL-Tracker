@@ -191,6 +191,7 @@ export default function UploadCsv() {
         // Parse phases/rooms from enhanced CSV data - find Build Phase OR Room column dynamically
         const headerLine = lines[enhancedFormatIndex];
         const enhancedHeaders = headerLine.split(',').map(h => h.trim().toLowerCase());
+        const phaseSet = new Set<string>();
 
         let targetColumnIndex = enhancedHeaders.findIndex(h =>
           h.includes('room') || h.includes('location') || h.includes('area')
