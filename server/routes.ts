@@ -5447,7 +5447,10 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
       res.json(record);
     } catch (error) {
       console.error("Upload error:", error);
-      res.status(500).json({ error: "Upload failed" });
+      res.status(500).json({
+        error: "Upload failed",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 

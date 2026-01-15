@@ -41,7 +41,8 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
             });
 
             if (!response.ok) {
-                throw new Error('Upload failed');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.details || 'Upload failed');
             }
 
             return response.json();
@@ -53,10 +54,11 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                 description: "Drawing added successfully",
             });
         },
-        onError: () => {
+        onError: (error) => {
+            console.error("Upload error details:", error);
             toast({
                 title: "Upload Failed",
-                description: "Could not upload the file",
+                description: error.message || "Could not upload the file",
                 variant: "destructive",
             });
         },
