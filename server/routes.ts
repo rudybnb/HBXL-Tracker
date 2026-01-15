@@ -558,13 +558,208 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log('🎯 Final extracted data:', { jobName, jobAddress, jobPostcode, jobType });
 
-        // Parse data section - supports both formats
-        // Check if this is the new enhanced format with Order Date, Build Phase, etc.
-        const enhancedFormatIndex = lines.findIndex(line =>
-          line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
+        // Parse data section - supports multiple formats
+        // 1. Check for MATERIALS USED format (Job 49 style - starts with "Type of resource")
+        const materialsFormatIndex = lines.findIndex(line =>
+          line.includes('Type of resource') &&
+          (line.includes('Resource quantity') || line.includes('Resource cost'))
         );
 
-        if (enhancedFormatIndex !== -1) {
+        if (materialsFormatIndex !== -1) {
+          // MATERIALS USED FORMAT PARSING
+          console.log('🎯 Using MATERIALS USED CSV parsing (Job 49 style)');
+
+          const headerLine = lines[materialsFormatIndex].toLowerCase();
+          const headers = lines[materialsFormatIndex].split(',').map(h => h.trim().toLowerCase());
+
+          // Find relevant column indices
+          const workTypeIndex = 0; // First column is work type (Electrical 1st Fix, Footings, etc.)
+          const resourceDescIndex = headers.findIndex(h => h.includes('resource') && !h.includes('quantity') && !h.includes('cost'));
+          const unitIndex = headers.findIndex(h => h.includes('unit') || h === 'each' || h === 'hours');
+          const quantityIndex = headers.findIndex(h => h.includes('quantity including wastage'));
+          const costIndex = headers.findIndex(h => h.includes('cost including wastage') && !h.includes('altering'));
+
+          console.log('📊 Column indices:', { workTypeIndex, resourceDescIndex, quantityIndex, costIndex });
+
+          interface MaterialItem {
+            description: string;
+            quantity: number;
+            unit: string;
+            rate: number;
+            total: number;
+            category: 'LABOUR' | 'MATERIAL' | 'PLANT' | 'SUBCONTRACTOR';
+          }
+
+          const phaseData: Record<string, MaterialItem[]> = {};
+          let totalLabour = 0;
+          let totalMaterial = 0;
+          let totalPlant = 0;
+          let totalSubcontractor = 0;
+
+          // Parse data rows
+          for (let i = materialsFormatIndex + 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || line.trim() === '') continue;
+
+            // Split by comma but respect quoted strings
+            const columns = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+
+            const workType = columns[0] || '';
+            if (!workType || workType === '') continue;
+
+            // Get description (usually column 2)
+            const description = columns[2] || columns[1] || 'Unknown';
+
+            // Find unit (usually column 8 or 9)
+            let unit = 'Each';
+            for (let c = 7; c < 10 && c < columns.length; c++) {
+              const val = columns[c]?.trim();
+              if (val && ['Each', 'Hours', 'Week', 'Day', 'm²', 'm³'].includes(val)) {
+                unit = val;
+                break;
+              }
+            }
+
+            // Get quantity (usually column 12)
+            let quantity = 0;
+            for (let c = 10; c < 14 && c < columns.length; c++) {
+              const val = parseFloat(columns[c]?.replace(/[^\d.-]/g, '') || '0');
+              if (!isNaN(val) && val > 0) {
+                quantity = val;
+                break;
+              }
+            }
+
+            // Get total cost (usually last column or second-to-last) - look for £ symbol
+            let totalCost = 0;
+            for (let c = columns.length - 1; c >= columns.length - 4 && c >= 0; c--) {
+              const val = columns[c]?.replace(/[£,]/g, '') || '';
+              const parsed = parseFloat(val);
+              if (!isNaN(parsed) && parsed > 0) {
+                totalCost = parsed;
+                break;
+              }
+            }
+
+            // Determine category based on description
+            let category: 'LABOUR' | 'MATERIAL' | 'PLANT' | 'SUBCONTRACTOR' = 'MATERIAL';
+            const descLower = description.toLowerCase();
+            if (descLower.includes('bricklayer') || descLower.includes('electrician') ||
+              descLower.includes('decorator') || descLower.includes('groundworker') ||
+              descLower.includes('joiner') || descLower.includes('plasterer') ||
+              descLower.includes('plumber') || descLower.includes('carpenter') ||
+              descLower.includes('labourer') || descLower.includes('mate') ||
+              unit.toLowerCase() === 'hours') {
+              category = 'LABOUR';
+              totalLabour += totalCost;
+            } else if (descLower.includes('digger') || descLower.includes('driver') ||
+              descLower.includes('scaffolding') || descLower.includes('skip') ||
+              unit.toLowerCase() === 'week' || unit.toLowerCase() === 'day') {
+              category = 'PLANT';
+              totalPlant += totalCost;
+            } else if (descLower.includes('subcontract')) {
+              category = 'SUBCONTRACTOR';
+              totalSubcontractor += totalCost;
+            } else {
+              totalMaterial += totalCost;
+            }
+
+            // Add to phase data
+            if (!phaseData[workType]) {
+              phaseData[workType] = [];
+              phases.push(workType);
+            }
+
+            const rate = quantity > 0 ? Math.round((totalCost / quantity) * 100) : 0; // Rate in pence
+
+            phaseData[workType].push({
+              description,
+              quantity,
+              unit,
+              rate,
+              total: Math.round(totalCost * 100), // Total in pence
+              category
+            });
+          }
+
+          const grandTotal = totalLabour + totalMaterial + totalPlant + totalSubcontractor;
+
+          console.log('💰 MATERIALS FORMAT TOTALS:', {
+            totalLabour: `£${totalLabour.toFixed(2)}`,
+            totalMaterial: `£${totalMaterial.toFixed(2)}`,
+            totalPlant: `£${totalPlant.toFixed(2)}`,
+            totalSubcontractor: `£${totalSubcontractor.toFixed(2)}`,
+            grandTotal: `£${grandTotal.toFixed(2)}`,
+            phases: phases.length,
+            totalItems: Object.values(phaseData).reduce((sum, items) => sum + items.length, 0)
+          });
+
+          // Use filename as job name if not found in headers
+          if (jobName === "Data Missing from CSV") {
+            jobName = req.file.originalname.replace(/\.[^/.]+$/, '').replace(/-/g, ' ').trim();
+          }
+
+          // Create the job with financial summary
+          const newJob = await storage.createJob({
+            title: jobName,
+            description: `Materials Schedule Import - ${phases.length} work phases`,
+            location: `${jobAddress}, ${jobPostcode}`,
+            status: "pending",
+            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            notes: `Imported from ${req.file.originalname}`,
+            phases: phases.join(', '),
+            uploadId: csvUpload.id,
+            phaseTaskData: JSON.stringify({
+              phases: phaseData,
+              financials: {
+                totalLabour: Math.round(totalLabour * 100),
+                totalMaterial: Math.round(totalMaterial * 100),
+                totalPlant: Math.round(totalPlant * 100),
+                totalSubcontractor: Math.round(totalSubcontractor * 100),
+                grandTotal: Math.round(grandTotal * 100)
+              }
+            }),
+            financialSummary: JSON.stringify({
+              labour: Math.round(totalLabour * 100),
+              material: Math.round(totalMaterial * 100),
+              plant: Math.round(totalPlant * 100),
+              subcontractor: Math.round(totalSubcontractor * 100),
+              total: Math.round(grandTotal * 100)
+            }),
+            quotedAmount: Math.round(grandTotal * 100).toString()
+          });
+
+          // Create individual cost items
+          const { jobCostItems } = await import("@shared/schema");
+          for (const [phase, items] of Object.entries(phaseData)) {
+            for (const item of items) {
+              await db.insert(jobCostItems).values({
+                jobId: newJob.id,
+                category: item.category,
+                description: `[${phase}] ${item.description}`,
+                quantity: item.quantity.toString(),
+                unit: item.unit,
+                rate: item.rate.toString(),
+                total: item.total.toString(),
+                sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
+              });
+            }
+          }
+
+          jobsCreated = 1;
+
+          await storage.updateCsvUpload(csvUpload.id, {
+            status: "processed",
+            jobsCount: "1"
+          });
+
+        } else if (lines.findIndex(line =>
+          line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
+        ) !== -1) {
+          // 2. Check if this is the ENHANCED format with Order Date, Build Phase, etc.
+          const enhancedFormatIndex = lines.findIndex(line =>
+            line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
+          );
           // ENHANCED FORMAT PARSING - using shared parser logic
           console.log('🎯 Using ENHANCED CSV parsing (Imported Function)');
 
