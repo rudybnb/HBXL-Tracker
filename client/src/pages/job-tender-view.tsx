@@ -130,7 +130,10 @@ export default function JobTenderView() {
 
                 <Tabs defaultValue="tender" className="space-y-6">
                     <TabsList className="bg-slate-800 border-slate-700">
-                        <TabsTrigger value="tender" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Tender Document</TabsTrigger>
+                        <TabsTrigger value="tender" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Smart Plan (HBXL)</TabsTrigger>
+                        <Link href={`/jobs/${id}/rooms`}>
+                            <TabsTrigger value="rooms" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Room Work Packages</TabsTrigger>
+                        </Link>
                         <TabsTrigger value="drawings" className="data-[state=active]:bg-amber-500 data-[state=active]:text-white">Drawings & Files</TabsTrigger>
                     </TabsList>
 

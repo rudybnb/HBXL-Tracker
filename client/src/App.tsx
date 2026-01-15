@@ -27,6 +27,7 @@ import TelegramTest from "@/pages/telegram-test";
 import PayrollOverview from "@/pages/payroll-overview";
 import LiveClockMonitor from "@/pages/live-clock-monitor";
 import JobTenderView from "@/pages/job-tender-view";
+import RoomWorkPackages from "@/pages/room-work-packages";
 
 import ContractorIdCapture from "@/pages/contractor-id-capture";
 import AdminSettings from "@/pages/admin-settings";
@@ -103,6 +104,11 @@ function Router() {
         <Route path="/jobs/:id/tender" component={() => (
           <ProtectedRoute requiredRole="admin">
             <JobTenderView />
+          </ProtectedRoute>
+        )} />
+        <Route path="/jobs/:id/rooms" component={() => (
+          <ProtectedRoute requiredRole="admin">
+            <RoomWorkPackages />
           </ProtectedRoute>
         )} />
         <Route path="/contractor-onboarding" component={() => (
