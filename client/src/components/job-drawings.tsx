@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Upload, FileText, Image as ImageIcon, Trash2, Loader2, X, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -32,6 +32,11 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 
     const { data: files, isLoading } = useQuery<JobFile[]>({
         queryKey: [`/api/jobs/${jobId}/files`],
+        // Poll every 3 seconds if any file is being processed (to detect extraction completion)
+        refetchInterval: (data) => {
+            const hasProcessing = data?.state?.data?.some(f => f.extractionStatus === 'processing');
+            return hasProcessing ? 3000 : false;
+        },
     });
 
     const uploadMutation = useMutation({

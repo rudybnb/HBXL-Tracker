@@ -44,6 +44,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve uploaded files statically
   app.use('/uploads', express.static(uploadsDir));
 
+  // AI Configuration Health Check
+  app.get("/api/health/ai", (req, res) => {
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+    res.json({
+      aiEnabled: hasOpenAIKey,
+      message: hasOpenAIKey
+        ? "OpenAI API key configured - AI extraction enabled"
+        : "OpenAI API key NOT configured - please add OPENAI_API_KEY to Render environment variables",
+      timestamp: new Date().toISOString()
+    });
+  });
+
   // Database Health Check
   app.get("/api/health/db", async (req, res) => {
     try {
