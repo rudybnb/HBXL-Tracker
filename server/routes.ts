@@ -559,11 +559,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('🎯 Final extracted data:', { jobName, jobAddress, jobPostcode, jobType });
 
         // Parse data section - supports multiple formats
-        // 1. Check for MATERIALS USED format (Job 49 style - starts with "Type of resource")
-        const materialsFormatIndex = lines.findIndex(line =>
+        // 1. Check for MATERIALS USED format (Job 49 style) - multiple detection patterns
+        // Pattern A: Header row with "Resource quantity" and "Resource cost" columns
+        // Pattern B: Data rows starting with work phases like "Electrical 1st Fix" directly after header info
+        let materialsFormatIndex = lines.findIndex(line =>
           line.includes('Type of resource') &&
           (line.includes('Resource quantity') || line.includes('Resource cost'))
         );
+
+        // Pattern B: Look for "Resource quantity excluding wastage" or similar header structure
+        if (materialsFormatIndex === -1) {
+          materialsFormatIndex = lines.findIndex(line =>
+            line.includes('Resource quantity') &&
+            line.includes('Resource cost') &&
+            (line.includes('excluding wastage') || line.includes('including wastage'))
+          );
+        }
 
         if (materialsFormatIndex !== -1) {
           // MATERIALS USED FORMAT PARSING
@@ -620,9 +631,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             }
 
-            // Get quantity (usually column 12)
+            // Get quantity (column 11 typically = "Resource quantity including wastage")
             let quantity = 0;
-            for (let c = 10; c < 14 && c < columns.length; c++) {
+            // Look for quantity in columns 9-13 (0-indexed)
+            for (let c = 9; c < 14 && c < columns.length; c++) {
               const val = parseFloat(columns[c]?.replace(/[^\d.-]/g, '') || '0');
               if (!isNaN(val) && val > 0) {
                 quantity = val;
@@ -630,15 +642,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             }
 
-            // Get total cost (usually last column or second-to-last) - look for £ symbol
+            // Get total cost - ALWAYS use the LAST column which is "Resource cost including wastage"
+            // This is the definitive total cost per line item
             let totalCost = 0;
-            for (let c = columns.length - 1; c >= columns.length - 4 && c >= 0; c--) {
-              const val = columns[c]?.replace(/[£,]/g, '') || '';
+            const lastCol = columns[columns.length - 1];
+            if (lastCol) {
+              const val = lastCol.replace(/[£,]/g, '');
               const parsed = parseFloat(val);
-              if (!isNaN(parsed) && parsed > 0) {
+              if (!isNaN(parsed)) {
                 totalCost = parsed;
-                break;
               }
+            }
+
+            // Debug logging for first 5 data rows
+            if (i < materialsFormatIndex + 6) {
+              console.log(`📝 Row ${i - materialsFormatIndex}: phase="${workType}", desc="${description}", qty=${quantity}, cost=£${totalCost.toFixed(2)}, cols=${columns.length}`);
             }
 
             // Determine category based on description
