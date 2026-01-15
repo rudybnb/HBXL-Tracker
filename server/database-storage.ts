@@ -41,7 +41,8 @@ import {
   type InsertJobCostItem,
   type JobImportPayload,
   type FinancialSummary,
-  jobCostItems
+  jobCostItems,
+  jobFiles
 } from "@shared/schema";
 import { contractors, jobs, csvUploads, contractorApplications, workSessions, adminSettings, jobAssignments, contractorReports, adminInspections, inspectionNotifications, taskProgress, taskInspectionResults, projectCashflowWeekly, materialPurchases, projectMaster, calendarEvents, emailRecords, meetings } from "@shared/schema";
 import { db } from "./db";
