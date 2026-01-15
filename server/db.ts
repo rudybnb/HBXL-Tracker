@@ -74,6 +74,35 @@ export async function initManusSchema(): Promise<void> {
         file_url TEXT NOT NULL,
         file_type TEXT NOT NULL,
         uploaded_by TEXT DEFAULT 'user',
+        extraction_status TEXT DEFAULT 'pending',
+        extraction_error TEXT,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+
+    // Add extraction columns if table already exists
+    await db.execute(sql`
+      ALTER TABLE job_files 
+      ADD COLUMN IF NOT EXISTS extraction_status TEXT DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS extraction_error TEXT
+    `);
+
+    // Create extracted_elements table for AI extraction results
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS extracted_elements (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        job_id VARCHAR(36) NOT NULL REFERENCES jobs(id),
+        file_id VARCHAR(36) NOT NULL REFERENCES job_files(id),
+        element_type TEXT NOT NULL,
+        element_code TEXT,
+        description TEXT NOT NULL,
+        dimensions TEXT,
+        quantity TEXT DEFAULT '1',
+        location TEXT,
+        material TEXT,
+        notes TEXT,
+        linked_cost_item_id VARCHAR(36) REFERENCES job_cost_items(id),
+        raw_json TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
     `);
