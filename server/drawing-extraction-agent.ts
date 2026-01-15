@@ -7,9 +7,19 @@ import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
+// Lazy initialization to handle missing API key gracefully
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+    if (!openai) {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            throw new Error('OPENAI_API_KEY environment variable is not set. Please add it to your Render environment variables.');
+        }
+        openai = new OpenAI({ apiKey });
+    }
+    return openai;
+}
 
 export interface ExtractedElement {
     elementType: string;      // "door", "window", "wall", "floor", "ceiling", "roof", "structural", "electrical", "plumbing"
@@ -97,7 +107,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
         console.log(`🔍 Analyzing drawing: ${path.basename(imagePath)}`);
 
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAIClient().chat.completions.create({
             model: 'gpt-4o', // GPT-4 with vision
             messages: [
                 {
@@ -177,7 +187,7 @@ export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult
     try {
         console.log(`🔍 Analyzing drawing from URL: ${imageUrl}`);
 
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAIClient().chat.completions.create({
             model: 'gpt-4o',
             messages: [
                 {
