@@ -14,7 +14,7 @@ interface SessionRequest extends Express.Request {
 }
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
 import multer from "multer";
@@ -23,7 +23,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as XLSX from "xlsx";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 
 interface MulterRequest extends ExpressRequest {
   file?: Express.Multer.File;
@@ -41,6 +41,9 @@ const mt = multer({ storage: multer.memoryStorage() });
 const upload = mt; // Alias for backward compatibility if needed, or just use mt
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Serve uploaded files statically
+  app.use('/uploads', express.static(uploadsDir));
+
   // Database Health Check
   app.get("/api/health/db", async (req, res) => {
     try {
@@ -5388,6 +5391,86 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
         success: false,
         error: 'Failed to get financial summary'
       });
+    }
+  });
+
+  // Job Files Endpoints
+
+  // Get files for a job
+  app.get("/api/jobs/:id/files", async (req, res) => {
+    try {
+      if (!req.params.id) {
+        return res.status(400).json({ error: "Job ID is required" });
+      }
+
+      const files = await db.select().from(jobFiles).where(eq(jobFiles.jobId, req.params.id));
+      res.json(files);
+    } catch (error) {
+      console.error("Error fetching files:", error);
+      res.status(500).json({ error: "Failed to fetch files" });
+    }
+  });
+
+  // Upload file to job
+  app.post("/api/jobs/:id/files", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      if (!req.params.id) {
+        return res.status(400).json({ error: "Job ID is required" });
+      }
+
+      const jobId = req.params.id;
+      const file = req.file;
+      const originalName = file.originalname;
+      const fileType = file.mimetype;
+
+      // Generate unique filename
+      const uniqueFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(originalName)}`;
+      const filePath = path.join(uploadsDir, uniqueFilename);
+
+      // Write file to disk
+      fs.writeFileSync(filePath, file.buffer);
+
+      const fileUrl = `/uploads/${uniqueFilename}`;
+
+      const [record] = await db.insert(jobFiles).values({
+        jobId,
+        filename: uniqueFilename,
+        originalName,
+        fileUrl,
+        fileType,
+      }).returning();
+
+      res.json(record);
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({ error: "Upload failed" });
+    }
+  });
+
+  // Delete file
+  app.delete("/api/files/:id", async (req, res) => {
+    try {
+      if (!req.params.id) {
+        return res.status(400).json({ error: "File ID is required" });
+      }
+
+      const [file] = await db.delete(jobFiles).where(eq(jobFiles.id, req.params.id)).returning();
+
+      if (file) {
+        const filePath = path.join(uploadsDir, file.filename);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete error:", error);
+      res.status(500).json({ error: "Failed to delete file" });
     }
   });
 

@@ -523,10 +523,10 @@ export default function JobAssignments() {
             </TabsContent>
           </Tabs>
         </div>
-      </div >
+      </div>
 
       {/* Bottom Navigation */}
-      < div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700" >
+      <div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700">
         <div className="grid grid-cols-4 text-center">
           <button
             onClick={() => window.location.href = '/'}
@@ -554,10 +554,10 @@ export default function JobAssignments() {
             <span className="text-xs">Upload</span>
           </button>
         </div>
-      </div >
+      </div>
 
       {/* Add bottom padding to account for fixed navigation */}
-      < div className="h-20" ></div >
-    </div >
+      <div className="h-20"></div>
+    </div>
   );
 }
