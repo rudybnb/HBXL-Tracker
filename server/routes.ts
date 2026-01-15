@@ -138,6 +138,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete a job and all associated data
+  app.delete("/api/jobs/:id", async (req, res) => {
+    try {
+      const jobId = req.params.id;
+
+      // Delete associated data first (cascading)
+      await db.delete(extractedElements).where(eq(extractedElements.jobId, jobId));
+      await db.delete(jobFiles).where(eq(jobFiles.jobId, jobId));
+
+      // Delete job cost items
+      const { jobCostItems } = await import("@shared/schema");
+      await db.delete(jobCostItems).where(eq(jobCostItems.jobId, jobId));
+
+      // Delete the job itself
+      const { jobs } = await import("@shared/schema");
+      await db.delete(jobs).where(eq(jobs.id, jobId));
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting job:", error);
+      res.status(500).json({ error: "Failed to delete job", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   // Job Tender endpoint
   app.get("/api/jobs/:id/qs-tender", async (req, res) => {
     try {
