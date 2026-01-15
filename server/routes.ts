@@ -474,9 +474,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manually trigger extraction for a file
   app.post("/api/files/:id/extract", async (req, res) => {
     try {
+      console.log(`🔄 Manual extraction requested for file ID: ${req.params.id}`);
+
       const [file] = await db.select().from(jobFiles).where(eq(jobFiles.id, req.params.id));
       if (!file) {
-        return res.status(404).json({ error: "File not found" });
+        console.log(`❌ File not found in database: ${req.params.id}`);
+        return res.status(404).json({ error: "File not found in database" });
       }
 
       // Only extract from images
@@ -484,15 +487,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Only image files can be extracted" });
       }
 
+      const filePath = path.join(uploadsDir, file.filename);
+      console.log(`📁 Checking file path: ${filePath}`);
+
+      // Check if file exists on disk (Render's ephemeral filesystem may have deleted it)
+      if (!fs.existsSync(filePath)) {
+        console.log(`❌ File not found on disk: ${filePath}`);
+        await db.update(jobFiles)
+          .set({
+            extractionStatus: 'failed',
+            extractionError: 'File deleted from server - please re-upload the drawing'
+          })
+          .where(eq(jobFiles.id, file.id));
+        return res.status(400).json({
+          error: "File was deleted from server (Render restart). Please re-upload the drawing.",
+          needsReupload: true
+        });
+      }
+
       // Update status to processing
+      console.log(`⏳ Setting extraction status to 'processing'`);
       await db.update(jobFiles)
         .set({ extractionStatus: 'processing', extractionError: null })
         .where(eq(jobFiles.id, file.id));
 
       // Run extraction
+      console.log(`🔍 Starting AI extraction...`);
       const agent = await import('./drawing-extraction-agent');
-      const filePath = path.join(uploadsDir, file.filename);
       const result = await agent.extractFromImage(filePath);
+      console.log(`📊 Extraction result:`, { success: result.success, elements: result.elements?.length, error: result.error });
 
       if (result.success && result.elements.length > 0) {
         // Clear old elements for this file
