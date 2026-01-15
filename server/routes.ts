@@ -370,16 +370,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Trigger async AI extraction for image files
       if (req.file.mimetype.startsWith('image/')) {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
+        console.log(`📁 File path: ${filePath}`);
 
         // Import and run extraction asynchronously (don't await)
         import('./drawing-extraction-agent').then(async (agent) => {
           try {
             // Update status to processing
+            console.log(`⏳ Setting extraction status to 'processing' for file: ${jobFile.id}`);
             await db.update(jobFiles)
               .set({ extractionStatus: 'processing' })
               .where(eq(jobFiles.id, jobFile.id));
 
+            console.log(`🔍 Calling extractFromImage with path: ${filePath}`);
             const result = await agent.extractFromImage(filePath);
+            console.log(`📊 Extraction result:`, { success: result.success, elementCount: result.elements?.length, error: result.error });
 
             if (result.success && result.elements.length > 0) {
               // Store extracted elements
@@ -407,25 +411,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.log(`✅ Extracted ${result.elements.length} elements from ${uniqueFilename}`);
             } else {
               // Update status to failed
+              const errorMsg = result.error || 'No elements found in image';
+              console.log(`⚠️ Extraction returned no elements: ${errorMsg}`);
               await db.update(jobFiles)
                 .set({
                   extractionStatus: 'failed',
-                  extractionError: result.error || 'No elements found'
+                  extractionError: errorMsg
                 })
                 .where(eq(jobFiles.id, jobFile.id));
-
-              console.log(`⚠️ Extraction failed for ${uniqueFilename}: ${result.error}`);
             }
           } catch (extractError) {
             console.error(`❌ Extraction error for ${uniqueFilename}:`, extractError);
+            try {
+              await db.update(jobFiles)
+                .set({
+                  extractionStatus: 'failed',
+                  extractionError: extractError instanceof Error ? extractError.message : String(extractError)
+                })
+                .where(eq(jobFiles.id, jobFile.id));
+            } catch (dbError) {
+              console.error(`❌ Failed to update DB status:`, dbError);
+            }
+          }
+        }).catch(async (importError) => {
+          console.error(`❌ Failed to import drawing-extraction-agent:`, importError);
+          try {
             await db.update(jobFiles)
               .set({
                 extractionStatus: 'failed',
-                extractionError: extractError instanceof Error ? extractError.message : String(extractError)
+                extractionError: `Module import failed: ${importError instanceof Error ? importError.message : String(importError)}`
               })
               .where(eq(jobFiles.id, jobFile.id));
+          } catch (dbError) {
+            console.error(`❌ Failed to update DB status after import error:`, dbError);
           }
-        }).catch(console.error);
+        });
       }
 
       res.status(201).json(jobFile);
