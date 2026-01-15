@@ -93,65 +93,69 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         return acc;
     }, {} as Record<string, ExtractedElement[]>);
 
-    // Get ALL image files that don't have completed extraction (show retry for anything not completed)
-    const extractableFiles = (files || []).filter(f =>
-        f.fileType.startsWith('image/') && f.extractionStatus !== 'completed'
-    );
+    // Get ALL image files - never hide any
+    const imageFiles = (files || []).filter(f => f.fileType.startsWith('image/'));
 
-    // Separate currently active processing from stuck ones (stuck = still processing)
+    // Check if mutation is currently running
     const activelyProcessing = extractMutation.isPending;
+
+    // Get status badge color and text
+    const getStatusInfo = (status: string | null) => {
+        switch (status) {
+            case 'completed':
+                return { bg: 'bg-green-900/20 border-green-500/30', icon: <CheckCircle2 className="h-5 w-5 text-green-400" />, text: 'Extracted', showBtn: false };
+            case 'processing':
+                return { bg: 'bg-amber-900/20 border-amber-500/30', icon: <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />, text: 'Processing...', showBtn: true };
+            case 'failed':
+                return { bg: 'bg-red-900/20 border-red-500/30', icon: <AlertCircle className="h-5 w-5 text-red-400" />, text: 'Failed - Retry', showBtn: true };
+            default:
+                return { bg: 'bg-slate-800 border-slate-700', icon: <Clock className="h-5 w-5 text-slate-400" />, text: `Ready (${status || 'null'})`, showBtn: true };
+        }
+    };
 
     return (
         <div className="space-y-6">
-            {/* Extraction Status Cards */}
-            {extractableFiles.length > 0 && (
+            {/* Debug: Show all image files */}
+            {imageFiles.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {extractableFiles.map(file => (
-                        <div key={file.id} className={`border rounded-lg p-4 flex items-center justify-between ${file.extractionStatus === 'processing'
-                            ? 'bg-amber-900/20 border-amber-500/30'
-                            : file.extractionStatus === 'failed'
-                                ? 'bg-red-900/20 border-red-500/30'
-                                : 'bg-slate-800 border-slate-700'
-                            }`}>
-                            <div className="flex items-center space-x-3">
-                                {file.extractionStatus === 'processing' ? (
-                                    <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
-                                ) : file.extractionStatus === 'failed' ? (
-                                    <AlertCircle className="h-5 w-5 text-red-400" />
-                                ) : (
-                                    <Clock className="h-5 w-5 text-slate-400" />
-                                )}
-                                <div>
-                                    <p className="text-sm font-medium text-slate-200">{file.originalName}</p>
-                                    <p className="text-xs text-slate-400">
-                                        {file.extractionStatus === 'processing'
-                                            ? 'Stuck processing - click Retry'
-                                            : file.extractionStatus === 'failed'
-                                                ? file.extractionError || 'Extraction failed'
-                                                : 'Ready for AI analysis'}
-                                    </p>
+                    {imageFiles.map(file => {
+                        const statusInfo = getStatusInfo(file.extractionStatus);
+                        return (
+                            <div key={file.id} className={`border rounded-lg p-4 flex items-center justify-between ${statusInfo.bg}`}>
+                                <div className="flex items-center space-x-3">
+                                    {statusInfo.icon}
+                                    <div>
+                                        <p className="text-sm font-medium text-slate-200">{file.originalName}</p>
+                                        <p className="text-xs text-slate-400">
+                                            {file.extractionStatus === 'failed'
+                                                ? file.extractionError || statusInfo.text
+                                                : statusInfo.text}
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
-                            <Button
-                                size="sm"
-                                variant={file.extractionStatus === 'processing' ? 'default' : 'outline'}
-                                className={file.extractionStatus === 'processing'
-                                    ? 'bg-amber-600 hover:bg-amber-700'
-                                    : 'border-slate-600'}
-                                onClick={() => extractMutation.mutate(file.id)}
-                                disabled={activelyProcessing}
-                            >
-                                {activelyProcessing ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                    <RefreshCw className="h-4 w-4" />
+                                {statusInfo.showBtn && (
+                                    <Button
+                                        size="sm"
+                                        variant={file.extractionStatus === 'processing' ? 'default' : 'outline'}
+                                        className={file.extractionStatus === 'processing'
+                                            ? 'bg-amber-600 hover:bg-amber-700'
+                                            : 'border-slate-600'}
+                                        onClick={() => extractMutation.mutate(file.id)}
+                                        disabled={activelyProcessing}
+                                    >
+                                        {activelyProcessing ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <RefreshCw className="h-4 w-4" />
+                                        )}
+                                        <span className="ml-2">
+                                            {file.extractionStatus === 'failed' ? 'Retry' : 'Extract'}
+                                        </span>
+                                    </Button>
                                 )}
-                                <span className="ml-2">
-                                    {file.extractionStatus === 'processing' ? 'Retry' : 'Extract'}
-                                </span>
-                            </Button>
-                        </div>
-                    ))}
+                            </div>
+                        );
+                    })}
                 </div>
             )}
 
