@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { JobWithContractor } from "@shared/schema";
 
 interface JobsTableProps {
@@ -14,9 +16,28 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
   const [_, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: jobs = [], isLoading } = useQuery<JobWithContractor[]>({
     queryKey: ['/api/jobs', { status: statusFilter === 'all' ? '' : statusFilter, search: searchTerm }],
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Delete failed');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/jobs'] });
+      toast({ title: "Job Deleted", description: "The job and all associated data have been removed." });
+    },
+    onError: (error) => {
+      toast({ title: "Delete Failed", description: error.message, variant: "destructive" });
+    },
   });
 
   const getStatusColor = (status: string) => {
@@ -169,6 +190,19 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
                     className="text-amber-600 hover:text-amber-900"
                   >
                     QS Tender
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm(`Delete "${job.title}"? This will remove all associated drawings, elements, and cost data.`)) {
+                        deleteMutation.mutate(job.id);
+                      }
+                    }}
+                    disabled={deleteMutation.isPending}
+                    className="text-red-600 hover:text-red-900 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </td>
               </tr>
