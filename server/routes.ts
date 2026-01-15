@@ -180,6 +180,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Room Work Packages endpoint (AGENTS.md compliant)
+  // Returns Room-based data: rooms -> elements -> payable items
+  app.get("/api/jobs/:id/rooms", async (req, res) => {
+    try {
+      const job = await storage.getJob(req.params.id);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      const { roomMapper } = await import("./room-mapper");
+      const roomData = await roomMapper.getRoomDataForJob(req.params.id);
+
+      // If no rooms exist yet, trigger room mapping from phase data
+      if (roomData.length === 0 && job.phaseTaskData) {
+        try {
+          const phaseData = JSON.parse(job.phaseTaskData);
+          if (phaseData.phases) {
+            console.log('🏠 Auto-generating rooms from phase data...');
+            await roomMapper.mapPhasesToRooms(req.params.id, phaseData.phases);
+            const newRoomData = await roomMapper.getRoomDataForJob(req.params.id);
+            return res.json({
+              jobId: job.id,
+              projectName: job.title,
+              rooms: newRoomData,
+              generatedAt: new Date().toISOString()
+            });
+          }
+        } catch (parseError) {
+          console.error('Error parsing phase data for room mapping:', parseError);
+        }
+      }
+
+      res.json({
+        jobId: job.id,
+        projectName: job.title,
+        rooms: roomData,
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error fetching room data:", error);
+      res.status(500).json({ error: "Failed to fetch room data" });
+    }
+  });
+
   app.put("/api/jobs/:id", async (req, res) => {
     try {
       const job = await storage.updateJob(req.params.id, req.body);
