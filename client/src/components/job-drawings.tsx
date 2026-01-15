@@ -42,7 +42,8 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || errorData.details || 'Upload failed');
+                // Prioritize details to show specific server error
+                throw new Error(errorData.details || errorData.error || 'Upload failed');
             }
 
             return response.json();
