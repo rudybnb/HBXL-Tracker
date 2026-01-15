@@ -77,6 +77,26 @@ export const jobFiles = pgTable("job_files", {
   fileUrl: text("file_url").notNull(),
   fileType: text("file_type").notNull(), // "image/png", "application/pdf"
   uploadedBy: text("uploaded_by").default("user"),
+  extractionStatus: text("extraction_status").default("pending"), // "pending", "processing", "completed", "failed"
+  extractionError: text("extraction_error"), // Error message if extraction failed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// AI Extraction - Stores elements extracted from drawings by GPT-4 Vision
+export const extractedElements = pgTable("extracted_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").notNull().references(() => jobs.id),
+  fileId: varchar("file_id").notNull().references(() => jobFiles.id),
+  elementType: text("element_type").notNull(), // "door", "window", "wall", "floor", "ceiling", "roof", "structural"
+  elementCode: text("element_code"), // "D01", "W03", "W-BATH-01"
+  description: text("description").notNull(),
+  dimensions: text("dimensions"), // "900x2100mm"
+  quantity: text("quantity").default("1"),
+  location: text("location"), // "Bathroom", "First Floor", etc.
+  material: text("material"), // "Softwood", "uPVC", "Plasterboard"
+  notes: text("notes"), // Additional notes from drawing
+  linkedCostItemId: varchar("linked_cost_item_id").references(() => jobCostItems.id), // Link to cost item if matched
+  rawJson: text("raw_json"), // Full AI response for debugging
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

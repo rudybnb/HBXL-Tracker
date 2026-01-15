@@ -14,7 +14,7 @@ interface SessionRequest extends Express.Request {
 }
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, extractedElements, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
 import multer from "multer";
@@ -271,18 +271,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
+      // Generate unique filename to avoid collisions
+      const uniqueFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(req.file.originalname)}`;
+      const filePath = path.join(uploadsDir, uniqueFilename);
+
+      // Write file to disk
+      fs.writeFileSync(filePath, req.file.buffer);
+
       const jobFile = await storage.createJobFile({
         jobId: req.params.id,
-        filename: req.file.originalname,
+        filename: uniqueFilename,
         originalName: req.file.originalname,
-        fileUrl: `/uploads/${req.file.originalname}`,
+        fileUrl: `/uploads/${uniqueFilename}`,
         fileType: req.file.mimetype,
         uploadedBy: "user"
       });
 
-      // Write file to disk
-      const filePath = path.join(uploadsDir, req.file.originalname);
-      fs.writeFileSync(filePath, req.file.buffer);
+      // Trigger async AI extraction for image files
+      if (req.file.mimetype.startsWith('image/')) {
+        console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
+
+        // Import and run extraction asynchronously (don't await)
+        import('./drawing-extraction-agent').then(async (agent) => {
+          try {
+            // Update status to processing
+            await db.update(jobFiles)
+              .set({ extractionStatus: 'processing' })
+              .where(eq(jobFiles.id, jobFile.id));
+
+            const result = await agent.extractFromImage(filePath);
+
+            if (result.success && result.elements.length > 0) {
+              // Store extracted elements
+              for (const element of result.elements) {
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: element.elementType,
+                  elementCode: element.elementCode,
+                  description: element.description,
+                  dimensions: element.dimensions,
+                  quantity: String(element.quantity),
+                  location: element.location,
+                  material: element.material,
+                  notes: element.notes,
+                  rawJson: JSON.stringify(element)
+                });
+              }
+
+              // Update status to completed
+              await db.update(jobFiles)
+                .set({ extractionStatus: 'completed' })
+                .where(eq(jobFiles.id, jobFile.id));
+
+              console.log(`✅ Extracted ${result.elements.length} elements from ${uniqueFilename}`);
+            } else {
+              // Update status to failed
+              await db.update(jobFiles)
+                .set({
+                  extractionStatus: 'failed',
+                  extractionError: result.error || 'No elements found'
+                })
+                .where(eq(jobFiles.id, jobFile.id));
+
+              console.log(`⚠️ Extraction failed for ${uniqueFilename}: ${result.error}`);
+            }
+          } catch (extractError) {
+            console.error(`❌ Extraction error for ${uniqueFilename}:`, extractError);
+            await db.update(jobFiles)
+              .set({
+                extractionStatus: 'failed',
+                extractionError: extractError instanceof Error ? extractError.message : String(extractError)
+              })
+              .where(eq(jobFiles.id, jobFile.id));
+          }
+        }).catch(console.error);
+      }
 
       res.status(201).json(jobFile);
     } catch (error) {
@@ -294,8 +358,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get extracted elements for a job
+  app.get("/api/jobs/:id/elements", async (req, res) => {
+    try {
+      const elements = await db.select()
+        .from(extractedElements)
+        .where(eq(extractedElements.jobId, req.params.id));
+      res.json(elements);
+    } catch (error) {
+      console.error("Error fetching elements:", error);
+      res.status(500).json({ error: "Failed to fetch elements" });
+    }
+  });
+
+  // Manually trigger extraction for a file
+  app.post("/api/files/:id/extract", async (req, res) => {
+    try {
+      const [file] = await db.select().from(jobFiles).where(eq(jobFiles.id, req.params.id));
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      // Only extract from images
+      if (!file.fileType.startsWith('image/')) {
+        return res.status(400).json({ error: "Only image files can be extracted" });
+      }
+
+      // Update status to processing
+      await db.update(jobFiles)
+        .set({ extractionStatus: 'processing', extractionError: null })
+        .where(eq(jobFiles.id, file.id));
+
+      // Run extraction
+      const agent = await import('./drawing-extraction-agent');
+      const filePath = path.join(uploadsDir, file.filename);
+      const result = await agent.extractFromImage(filePath);
+
+      if (result.success && result.elements.length > 0) {
+        // Clear old elements for this file
+        await db.delete(extractedElements).where(eq(extractedElements.fileId, file.id));
+
+        // Store new extracted elements
+        for (const element of result.elements) {
+          await db.insert(extractedElements).values({
+            jobId: file.jobId,
+            fileId: file.id,
+            elementType: element.elementType,
+            elementCode: element.elementCode,
+            description: element.description,
+            dimensions: element.dimensions,
+            quantity: String(element.quantity),
+            location: element.location,
+            material: element.material,
+            notes: element.notes,
+            rawJson: JSON.stringify(element)
+          });
+        }
+
+        await db.update(jobFiles)
+          .set({ extractionStatus: 'completed' })
+          .where(eq(jobFiles.id, file.id));
+
+        res.json({ success: true, elementsExtracted: result.elements.length });
+      } else {
+        await db.update(jobFiles)
+          .set({
+            extractionStatus: 'failed',
+            extractionError: result.error || 'No elements found'
+          })
+          .where(eq(jobFiles.id, file.id));
+
+        res.json({ success: false, error: result.error || 'No elements found' });
+      }
+    } catch (error) {
+      console.error("Manual extraction error:", error);
+      res.status(500).json({
+        error: "Extraction failed",
+        details: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   app.delete("/api/files/:id", async (req, res) => {
     try {
+      // Delete associated extracted elements first
+      await db.delete(extractedElements).where(eq(extractedElements.fileId, req.params.id));
+
       await storage.deleteJobFile(req.params.id);
       res.status(204).send();
     } catch (error) {
