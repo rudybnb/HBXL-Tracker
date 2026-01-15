@@ -507,8 +507,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('🔄 Converted Excel to CSV format');
       } else {
         // Parse CSV with specific handling for your format
-        csvContent = req.file.buffer.toString();
-        console.log('📄 Processing CSV file:', req.file.originalname);
+        // HBXL exports use Windows-1252/Latin-1 encoding for £ symbols
+        // Try UTF-8 first, if £ is corrupted, use Latin-1
+        let utf8Content = req.file.buffer.toString('utf8');
+
+        // Check if £ symbol is corrupted (appears as replacement character)
+        if (utf8Content.includes('�') || !utf8Content.includes('£')) {
+          // Use Latin-1 encoding which properly handles £ (0xA3)
+          csvContent = req.file.buffer.toString('latin1');
+          console.log('📄 Processing CSV file (Latin-1 encoding):', req.file.originalname);
+        } else {
+          csvContent = utf8Content;
+          console.log('📄 Processing CSV file (UTF-8 encoding):', req.file.originalname);
+        }
       }
 
       console.log('🔍 Raw Content:', csvContent.substring(0, 500) + '...');
