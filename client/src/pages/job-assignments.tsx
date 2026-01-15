@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import JobsTable from "@/components/jobs-table";
 
 function LogoutButton() {
   const handleLogout = () => {
@@ -53,14 +55,14 @@ export default function JobAssignments() {
       const response = await fetch(`/api/job-assignments/${assignmentId}`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to delete assignment');
       }
-      
+
       // Refresh the assignments list
       refetch();
-      
+
       toast({
         title: "Assignment Deleted",
         description: "Job assignment has been removed successfully.",
@@ -82,7 +84,7 @@ export default function JobAssignments() {
     }
 
     setExpandedAssignment(assignmentId);
-    
+
     // Load completed tasks for this assignment
     try {
       const assignment = assignments.find((a: any) => a.id === assignmentId);
@@ -172,7 +174,7 @@ export default function JobAssignments() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <LogoutButton />
-      
+
       {/* Header */}
       <div className="bg-slate-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -198,7 +200,7 @@ export default function JobAssignments() {
         {/* Page Title */}
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-yellow-400">Job Assignments</h1>
-          <Button 
+          <Button
             onClick={() => window.location.href = '/create-assignment'}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg flex items-center"
           >
@@ -212,7 +214,7 @@ export default function JobAssignments() {
           <div className="p-4 border-b border-slate-700">
             <h2 className="text-xl font-semibold text-yellow-400">Current Assignments</h2>
           </div>
-          
+
           <div className="p-4">
             {/* Search Box */}
             <div className="mb-6">
@@ -233,7 +235,7 @@ export default function JobAssignments() {
             ) : filteredAssignments && filteredAssignments.length > 0 ? (
               <div className="space-y-4">
                 {filteredAssignments.map((assignment: any, index: number) => (
-                  <div 
+                  <div
                     key={index}
                     className="bg-slate-700 rounded-lg p-4 border border-slate-600"
                   >
@@ -297,7 +299,7 @@ export default function JobAssignments() {
                       <div>
                         <div className="text-xs text-slate-400">Actions</div>
                         <div className="flex space-x-2">
-                          <button 
+                          <button
                             onClick={() => toggleInspectionView(assignment.id)}
                             className="text-yellow-400 hover:text-yellow-300 text-sm underline"
                           >
@@ -365,7 +367,7 @@ export default function JobAssignments() {
                                 </div>
                               </div>
                             </div>
-                            
+
                             {/* Task Inspection Cards */}
                             <div className="space-y-3 sm:space-y-4">
                               {completedTasks.map((task: any) => (
@@ -403,11 +405,10 @@ export default function JobAssignments() {
                                       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                                         <button
                                           onClick={() => setInspectionStatus(prev => ({ ...prev, [task.taskId]: 'approved' }))}
-                                          className={`px-3 sm:px-4 py-2 sm:py-3 rounded-lg font-medium transition-all duration-200 text-sm sm:text-base ${
-                                            inspectionStatus[task.taskId] === 'approved'
-                                              ? 'bg-green-600 text-white shadow-lg shadow-green-600/25 border-2 border-green-500'
-                                              : 'bg-slate-700 text-slate-300 hover:bg-green-700 hover:text-white border-2 border-slate-600'
-                                          }`}
+                                          className={`px-3 sm:px-4 py-2 sm:py-3 rounded-lg font-medium transition-all duration-200 text-sm sm:text-base ${inspectionStatus[task.taskId] === 'approved'
+                                            ? 'bg-green-600 text-white shadow-lg shadow-green-600/25 border-2 border-green-500'
+                                            : 'bg-slate-700 text-slate-300 hover:bg-green-700 hover:text-white border-2 border-slate-600'
+                                            }`}
                                         >
                                           <i className="fas fa-check-circle mr-2"></i>
                                           <span className="hidden sm:inline">Approve Work</span>
@@ -415,11 +416,10 @@ export default function JobAssignments() {
                                         </button>
                                         <button
                                           onClick={() => setInspectionStatus(prev => ({ ...prev, [task.taskId]: 'issues' }))}
-                                          className={`px-3 sm:px-4 py-2 sm:py-3 rounded-lg font-medium transition-all duration-200 text-sm sm:text-base ${
-                                            inspectionStatus[task.taskId] === 'issues'
-                                              ? 'bg-red-600 text-white shadow-lg shadow-red-600/25 border-2 border-red-500'
-                                              : 'bg-slate-700 text-slate-300 hover:bg-red-700 hover:text-white border-2 border-slate-600'
-                                          }`}
+                                          className={`px-3 sm:px-4 py-2 sm:py-3 rounded-lg font-medium transition-all duration-200 text-sm sm:text-base ${inspectionStatus[task.taskId] === 'issues'
+                                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/25 border-2 border-red-500'
+                                            : 'bg-slate-700 text-slate-300 hover:bg-red-700 hover:text-white border-2 border-slate-600'
+                                            }`}
                                         >
                                           <i className="fas fa-exclamation-triangle mr-2"></i>
                                           <span className="hidden sm:inline">Requires Attention</span>
@@ -432,7 +432,7 @@ export default function JobAssignments() {
                                         </button>
                                       </div>
                                     </div>
-                                    
+
                                     {/* Notes Section */}
                                     <div>
                                       <label className="block text-slate-300 font-medium mb-2 text-sm sm:text-base">Inspection Notes</label>
@@ -489,7 +489,7 @@ export default function JobAssignments() {
                             </div>
                             <h4 className="text-white text-base sm:text-lg font-medium mb-2">No Tasks Ready for Inspection</h4>
                             <p className="text-slate-400 text-xs sm:text-sm max-w-md mx-auto px-4">
-                              Completed tasks will appear here automatically once contractors mark them as 100% finished. 
+                              Completed tasks will appear here automatically once contractors mark them as 100% finished.
                               Check back later or contact the contractor for status updates.
                             </p>
                           </div>
@@ -510,42 +510,44 @@ export default function JobAssignments() {
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700">
-        <div className="grid grid-cols-4 text-center">
-          <button 
-            onClick={() => window.location.href = '/'}
-            className="py-3 px-4 text-slate-400 hover:text-white"
-          >
-            <i className="fas fa-home block mb-1"></i>
-            <span className="text-xs">Dashboard</span>
-          </button>
-          <button className="py-3 px-4 text-yellow-400">
-            <i className="fas fa-briefcase block mb-1"></i>
-            <span className="text-xs">Jobs</span>
-          </button>
-          <button 
-            onClick={() => window.location.href = '/admin-task-monitor'}
-            className="py-3 px-4 text-slate-400 hover:text-white"
-          >
-            <i className="fas fa-user-cog block mb-1"></i>
-            <span className="text-xs">Admin</span>
-          </button>
-          <button 
-            onClick={() => window.location.href = '/upload'}
-            className="py-3 px-4 text-slate-400 hover:text-white"
-          >
-            <i className="fas fa-upload block mb-1"></i>
-            <span className="text-xs">Upload</span>
-          </button>
-        </div>
-      </div>
-      
-      {/* Add bottom padding to account for fixed navigation */}
-      <div className="h-20"></div>
+        </TabsContent>
+      </Tabs>
     </div>
+      </div >
+
+    {/* Bottom Navigation */ }
+    < div className = "fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700" >
+      <div className="grid grid-cols-4 text-center">
+        <button
+          onClick={() => window.location.href = '/'}
+          className="py-3 px-4 text-slate-400 hover:text-white"
+        >
+          <i className="fas fa-home block mb-1"></i>
+          <span className="text-xs">Dashboard</span>
+        </button>
+        <button className="py-3 px-4 text-yellow-400">
+          <i className="fas fa-briefcase block mb-1"></i>
+          <span className="text-xs">Jobs</span>
+        </button>
+        <button
+          onClick={() => window.location.href = '/admin-task-monitor'}
+          className="py-3 px-4 text-slate-400 hover:text-white"
+        >
+          <i className="fas fa-user-cog block mb-1"></i>
+          <span className="text-xs">Admin</span>
+        </button>
+        <button
+          onClick={() => window.location.href = '/upload'}
+          className="py-3 px-4 text-slate-400 hover:text-white"
+        >
+          <i className="fas fa-upload block mb-1"></i>
+          <span className="text-xs">Upload</span>
+        </button>
+      </div>
+      </div >
+
+    {/* Add bottom padding to account for fixed navigation */ }
+    < div className = "h-20" ></div >
+    </div >
   );
 }
