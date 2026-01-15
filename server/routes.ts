@@ -607,13 +607,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let totalPlant = 0;
           let totalSubcontractor = 0;
 
+          // Helper function to properly parse CSV with quoted values containing commas
+          const parseCSVLine = (line: string): string[] => {
+            const result: string[] = [];
+            let current = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                result.push(current.trim().replace(/^"|"$/g, ''));
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            result.push(current.trim().replace(/^"|"$/g, ''));
+            return result;
+          };
+
+          // First, check for a Grand Total row to validate our parsing
+          let csvGrandTotal = 0;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i];
+            if (line.startsWith('Grand Total')) {
+              const columns = parseCSVLine(line);
+              // Grand Total row has the total in the last column
+              const lastCol = columns[columns.length - 1];
+              if (lastCol) {
+                csvGrandTotal = parseFloat(lastCol.replace(/[£,]/g, ''));
+                console.log(`📊 Found Grand Total row: £${csvGrandTotal.toFixed(2)}`);
+              }
+              break;
+            }
+          }
+
           // Parse data rows
           for (let i = materialsFormatIndex + 1; i < lines.length; i++) {
             const line = lines[i];
             if (!line || line.trim() === '') continue;
 
-            // Split by comma but respect quoted strings
-            const columns = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+            // Skip the Grand Total row - we extracted it already
+            if (line.startsWith('Grand Total')) continue;
+
+            // Properly split CSV respecting quoted values
+            const columns = parseCSVLine(line);
 
             const workType = columns[0] || '';
             if (!workType || workType === '') continue;
@@ -625,7 +665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             let unit = 'Each';
             for (let c = 7; c < 10 && c < columns.length; c++) {
               const val = columns[c]?.trim();
-              if (val && ['Each', 'Hours', 'Week', 'Day', 'm²', 'm³'].includes(val)) {
+              if (val && ['Each', 'Hours', 'Week', 'Day', 'm²', 'm³', 'm', 'Unit'].includes(val)) {
                 unit = val;
                 break;
               }
@@ -700,14 +740,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
 
-          const grandTotal = totalLabour + totalMaterial + totalPlant + totalSubcontractor;
+          // Use csvGrandTotal if found, otherwise use calculated sum
+          const calculatedTotal = totalLabour + totalMaterial + totalPlant + totalSubcontractor;
+          const grandTotal = csvGrandTotal > 0 ? csvGrandTotal : calculatedTotal;
 
           console.log('💰 MATERIALS FORMAT TOTALS:', {
+            csvGrandTotal: csvGrandTotal > 0 ? `£${csvGrandTotal.toFixed(2)}` : 'Not found',
+            calculatedTotal: `£${calculatedTotal.toFixed(2)}`,
+            usingGrandTotal: `£${grandTotal.toFixed(2)}`,
             totalLabour: `£${totalLabour.toFixed(2)}`,
             totalMaterial: `£${totalMaterial.toFixed(2)}`,
             totalPlant: `£${totalPlant.toFixed(2)}`,
             totalSubcontractor: `£${totalSubcontractor.toFixed(2)}`,
-            grandTotal: `£${grandTotal.toFixed(2)}`,
             phases: phases.length,
             totalItems: Object.values(phaseData).reduce((sum, items) => sum + items.length, 0)
           });
