@@ -1,22 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
-interface ExtractedElement {
+// Room extracted from drawing (costs come from CSV)
+interface ExtractedRoom {
     id: string;
-    elementType: string;
-    elementCode: string | null;
-    description: string;
-    dimensions: string | null;
-    quantity: string;
-    unit: string | null;
-    rate: string | null;
-    total: string | null;
-    roomName: string | null;
-    location: string | null;
-    material: string | null;
-    notes: string | null;
+    name: string;
+    floor: string;
+    status: string;
     createdAt: string;
 }
 
@@ -35,21 +27,6 @@ interface ExtractedElementsPanelProps {
     files?: JobFile[];
 }
 
-const ELEMENT_TYPE_COLORS: Record<string, string> = {
-    door: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-    window: "bg-sky-500/20 text-sky-400 border-sky-500/30",
-    wall: "bg-slate-500/20 text-slate-400 border-slate-500/30",
-    floor: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-    ceiling: "bg-violet-500/20 text-violet-400 border-violet-500/30",
-    roof: "bg-red-500/20 text-red-400 border-red-500/30",
-    structural: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-    electrical: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-    plumbing: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-    fixture: "bg-pink-500/20 text-pink-400 border-pink-500/30",
-    finish: "bg-teal-500/20 text-teal-400 border-teal-500/30",
-    other: "bg-gray-500/20 text-gray-400 border-gray-500/30",
-};
-
 export default function ExtractedElementsPanel({ jobId, files }: ExtractedElementsPanelProps) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -59,11 +36,10 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
     // Count completed files to detect when extraction finishes
     const completedCount = (files || []).filter(f => f.extractionStatus === 'completed').length;
 
-    const { data: elements, isLoading, refetch } = useQuery<ExtractedElement[]>({
-        queryKey: [`/api/jobs/${jobId}/elements`, { completedCount }],
-        // Override staleTime to always refetch
+    // Fetch ROOMS from drawing extraction (not fake elements)
+    const { data: rooms, isLoading } = useQuery<ExtractedRoom[]>({
+        queryKey: [`/api/jobs/${jobId}/rooms`, { completedCount }],
         staleTime: 0,
-        // Refetch elements every 3 seconds while files are processing
         refetchInterval: hasProcessing ? 3000 : false,
     });
 
@@ -79,12 +55,12 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
             return response.json();
         },
         onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/elements`] });
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/rooms`] });
             queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/files`] });
             toast({
                 title: data.success ? "Extraction Complete" : "Extraction Issue",
                 description: data.success
-                    ? `Found ${data.elementsExtracted} elements`
+                    ? `Identified ${data.roomsIdentified || 0} rooms`
                     : data.error,
                 variant: data.success ? "default" : "destructive",
             });
@@ -97,22 +73,6 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
             });
         },
     });
-
-    // Group elements by room (AGENTS.md compliant)
-    const groupedByRoom = (elements || []).reduce((acc, el) => {
-        const room = el.roomName || el.location || 'General';
-        if (!acc[room]) acc[room] = [];
-        acc[room].push(el);
-        return acc;
-    }, {} as Record<string, ExtractedElement[]>);
-
-    // Calculate room and project totals
-    const roomTotals = Object.entries(groupedByRoom).map(([room, items]) => ({
-        room,
-        items,
-        total: items.reduce((sum, el) => sum + (parseFloat(el.total || '0') || 0), 0)
-    }));
-    const projectTotal = roomTotals.reduce((sum, r) => sum + r.total, 0);
 
     // Get ALL image files - never hide any
     const imageFiles = (files || []).filter(f => f.fileType.startsWith('image/'));
@@ -180,98 +140,53 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                 </div>
             )}
 
-            {/* Bill of Quantities Table (AGENTS.md Format) */}
+            {/* Rooms Identified from Drawing */}
             {isLoading ? (
                 <div className="flex justify-center py-12">
                     <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                 </div>
-            ) : elements && elements.length > 0 ? (
+            ) : rooms && rooms.length > 0 ? (
                 <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-slate-200 flex items-center">
-                            <Layers className="h-5 w-5 mr-2 text-amber-500" />
-                            Bill of Quantities ({elements.length} items)
-                        </h3>
-                        <span className="text-lg font-bold text-amber-400">
-                            £{projectTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                    </div>
+                    <h3 className="text-lg font-semibold text-slate-200 flex items-center">
+                        <Home className="h-5 w-5 mr-2 text-amber-500" />
+                        Rooms Identified ({rooms.length})
+                    </h3>
+                    <p className="text-sm text-slate-400">
+                        These rooms were detected from the uploaded drawing. HBXL costs will be allocated to these rooms.
+                    </p>
 
-                    {/* Table */}
-                    <div className="bg-slate-900/50 border border-slate-700 rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                            <thead className="bg-slate-800 text-slate-300">
-                                <tr>
-                                    <th className="text-left px-4 py-3 font-medium">Room</th>
-                                    <th className="text-left px-4 py-3 font-medium">Item</th>
-                                    <th className="text-right px-4 py-3 font-medium">Qty</th>
-                                    <th className="text-right px-4 py-3 font-medium">Rate</th>
-                                    <th className="text-right px-4 py-3 font-medium">Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {roomTotals.map(({ room, items, total: roomTotal }) => (
-                                    <>
-                                        {items.map((element, idx) => (
-                                            <tr key={element.id} className="border-t border-slate-700/50 hover:bg-slate-800/30">
-                                                {idx === 0 ? (
-                                                    <td className="px-4 py-3 font-medium text-amber-400" rowSpan={items.length}>
-                                                        {room}
-                                                    </td>
-                                                ) : null}
-                                                <td className="px-4 py-3 text-slate-200">
-                                                    {element.elementCode && (
-                                                        <span className="text-xs font-mono bg-slate-700 text-amber-400 px-1 py-0.5 rounded mr-2">
-                                                            {element.elementCode}
-                                                        </span>
-                                                    )}
-                                                    {element.description}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-slate-300">
-                                                    {element.quantity} {element.unit || ''}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-slate-400">
-                                                    {parseFloat(element.rate || '0') > 0 ? `£${parseFloat(element.rate || '0').toFixed(2)}` : '-'}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-slate-200 font-medium">
-                                                    {parseFloat(element.total || '0') > 0 ? `£${parseFloat(element.total || '0').toFixed(2)}` : '-'}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                        {/* Room Subtotal */}
-                                        <tr className="bg-slate-800/50 border-t border-slate-600">
-                                            <td colSpan={4} className="px-4 py-2 text-right text-slate-400 font-medium">
-                                                {room} Subtotal:
-                                            </td>
-                                            <td className="px-4 py-2 text-right text-amber-400 font-bold">
-                                                £{roomTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </td>
-                                        </tr>
-                                    </>
-                                ))}
-                            </tbody>
-                            <tfoot className="bg-slate-800 border-t-2 border-amber-500/50">
-                                <tr>
-                                    <td colSpan={4} className="px-4 py-3 text-right font-bold text-slate-200">
-                                        Project Total:
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-lg font-bold text-amber-400">
-                                        £{projectTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                </tr>
-                            </tfoot>
-                        </table>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {rooms.map(room => (
+                            <div
+                                key={room.id}
+                                className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
+                            >
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <h4 className="text-lg font-medium text-amber-400">{room.name}</h4>
+                                        <p className="text-sm text-slate-400">{room.floor} Floor</p>
+                                    </div>
+                                    <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
+                                            room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
+                                                'bg-slate-500/20 text-slate-400'
+                                        }`}>
+                                        {room.status === 'not_started' ? 'Not Started' : room.status}
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             ) : (
                 <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700/50">
-                    <Layers className="h-12 w-12 text-slate-600 mx-auto mb-3" />
-                    <p className="text-slate-400 mb-2">No elements extracted yet</p>
+                    <Home className="h-12 w-12 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-400 mb-2">No rooms identified yet</p>
                     <p className="text-sm text-slate-500">
-                        Upload a construction drawing (image) to automatically extract elements
+                        Upload a construction drawing to identify rooms for cost allocation
                     </p>
                 </div>
             )}
         </div>
     );
 }
+
