@@ -63,6 +63,71 @@ export class QSCalculator {
             console.error("Failed to parse job phase data", e);
         }
 
+        // Check if this is Materials Used format (Job 49 style)
+        // These have financials with totalLabour, totalMaterial, etc.
+        if (resourceData.financials && resourceData.financials.grandTotal) {
+            console.log("📊 Using MATERIALS USED format for QS Tender");
+
+            const sections: QSSection[] = [];
+            let grandTotal = 0;
+
+            // Add financial summary section first
+            const financials = resourceData.financials;
+            sections.push({
+                id: 'financial-summary',
+                title: 'FINANCIAL SUMMARY',
+                description: 'Cost breakdown by category',
+                total: (financials.grandTotal || 0) / 100,
+                items: [
+                    { element: 'LABOUR', description: 'All labour costs', quantity: 1, unit: 'Sum', rate: 0, total: (financials.totalLabour || 0) / 100, isCalculated: false },
+                    { element: 'MATERIAL', description: 'All material costs', quantity: 1, unit: 'Sum', rate: 0, total: (financials.totalMaterial || 0) / 100, isCalculated: false },
+                    { element: 'PLANT', description: 'Plant and equipment', quantity: 1, unit: 'Sum', rate: 0, total: (financials.totalPlant || 0) / 100, isCalculated: false },
+                    { element: 'SUBCONTRACTOR', description: 'Subcontractor costs', quantity: 1, unit: 'Sum', rate: 0, total: (financials.totalSubcontractor || 0) / 100, isCalculated: false }
+                ]
+            });
+
+            // Group items by work phase from the phases object
+            const phases = resourceData.phases || {};
+
+            for (const [phaseName, items] of Object.entries(phases) as [string, any[]][]) {
+                const sectionItems: QSItem[] = [];
+                let sectionTotal = 0;
+
+                for (const item of items) {
+                    const itemTotal = (item.total || 0) / 100; // Convert from pence to pounds
+                    sectionTotal += itemTotal;
+
+                    sectionItems.push({
+                        element: item.category || 'MATERIAL',
+                        description: item.description || 'Unknown',
+                        quantity: item.quantity || 1,
+                        unit: item.unit || 'Each',
+                        rate: (item.rate || 0) / 100, // Convert from pence
+                        total: itemTotal,
+                        isCalculated: false // This is actual data, not estimated
+                    });
+                }
+
+                sections.push({
+                    id: `section-${phaseName.toLowerCase().replace(/\s+/g, '-')}`,
+                    title: phaseName.toUpperCase(),
+                    description: `${sectionItems.length} items`,
+                    total: sectionTotal,
+                    items: sectionItems
+                });
+
+                grandTotal += sectionTotal;
+            }
+
+            return {
+                projectId: job.id.toString(),
+                projectName: job.title || "Project " + job.id,
+                generatedAt: new Date().toISOString(),
+                grandTotal: (financials.grandTotal || 0) / 100,
+                sections
+            };
+        }
+
         // Helper to find resources by Phase Name
         // The "enhanced" import stores phases in `phases` object
         // usage: getItems("Footings")

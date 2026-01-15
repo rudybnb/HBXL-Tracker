@@ -542,8 +542,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const extracted = line.substring(line.indexOf(',') + 1).replace(/,+$/, '').trim();
             jobAddress = extracted || "Data Missing from CSV";
             console.log(`📍 Extracted job address: "${jobAddress}"`);
-          } else if (line.startsWith('Post Code ,') || line.startsWith('Post code,')) {
-            // Extract everything after "Post code," and remove trailing commas - handle space in "Post Code "
+          } else if (line.startsWith('Post Code ,') || line.startsWith('Post code,') || line.startsWith('Post Code,') || line.toLowerCase().startsWith('postcode,')) {
+            // Extract everything after "Post code," and remove trailing commas - handle all variations
             const colonIndex = line.indexOf(',');
             const extracted = line.substring(colonIndex + 1).replace(/,+$/, '').trim().toUpperCase();
             jobPostcode = extracted || "Data Missing from CSV";
