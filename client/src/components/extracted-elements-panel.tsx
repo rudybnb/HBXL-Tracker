@@ -36,12 +36,19 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
     // Count completed files to detect when extraction finishes
     const completedCount = (files || []).filter(f => f.extractionStatus === 'completed').length;
 
+    // API returns { rooms: [...] } so we need to select the rooms array
+    interface RoomsResponse {
+        rooms: ExtractedRoom[];
+    }
+
     // Fetch ROOMS from drawing extraction (not fake elements)
-    const { data: rooms, isLoading } = useQuery<ExtractedRoom[]>({
+    const { data: roomsData, isLoading } = useQuery<RoomsResponse>({
         queryKey: [`/api/jobs/${jobId}/rooms`, { completedCount }],
         staleTime: 0,
         refetchInterval: hasProcessing ? 3000 : false,
     });
+
+    const rooms = roomsData?.rooms || [];
 
     const extractMutation = useMutation({
         mutationFn: async (fileId: string) => {
@@ -167,8 +174,8 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                                         <p className="text-sm text-slate-400">{room.floor} Floor</p>
                                     </div>
                                     <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
-                                            room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
-                                                'bg-slate-500/20 text-slate-400'
+                                        room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
+                                            'bg-slate-500/20 text-slate-400'
                                         }`}>
                                         {room.status === 'not_started' ? 'Not Started' : room.status}
                                     </span>
