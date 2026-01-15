@@ -16,7 +16,11 @@ function getOpenAIClient(): OpenAI {
         if (!apiKey) {
             throw new Error('OPENAI_API_KEY environment variable is not set. Please add it to your Render environment variables.');
         }
-        openai = new OpenAI({ apiKey });
+        openai = new OpenAI({
+            apiKey,
+            timeout: 60000,  // 60 second timeout to prevent infinite hangs
+            maxRetries: 2    // Retry failed requests up to 2 times
+        });
     }
     return openai;
 }
