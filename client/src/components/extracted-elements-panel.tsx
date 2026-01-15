@@ -52,9 +52,13 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
 
     // Check if any file is still processing
     const hasProcessing = (files || []).some(f => f.extractionStatus === 'processing');
+    // Count completed files to detect when extraction finishes
+    const completedCount = (files || []).filter(f => f.extractionStatus === 'completed').length;
 
-    const { data: elements, isLoading } = useQuery<ExtractedElement[]>({
-        queryKey: [`/api/jobs/${jobId}/elements`],
+    const { data: elements, isLoading, refetch } = useQuery<ExtractedElement[]>({
+        queryKey: [`/api/jobs/${jobId}/elements`, { completedCount }],
+        // Override staleTime to always refetch
+        staleTime: 0,
         // Refetch elements every 3 seconds while files are processing
         refetchInterval: hasProcessing ? 3000 : false,
     });
