@@ -64,6 +64,20 @@ export async function initManusSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL
     `);
 
+    // Create job_files table if it doesn't exist (Fallback for migration failures)
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS job_files (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        job_id VARCHAR(36) NOT NULL REFERENCES jobs(id),
+        filename TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        file_url TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        uploaded_by TEXT DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `);
+
     console.log('✅ Manus-n8n schema initialized successfully');
   } catch (error) {
     console.log('⚠️ Some Manus-n8n schema elements may already exist:', error);
