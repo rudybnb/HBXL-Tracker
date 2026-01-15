@@ -93,10 +93,9 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         return acc;
     }, {} as Record<string, ExtractedElement[]>);
 
-    // Get files that can be (re)extracted - include processing for retry
+    // Get ALL image files that don't have completed extraction (show retry for anything not completed)
     const extractableFiles = (files || []).filter(f =>
-        f.fileType.startsWith('image/') &&
-        (f.extractionStatus === 'pending' || f.extractionStatus === 'failed' || f.extractionStatus === 'processing')
+        f.fileType.startsWith('image/') && f.extractionStatus !== 'completed'
     );
 
     // Separate currently active processing from stuck ones (stuck = still processing)
@@ -109,10 +108,10 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {extractableFiles.map(file => (
                         <div key={file.id} className={`border rounded-lg p-4 flex items-center justify-between ${file.extractionStatus === 'processing'
-                                ? 'bg-amber-900/20 border-amber-500/30'
-                                : file.extractionStatus === 'failed'
-                                    ? 'bg-red-900/20 border-red-500/30'
-                                    : 'bg-slate-800 border-slate-700'
+                            ? 'bg-amber-900/20 border-amber-500/30'
+                            : file.extractionStatus === 'failed'
+                                ? 'bg-red-900/20 border-red-500/30'
+                                : 'bg-slate-800 border-slate-700'
                             }`}>
                             <div className="flex items-center space-x-3">
                                 {file.extractionStatus === 'processing' ? (
