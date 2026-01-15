@@ -498,7 +498,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       console.error("Error uploading CSV:", error);
-      res.status(500).json({ error: "Failed to upload CSV file" });
+      res.status(500).json({
+        error: "Failed to upload CSV file",
+        details: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   });
 
