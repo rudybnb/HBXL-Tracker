@@ -50,8 +50,13 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
     const { toast } = useToast();
     const queryClient = useQueryClient();
 
+    // Check if any file is still processing
+    const hasProcessing = (files || []).some(f => f.extractionStatus === 'processing');
+
     const { data: elements, isLoading } = useQuery<ExtractedElement[]>({
         queryKey: [`/api/jobs/${jobId}/elements`],
+        // Refetch elements every 3 seconds while files are processing
+        refetchInterval: hasProcessing ? 3000 : false,
     });
 
     const extractMutation = useMutation({
