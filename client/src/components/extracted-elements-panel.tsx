@@ -93,35 +93,31 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         return acc;
     }, {} as Record<string, ExtractedElement[]>);
 
-    // Get files that can be extracted (images with pending/failed status)
+    // Get files that can be (re)extracted - include processing for retry
     const extractableFiles = (files || []).filter(f =>
         f.fileType.startsWith('image/') &&
-        (f.extractionStatus === 'pending' || f.extractionStatus === 'failed')
+        (f.extractionStatus === 'pending' || f.extractionStatus === 'failed' || f.extractionStatus === 'processing')
     );
 
-    const processingFiles = (files || []).filter(f =>
-        f.extractionStatus === 'processing'
-    );
+    // Separate currently active processing from stuck ones (stuck = still processing)
+    const activelyProcessing = extractMutation.isPending;
 
     return (
         <div className="space-y-6">
             {/* Extraction Status Cards */}
-            {(extractableFiles.length > 0 || processingFiles.length > 0) && (
+            {extractableFiles.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {processingFiles.map(file => (
-                        <div key={file.id} className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 flex items-center space-x-3">
-                            <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
-                            <div className="flex-1">
-                                <p className="text-sm font-medium text-blue-300">{file.originalName}</p>
-                                <p className="text-xs text-blue-400">AI analyzing drawing...</p>
-                            </div>
-                        </div>
-                    ))}
-
                     {extractableFiles.map(file => (
-                        <div key={file.id} className="bg-slate-800 border border-slate-700 rounded-lg p-4 flex items-center justify-between">
+                        <div key={file.id} className={`border rounded-lg p-4 flex items-center justify-between ${file.extractionStatus === 'processing'
+                                ? 'bg-amber-900/20 border-amber-500/30'
+                                : file.extractionStatus === 'failed'
+                                    ? 'bg-red-900/20 border-red-500/30'
+                                    : 'bg-slate-800 border-slate-700'
+                            }`}>
                             <div className="flex items-center space-x-3">
-                                {file.extractionStatus === 'failed' ? (
+                                {file.extractionStatus === 'processing' ? (
+                                    <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
+                                ) : file.extractionStatus === 'failed' ? (
                                     <AlertCircle className="h-5 w-5 text-red-400" />
                                 ) : (
                                     <Clock className="h-5 w-5 text-slate-400" />
@@ -129,25 +125,31 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                                 <div>
                                     <p className="text-sm font-medium text-slate-200">{file.originalName}</p>
                                     <p className="text-xs text-slate-400">
-                                        {file.extractionStatus === 'failed'
-                                            ? file.extractionError || 'Extraction failed'
-                                            : 'Ready for AI analysis'}
+                                        {file.extractionStatus === 'processing'
+                                            ? 'Stuck processing - click Retry'
+                                            : file.extractionStatus === 'failed'
+                                                ? file.extractionError || 'Extraction failed'
+                                                : 'Ready for AI analysis'}
                                     </p>
                                 </div>
                             </div>
                             <Button
                                 size="sm"
-                                variant="outline"
-                                className="border-slate-600"
+                                variant={file.extractionStatus === 'processing' ? 'default' : 'outline'}
+                                className={file.extractionStatus === 'processing'
+                                    ? 'bg-amber-600 hover:bg-amber-700'
+                                    : 'border-slate-600'}
                                 onClick={() => extractMutation.mutate(file.id)}
-                                disabled={extractMutation.isPending}
+                                disabled={activelyProcessing}
                             >
-                                {extractMutation.isPending ? (
+                                {activelyProcessing ? (
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
                                     <RefreshCw className="h-4 w-4" />
                                 )}
-                                <span className="ml-2">Extract</span>
+                                <span className="ml-2">
+                                    {file.extractionStatus === 'processing' ? 'Retry' : 'Extract'}
+                                </span>
                             </Button>
                         </div>
                     ))}
