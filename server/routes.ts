@@ -361,16 +361,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const roomData = await roomMapper.getRoomDataForJob(req.params.id);
 
       // Extract cost breakdown from job data
-      // These are stored in pence, convert to pounds
-      const costBreakdown = {
-        labour: (job.costBreakdown?.labour || 0) / 100,
-        material: (job.costBreakdown?.material || 0) / 100,
-        plant: (job.costBreakdown?.plant || 0) / 100,
-        subcontractor: (job.costBreakdown?.subcontractor || 0) / 100,
-        total: (job.costBreakdown?.total || 0) / 100
+      // First try job.costBreakdown, then try phaseTaskData.financials
+      let costBreakdown = {
+        labour: 0,
+        material: 0,
+        plant: 0,
+        subcontractor: 0,
+        total: 0
       };
 
-      // If no breakdown available, try to calculate from job's totalCost
+      // Try to get from costBreakdown field (stored in pence)
+      if (job.costBreakdown?.total) {
+        costBreakdown = {
+          labour: (job.costBreakdown.labour || 0) / 100,
+          material: (job.costBreakdown.material || 0) / 100,
+          plant: (job.costBreakdown.plant || 0) / 100,
+          subcontractor: (job.costBreakdown.subcontractor || 0) / 100,
+          total: (job.costBreakdown.total || 0) / 100
+        };
+      }
+      // Try to get from phaseTaskData.financials (from CSV import)
+      else if (job.phaseTaskData) {
+        try {
+          const phaseData = JSON.parse(job.phaseTaskData);
+          if (phaseData.financials) {
+            costBreakdown = {
+              labour: phaseData.financials.totalLabour || 0,
+              material: phaseData.financials.totalMaterial || 0,
+              plant: phaseData.financials.totalPlant || 0,
+              subcontractor: phaseData.financials.totalSubcontractor || 0,
+              total: phaseData.financials.grandTotal || 0
+            };
+            console.log('📊 Cost breakdown from phaseTaskData:', costBreakdown);
+          }
+        } catch (e) {
+          console.error('Failed to parse phaseTaskData for costBreakdown:', e);
+        }
+      }
+
+      // Fallback to job totalCost if available
       if (costBreakdown.total === 0 && job.totalCost) {
         costBreakdown.total = parseFloat(job.totalCost) || 0;
       }
