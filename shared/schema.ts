@@ -92,7 +92,11 @@ export const extractedElements = pgTable("extracted_elements", {
   description: text("description").notNull(),
   dimensions: text("dimensions"), // "900x2100mm"
   quantity: text("quantity").default("1"),
-  location: text("location"), // "Bathroom", "First Floor", etc.
+  unit: text("unit").default("nr"), // "sqm", "nr", "lm"
+  rate: numeric("rate", { precision: 10, scale: 2 }).default("0"), // £45.00
+  total: numeric("total", { precision: 10, scale: 2 }).default("0"), // £1012.50
+  roomName: text("room_name"), // "Lounge", "Bathroom" - groups elements by room
+  location: text("location"), // "Bathroom", "First Floor", etc. (deprecated, use roomName)
   material: text("material"), // "Softwood", "uPVC", "Plasterboard"
   notes: text("notes"), // Additional notes from drawing
   linkedCostItemId: varchar("linked_cost_item_id").references(() => jobCostItems.id), // Link to cost item if matched

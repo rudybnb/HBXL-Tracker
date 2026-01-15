@@ -10,6 +10,10 @@ interface ExtractedElement {
     description: string;
     dimensions: string | null;
     quantity: string;
+    unit: string | null;
+    rate: string | null;
+    total: string | null;
+    roomName: string | null;
     location: string | null;
     material: string | null;
     notes: string | null;
@@ -94,13 +98,21 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         },
     });
 
-    // Group elements by type
-    const groupedElements = (elements || []).reduce((acc, el) => {
-        const type = el.elementType || 'other';
-        if (!acc[type]) acc[type] = [];
-        acc[type].push(el);
+    // Group elements by room (AGENTS.md compliant)
+    const groupedByRoom = (elements || []).reduce((acc, el) => {
+        const room = el.roomName || el.location || 'General';
+        if (!acc[room]) acc[room] = [];
+        acc[room].push(el);
         return acc;
     }, {} as Record<string, ExtractedElement[]>);
+
+    // Calculate room and project totals
+    const roomTotals = Object.entries(groupedByRoom).map(([room, items]) => ({
+        room,
+        items,
+        total: items.reduce((sum, el) => sum + (parseFloat(el.total || '0') || 0), 0)
+    }));
+    const projectTotal = roomTotals.reduce((sum, r) => sum + r.total, 0);
 
     // Get ALL image files - never hide any
     const imageFiles = (files || []).filter(f => f.fileType.startsWith('image/'));
@@ -168,72 +180,88 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                 </div>
             )}
 
-            {/* Elements Display */}
+            {/* Bill of Quantities Table (AGENTS.md Format) */}
             {isLoading ? (
                 <div className="flex justify-center py-12">
                     <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                 </div>
             ) : elements && elements.length > 0 ? (
-                <div className="space-y-6">
+                <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold text-slate-200 flex items-center">
                             <Layers className="h-5 w-5 mr-2 text-amber-500" />
-                            Extracted Elements ({elements.length})
+                            Bill of Quantities ({elements.length} items)
                         </h3>
+                        <span className="text-lg font-bold text-amber-400">
+                            £{projectTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
                     </div>
 
-                    {Object.entries(groupedElements).map(([type, typeElements]) => (
-                        <div key={type} className="space-y-3">
-                            <h4 className="text-sm font-medium text-slate-400 uppercase tracking-wide flex items-center">
-                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold mr-2 border ${ELEMENT_TYPE_COLORS[type] || ELEMENT_TYPE_COLORS.other}`}>
-                                    {type}
-                                </span>
-                                <span className="text-slate-500">({typeElements.length})</span>
-                            </h4>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {typeElements.map(element => (
-                                    <div
-                                        key={element.id}
-                                        className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-slate-600 transition-colors"
-                                    >
-                                        <div className="flex items-start justify-between mb-2">
-                                            <div>
-                                                {element.elementCode && (
-                                                    <span className="text-xs font-mono bg-slate-700 text-amber-400 px-1.5 py-0.5 rounded mr-2">
-                                                        {element.elementCode}
-                                                    </span>
-                                                )}
-                                                <span className="text-sm font-medium text-slate-200">
+                    {/* Table */}
+                    <div className="bg-slate-900/50 border border-slate-700 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-800 text-slate-300">
+                                <tr>
+                                    <th className="text-left px-4 py-3 font-medium">Room</th>
+                                    <th className="text-left px-4 py-3 font-medium">Item</th>
+                                    <th className="text-right px-4 py-3 font-medium">Qty</th>
+                                    <th className="text-right px-4 py-3 font-medium">Rate</th>
+                                    <th className="text-right px-4 py-3 font-medium">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {roomTotals.map(({ room, items, total: roomTotal }) => (
+                                    <>
+                                        {items.map((element, idx) => (
+                                            <tr key={element.id} className="border-t border-slate-700/50 hover:bg-slate-800/30">
+                                                {idx === 0 ? (
+                                                    <td className="px-4 py-3 font-medium text-amber-400" rowSpan={items.length}>
+                                                        {room}
+                                                    </td>
+                                                ) : null}
+                                                <td className="px-4 py-3 text-slate-200">
+                                                    {element.elementCode && (
+                                                        <span className="text-xs font-mono bg-slate-700 text-amber-400 px-1 py-0.5 rounded mr-2">
+                                                            {element.elementCode}
+                                                        </span>
+                                                    )}
                                                     {element.description}
-                                                </span>
-                                            </div>
-                                            {parseInt(element.quantity) > 1 && (
-                                                <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">
-                                                    ×{element.quantity}
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-1 text-xs text-slate-400">
-                                            {element.dimensions && (
-                                                <p><span className="text-slate-500">Size:</span> {element.dimensions}</p>
-                                            )}
-                                            {element.location && (
-                                                <p><span className="text-slate-500">Location:</span> {element.location}</p>
-                                            )}
-                                            {element.material && (
-                                                <p><span className="text-slate-500">Material:</span> {element.material}</p>
-                                            )}
-                                            {element.notes && (
-                                                <p className="text-slate-500 italic">{element.notes}</p>
-                                            )}
-                                        </div>
-                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-slate-300">
+                                                    {element.quantity} {element.unit || ''}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-slate-400">
+                                                    {parseFloat(element.rate || '0') > 0 ? `£${parseFloat(element.rate || '0').toFixed(2)}` : '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-slate-200 font-medium">
+                                                    {parseFloat(element.total || '0') > 0 ? `£${parseFloat(element.total || '0').toFixed(2)}` : '-'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {/* Room Subtotal */}
+                                        <tr className="bg-slate-800/50 border-t border-slate-600">
+                                            <td colSpan={4} className="px-4 py-2 text-right text-slate-400 font-medium">
+                                                {room} Subtotal:
+                                            </td>
+                                            <td className="px-4 py-2 text-right text-amber-400 font-bold">
+                                                £{roomTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </td>
+                                        </tr>
+                                    </>
                                 ))}
-                            </div>
-                        </div>
-                    ))}
+                            </tbody>
+                            <tfoot className="bg-slate-800 border-t-2 border-amber-500/50">
+                                <tr>
+                                    <td colSpan={4} className="px-4 py-3 text-right font-bold text-slate-200">
+                                        Project Total:
+                                    </td>
+                                    <td className="px-4 py-3 text-right text-lg font-bold text-amber-400">
+                                        £{projectTotal.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
                 </div>
             ) : (
                 <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700/50">
