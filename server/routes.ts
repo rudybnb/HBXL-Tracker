@@ -22,6 +22,8 @@ import type { Request as ExpressRequest } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import * as XLSX from "xlsx";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 interface MulterRequest extends ExpressRequest {
   file?: Express.Multer.File;
@@ -39,6 +41,35 @@ const mt = multer({ storage: multer.memoryStorage() });
 const upload = mt; // Alias for backward compatibility if needed, or just use mt
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Database Health Check
+  app.get("/api/health/db", async (req, res) => {
+    try {
+      const start = Date.now();
+      // Simple query to test connection
+      const result = await db.execute(sql`SELECT 1 as connected`);
+      const duration = Date.now() - start;
+
+      res.json({
+        status: "ok",
+        message: "Database connected successfully",
+        duration: `${duration}ms`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Database health check failed:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Database connection failed",
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        env: {
+          hasUrl: !!process.env.DATABASE_URL,
+          nodeEnv: process.env.NODE_ENV
+        }
+      });
+    }
+  });
+
   // Stats endpoint
   app.get("/api/stats", async (req, res) => {
     try {
