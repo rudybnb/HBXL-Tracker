@@ -142,6 +142,62 @@ const ELEMENT_MAPPINGS: Record<string, string> = {
     'Completion': 'Snagging'
 };
 
+// OpenAI for AI-powered allocation
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+/**
+ * Uses GPT to intelligently match an item to the most appropriate room
+ * Based on item description, phase context, and available rooms
+ */
+async function aiMatchItemToRoom(
+    item: { description: string; phase: string },
+    roomNames: string[]
+): Promise<{ room: string | null; isGlobal: boolean; confidence: number }> {
+    try {
+        const prompt = `You are a construction QS expert. Given a construction cost item, determine which room it belongs to.
+
+ITEM:
+- Description: ${item.description}
+- Phase: ${item.phase}
+
+AVAILABLE ROOMS: ${roomNames.join(', ')}
+
+RULES:
+1. If the item is building-wide (foundations, roof, external walls, structural frame, main services) return "GLOBAL"
+2. If the item clearly belongs to a specific room (bathroom fittings, kitchen units, etc.) return that room name
+3. Match based on the item's function and typical location
+
+Respond with JSON only:
+{"room": "RoomName or GLOBAL", "confidence": 0.0-1.0}`;
+
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1,
+            max_tokens: 100
+        });
+
+        const content = response.choices[0]?.message?.content || '';
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+        if (jsonMatch) {
+            const result = JSON.parse(jsonMatch[0]);
+            return {
+                room: result.room === 'GLOBAL' ? null : result.room,
+                isGlobal: result.room === 'GLOBAL',
+                confidence: result.confidence || 0.5
+            };
+        }
+    } catch (error) {
+        console.error('AI allocation error:', error);
+    }
+
+    // Fallback to global if AI fails
+    return { room: null, isGlobal: true, confidence: 0 };
+}
+
 export class RoomMapper {
 
     /**
@@ -187,6 +243,12 @@ export class RoomMapper {
         // Track allocation stats
         let globalItems = 0;
         let roomItems = 0;
+        let aiMatchedItems = 0;
+
+        // Get room names for AI matching (excluding Building/Global)
+        const roomNamesForAI = existingRooms
+            .filter(r => r.name !== 'Building / Global')
+            .map(r => r.name);
 
         // Group items by which room they belong to
         for (const [phase, items] of Object.entries(phaseTaskData)) {
@@ -196,7 +258,7 @@ export class RoomMapper {
             );
 
             for (const item of items) {
-                // Priority 1: Check if item matches a specific room
+                // Priority 1: Check if item matches a specific room via keywords
                 const targetRoom = this.matchItemToRoom(item, existingRooms.filter(r => r.name !== 'Building / Global'));
 
                 if (targetRoom) {
@@ -208,9 +270,29 @@ export class RoomMapper {
                     await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
                     globalItems++;
                 }
-                // Priority 3: Default fallback - route to Global for safety
+                // Priority 3: Use AI to intelligently match ambiguous items
                 else {
-                    // Items without clear room match go to Global (can be manually reassigned)
+                    // Try AI matching for items that don't have clear keywords
+                    const aiResult = await aiMatchItemToRoom(
+                        { description: item.description || '', phase },
+                        roomNamesForAI
+                    );
+
+                    if (aiResult.room && aiResult.confidence > 0.6) {
+                        // Find the room by name
+                        const matchedRoom = existingRooms.find(
+                            r => r.name.toLowerCase() === aiResult.room!.toLowerCase()
+                        );
+                        if (matchedRoom) {
+                            await this.addItemToRoom(matchedRoom.id, elementName, item, phase);
+                            roomItems++;
+                            aiMatchedItems++;
+                            console.log(`🤖 AI assigned "${item.description}" to ${aiResult.room} (${(aiResult.confidence * 100).toFixed(0)}%)`);
+                            continue;
+                        }
+                    }
+
+                    // AI said Global or couldn't determine - route to Building/Global
                     await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
                     globalItems++;
                 }
@@ -222,7 +304,7 @@ export class RoomMapper {
 
         console.log(`✅ HBXL costs allocated:`);
         console.log(`   📦 Building / Global: ${globalItems} items`);
-        console.log(`   🏠 Specific Rooms: ${roomItems} items`);
+        console.log(`   🏠 Specific Rooms: ${roomItems} items (${aiMatchedItems} via AI)`);
     }
 
     /**

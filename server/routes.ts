@@ -385,14 +385,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const phaseData = JSON.parse(job.phaseTaskData);
           if (phaseData.financials) {
+            // Values from CSV are stored in pence, convert to pounds
             costBreakdown = {
-              labour: phaseData.financials.totalLabour || 0,
-              material: phaseData.financials.totalMaterial || 0,
-              plant: phaseData.financials.totalPlant || 0,
-              subcontractor: phaseData.financials.totalSubcontractor || 0,
-              total: phaseData.financials.grandTotal || 0
+              labour: (phaseData.financials.totalLabour || 0) / 100,
+              material: (phaseData.financials.totalMaterial || 0) / 100,
+              plant: (phaseData.financials.totalPlant || 0) / 100,
+              subcontractor: (phaseData.financials.totalSubcontractor || 0) / 100,
+              total: (phaseData.financials.grandTotal || 0) / 100
             };
-            console.log('📊 Cost breakdown from phaseTaskData:', costBreakdown);
+            console.log('📊 Cost breakdown from phaseTaskData (converted to £):', costBreakdown);
           }
         } catch (e) {
           console.error('Failed to parse phaseTaskData for costBreakdown:', e);
