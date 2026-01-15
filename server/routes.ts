@@ -14,7 +14,7 @@ interface SessionRequest extends Express.Request {
 }
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, extractedElements, rooms, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobFiles, extractedElements, rooms, roomElements, payableItems, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
 import multer from "multer";
@@ -85,7 +85,163 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // AGENTS.md Compliance: Cleanup phase-based rooms
+  // Delete rooms that were incorrectly created from HBXL phases
+  // Access via browser: http://localhost:5000/api/admin/cleanup-phase-rooms
+  app.get("/api/admin/cleanup-phase-rooms", async (req, res) => {
+    try {
+      const PHASE_BASED_ROOMS = ['General Works', 'Utility', 'External'];
+
+      console.log('🧹 AGENTS.md Compliance - Cleaning up phase-based rooms');
+
+      // Find all phase-based rooms
+      const allRooms = await db.select().from(rooms);
+      const phaseRooms = allRooms.filter(room => PHASE_BASED_ROOMS.includes(room.name));
+
+      console.log(`Found ${phaseRooms.length} phase-based rooms to delete`);
+
+      let deletedCount = 0;
+      for (const room of phaseRooms) {
+        // Delete payable items first
+        const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+        for (const element of elements) {
+          await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
+        }
+        // Delete elements
+        await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
+        // Delete room
+        await db.delete(rooms).where(eq(rooms.id, room.id));
+        deletedCount++;
+        console.log(`✓ Deleted room: ${room.name}`);
+      }
+
+      res.json({
+        success: true,
+        message: `Deleted ${deletedCount} phase-based rooms`,
+        deletedRooms: phaseRooms.map(r => r.name)
+      });
+    } catch (error) {
+      console.error("Cleanup error:", error);
+      res.status(500).json({ error: "Failed to cleanup rooms" });
+    }
+  });
+
+  // AGENTS.md Compliance: Allocate HBXL costs to rooms from drawing extraction
+  // Call this after uploading a drawing AND importing CSV
+  app.get("/api/jobs/:id/allocate-costs", async (req, res) => {
+    try {
+      const jobId = req.params.id;
+      const job = await storage.getJob(jobId);
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (!job.phaseTaskData) {
+        return res.status(400).json({
+          error: "No HBXL data found",
+          message: "Import a CSV first before allocating costs"
+        });
+      }
+
+      // Get existing rooms from drawing extraction
+      const existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+
+      if (existingRooms.length === 0) {
+        return res.status(400).json({
+          error: "No rooms found",
+          message: "Upload a drawing first to identify rooms"
+        });
+      }
+
+      console.log(`💰 Allocating HBXL costs to ${existingRooms.length} rooms for job ${jobId}`);
+
+      // Parse the HBXL phase data
+      const phaseData = JSON.parse(job.phaseTaskData);
+      const phases = phaseData.phases || phaseData;
+
+      // Import and run room mapper
+      const { roomMapper } = await import("./room-mapper");
+      await roomMapper.allocateCostsToRooms(jobId, phases);
+
+      // Get updated room data
+      const updatedRoomData = await roomMapper.getRoomDataForJob(jobId);
+
+      res.json({
+        success: true,
+        message: `Allocated costs to ${existingRooms.length} rooms`,
+        rooms: updatedRoomData.map(r => ({
+          name: r.name,
+          totalValue: r.totalValue,
+          elementCount: r.elements.length
+        }))
+      });
+    } catch (error) {
+      console.error("Cost allocation error:", error);
+      res.status(500).json({ error: "Failed to allocate costs" });
+    }
+  });
+
+  // Clear allocations endpoint - for re-testing cost allocation
+  // Removes all room elements and payable items for a job (keeps rooms from drawing)
+  app.get("/api/admin/clear-allocations/:id", async (req, res) => {
+    try {
+      const jobId = req.params.id;
+      const job = await storage.getJob(jobId);
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      console.log(`🧹 Clearing cost allocations for job ${jobId}`);
+
+      // Get all rooms for this job
+      const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+
+      let elementsDeleted = 0;
+      let itemsDeleted = 0;
+
+      for (const room of jobRooms) {
+        // Get elements for this room
+        const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+
+        for (const element of elements) {
+          // Delete payable items for this element
+          const deleted = await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
+          itemsDeleted++;
+        }
+
+        // Delete elements for this room
+        await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
+        elementsDeleted += elements.length;
+
+        // Reset room total
+        await db.update(rooms).set({ totalValue: '0' }).where(eq(rooms.id, room.id));
+      }
+
+      // Also delete "Building / Global" room so it gets recreated fresh
+      const globalRoom = jobRooms.find(r => r.name === 'Building / Global');
+      if (globalRoom) {
+        await db.delete(rooms).where(eq(rooms.id, globalRoom.id));
+        console.log('🗑️ Deleted Building / Global room for fresh re-creation');
+      }
+
+      res.json({
+        success: true,
+        message: `Cleared allocations for job`,
+        elementsDeleted,
+        itemsDeleted,
+        roomsReset: jobRooms.length
+      });
+    } catch (error) {
+      console.error("Clear allocations error:", error);
+      res.status(500).json({ error: "Failed to clear allocations" });
+    }
+  });
+
   // Stats endpoint
+
+
   app.get("/api/stats", async (req, res) => {
     try {
       const stats = await storage.getStats();
@@ -204,30 +360,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { roomMapper } = await import("./room-mapper");
       const roomData = await roomMapper.getRoomDataForJob(req.params.id);
 
-      // If no rooms exist yet, trigger room mapping from phase data
-      if (roomData.length === 0 && job.phaseTaskData) {
-        try {
-          const phaseData = JSON.parse(job.phaseTaskData);
-          if (phaseData.phases) {
-            console.log('🏠 Auto-generating rooms from phase data...');
-            await roomMapper.mapPhasesToRooms(req.params.id, phaseData.phases);
-            const newRoomData = await roomMapper.getRoomDataForJob(req.params.id);
-            return res.json({
-              jobId: job.id,
-              projectName: job.title,
-              rooms: newRoomData,
-              generatedAt: new Date().toISOString()
-            });
-          }
-        } catch (parseError) {
-          console.error('Error parsing phase data for room mapping:', parseError);
-        }
+      // Extract cost breakdown from job data
+      // These are stored in pence, convert to pounds
+      const costBreakdown = {
+        labour: (job.costBreakdown?.labour || 0) / 100,
+        material: (job.costBreakdown?.material || 0) / 100,
+        plant: (job.costBreakdown?.plant || 0) / 100,
+        subcontractor: (job.costBreakdown?.subcontractor || 0) / 100,
+        total: (job.costBreakdown?.total || 0) / 100
+      };
+
+      // If no breakdown available, try to calculate from job's totalCost
+      if (costBreakdown.total === 0 && job.totalCost) {
+        costBreakdown.total = parseFloat(job.totalCost) || 0;
       }
+
+      // AGENTS.md COMPLIANCE: Rooms come from drawing extraction ONLY
+      // If no rooms exist, user needs to upload a drawing first
+      if (roomData.length === 0) {
+        console.log('⚠️ No rooms from drawing extraction for job. Upload a drawing to identify rooms.');
+        return res.json({
+          jobId: job.id,
+          projectName: job.title,
+          rooms: [],
+          costBreakdown,
+          message: 'No rooms identified. Upload a construction drawing to extract rooms.',
+          generatedAt: new Date().toISOString()
+        });
+      }
+
 
       res.json({
         jobId: job.id,
         projectName: job.title,
         rooms: roomData,
+        costBreakdown,
         generatedAt: new Date().toISOString()
       });
     } catch (error) {

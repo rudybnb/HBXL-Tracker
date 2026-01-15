@@ -11,7 +11,11 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
+// Render requires SSL for external connections
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: databaseUrl.includes('render.com') ? { rejectUnauthorized: false } : false
+});
 export const db = drizzle(pool, { schema });
 
 // Initialize Manus-n8n schema columns if they don't exist

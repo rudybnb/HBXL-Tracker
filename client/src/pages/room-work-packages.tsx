@@ -61,10 +61,19 @@ interface RoomData {
     elements: ElementData[];
 }
 
+interface CostBreakdown {
+    labour: number;
+    material: number;
+    plant: number;
+    subcontractor: number;
+    total: number;
+}
+
 interface RoomWorkPackagesResponse {
     jobId: string;
     projectName: string;
     rooms: RoomData[];
+    costBreakdown?: CostBreakdown;
     generatedAt: string;
 }
 
@@ -306,6 +315,65 @@ export default function RoomWorkPackages() {
                     </div>
                 </div>
             </div>
+
+            {/* Cost Breakdown Summary Cards */}
+            {data.costBreakdown && data.costBreakdown.total > 0 && (
+                <div className="max-w-7xl mx-auto pt-6 px-4 sm:px-6 lg:px-8">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        {/* Labour */}
+                        <div className="bg-gradient-to-br from-blue-900/50 to-blue-800/30 border border-blue-700/50 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-blue-400 text-sm font-medium">Labour</span>
+                                <div className="w-8 h-8 bg-blue-600/30 rounded-lg flex items-center justify-center">
+                                    <User className="h-4 w-4 text-blue-400" />
+                                </div>
+                            </div>
+                            <p className="text-xl font-bold text-white">
+                                £{data.costBreakdown.labour.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+
+                        {/* Material */}
+                        <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-emerald-400 text-sm font-medium">Material</span>
+                                <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
+                                    <Home className="h-4 w-4 text-emerald-400" />
+                                </div>
+                            </div>
+                            <p className="text-xl font-bold text-white">
+                                £{data.costBreakdown.material.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+
+                        {/* Plant */}
+                        <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-orange-400 text-sm font-medium">Plant</span>
+                                <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
+                                    <Clock className="h-4 w-4 text-orange-400" />
+                                </div>
+                            </div>
+                            <p className="text-xl font-bold text-white">
+                                £{data.costBreakdown.plant.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+
+                        {/* Total */}
+                        <div className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border border-amber-700/50 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-amber-400 text-sm font-medium">Total Cost</span>
+                                <div className="w-8 h-8 bg-amber-600/30 rounded-lg flex items-center justify-center">
+                                    <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                                </div>
+                            </div>
+                            <p className="text-xl font-bold text-amber-400">
+                                £{data.costBreakdown.total.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Room Cards */}
             <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
