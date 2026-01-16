@@ -383,20 +383,19 @@ export class RoomMapper {
             }
 
             // Create payable item
-            // Note: rate and total are stored in pence for precision
-            // But we need to check if source data is already in pounds
-            const rateValue = item.rate || 0;
-            const totalValue = item.total || 0;
+            // CSV parser stores values in POUNDS - convert to pence for storage
+            const rateValue = item.rate || item.unitPrice || 0;
+            const totalValue = item.total || item.totalCost || 0;
 
-            // Store in pence (multiply by 100 if values are in pounds)
-            // Check if values seem like they're in pounds (reasonable range)
-            const isInPounds = rateValue < 10000 && totalValue < 1000000;
-            const ratePence = isInPounds ? Math.round(rateValue * 100) : Math.round(rateValue);
-            const totalPence = isInPounds ? Math.round(totalValue * 100) : Math.round(totalValue);
+            // Always multiply by 100 to convert pounds to pence
+            const ratePence = Math.round(rateValue * 100);
+            const totalPence = Math.round(totalValue * 100);
+
+            console.log(`💰 Item: ${item.description?.substring(0, 30)}... | Rate: £${rateValue} -> ${ratePence}p | Total: £${totalValue} -> ${totalPence}p`);
 
             await db.insert(payableItems).values({
                 elementId: element.id,
-                description: item.description || 'Unknown Item',
+                description: item.description || item.task || 'Unknown Item',
                 quantity: String(item.quantity || 1),
                 unit: item.unit || 'Each',
                 rate: String(ratePence),
