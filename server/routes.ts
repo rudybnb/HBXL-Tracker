@@ -1139,13 +1139,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             jobsCount: "1"
           });
 
-        } else if (lines.findIndex(line =>
-          line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
-        ) !== -1) {
+        } else if (lines.findIndex(line => {
+          const l = line.toLowerCase();
+          return (l.includes('order date') || l.includes('order')) &&
+            (l.includes('build phase') || l.includes('phase')) &&
+            (l.includes('resource description') || l.includes('type of resource'));
+        }) !== -1) {
           // 2. Check if this is the ENHANCED format with Order Date, Build Phase, etc.
-          const enhancedFormatIndex = lines.findIndex(line =>
-            line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
-          );
+          const enhancedFormatIndex = lines.findIndex(line => {
+            const l = line.toLowerCase();
+            return (l.includes('order date') || l.includes('order')) &&
+              (l.includes('build phase') || l.includes('phase')) &&
+              (l.includes('resource description') || l.includes('type of resource'));
+          });
           // ENHANCED FORMAT PARSING - using shared parser logic
           console.log('🎯 Using ENHANCED CSV parsing (Imported Function)');
 
