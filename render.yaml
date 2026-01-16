@@ -2,10 +2,9 @@ services:
   # Node.js + React Frontend Service
   - type: web
     name: erdesignandbuild-web
-    runtime: node
-    env: node
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    runtime: docker
+    env: docker
+    dockerContext: .
     envVars:
       - key: NODE_ENV
         value: production
