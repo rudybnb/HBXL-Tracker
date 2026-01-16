@@ -474,7 +474,12 @@ export class RoomMapper {
      * Gets all rooms with their elements and items for a job
      */
     async getRoomDataForJob(jobId: string): Promise<RoomData[]> {
+        console.log(`🔍 getRoomDataForJob called for jobId: ${jobId}`);
         const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+        console.log(`📊 Found ${jobRooms.length} rooms for job ${jobId}`);
+        if (jobRooms.length > 0) {
+            console.log(`   Room names: ${jobRooms.map(r => r.name).join(', ')}`);
+        }
 
         const roomData: RoomData[] = [];
 
