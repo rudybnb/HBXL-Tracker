@@ -197,18 +197,28 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             console.log(`📄 PDF detected, converting to image using native poppler-utils (pdftocairo)...`);
 
             try {
-                // Determine output path (temp file)
-                const tempOutputPrefix = path.join(path.dirname(absolutePath), `temp_extract_${Date.now()}`);
+                const os = await import('os');
+
+                // Use system temp directory to avoid permission issues
+                // tempOutputPrefix will be like /tmp/extract_123456789
+                const tempDir = os.tmpdir();
+                const tempOutputPrefix = path.join(tempDir, `extract_${Date.now()}_${Math.random().toString(36).substring(7)}`);
 
                 // Command to convert first page of PDF to PNG
                 // -png: Output PNG format
-                // -singlefile: Output only the first page (or specified page)
-                // -r 300: Resolution 300 DPI for good quality
+                // -singlefile: Output only the first page
                 const command = `pdftocairo -png -singlefile -r 300 "${absolutePath}" "${tempOutputPrefix}"`;
 
-                console.log(`🐳 Running native command: ${command}`);
-                await execAsync(command);
+                console.log(`🐳 PDF Conversion Details:`);
+                console.log(`   Source: ${absolutePath} (Exists: ${fs.existsSync(absolutePath)})`);
+                console.log(`   Target Prefix: ${tempOutputPrefix}`);
+                console.log(`   Command: ${command}`);
 
+                const { stdout, stderr } = await execAsync(command);
+                if (stdout) console.log('   stdout:', stdout);
+                if (stderr) console.log('   stderr:', stderr);
+
+                // pdftocairo adds .png extension automatically
                 const expectedOutputFile = `${tempOutputPrefix}.png`;
 
                 if (fs.existsSync(expectedOutputFile)) {
