@@ -787,6 +787,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             }
 
+            // FALLBACK: If no elements found for this room (or detailedElements was empty), create a default one
+            if (!result.detailedElements || result.detailedElements.filter(e => e.room === room.name).length === 0) {
+              console.log(`      ⚠️ No elements found for ${room.name}, creating default container.`);
+
+              const [defaultElement] = await db.insert(roomElements).values({
+                roomId: newRoom.id,
+                name: "Room Construction",
+                measurementSummary: "Item",
+                subtotal: "0"
+              }).returning();
+
+              await db.insert(payableItems).values({
+                elementId: defaultElement.id,
+                description: "General construction works",
+                quantity: "1",
+                unit: "item",
+                rate: "0",
+                total: "0",
+                status: "not_started"
+              });
+            }
+
           } else {
             console.log(`   📍 Room exists: ${room.name}`);
             // Logic to add elements to existing room could go here if needed

@@ -124,13 +124,7 @@ Based on the elements identified, suggest:
 Respond with valid JSON ONLY:
 {
   "rooms": [
-    {
-      "name": "Room Name",
-      "floor": "Ground",
-      "dimensions": "4850mm x 3600mm",
-      "area": 17.46,
-      "elements": ["D01", "W01", "Radiator"]
-    }
+    { "name": "Lounge", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] }
   ],
   "instructions": [
     {
@@ -139,21 +133,9 @@ Respond with valid JSON ONLY:
       "location": "Where on drawing (optional)"
     }
   ],
-  "elements": [
-    {
-      "code": "D01",
-      "type": "door",
-      "description": "Internal door 762mm",
-      "room": "Lounge",
-      "size": "762 x 1981mm"
-    },
-    {
-      "code": "W01",
-      "type": "window",
-      "description": "Double glazed window",
-      "room": "Lounge",
-      "size": "1200 x 1050mm"
-    }
+  "detailedElements": [
+    { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge" },
+    { "code": "WC-01", "type": "sanitary", "description": "Toilet", "room": "Bathroom" }
   ],
   "workFlow": {
     "sequence": ["Substructure", "Superstructure", "First Fix Electrical", "First Fix Plumbing", "Plastering", "Second Fix"],
