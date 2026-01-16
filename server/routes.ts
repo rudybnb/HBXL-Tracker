@@ -6231,6 +6231,28 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
       results.csvParsing.error = error.message;
     }
 
+    // Check PDF Tools (poppler-utils)
+    try {
+      console.log('🔍 DEBUG: Checking pdftocairo version...');
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      const { stdout, stderr } = await execAsync('pdftocairo -v');
+      results.pdfTools = {
+        status: 'success',
+        message: 'pdftocairo found',
+        version: stdout || stderr // pdftocairo prints version to stderr often
+      };
+    } catch (error: any) {
+      console.error('❌ DEBUG: pdftocairo check failed:', error);
+      results.pdfTools = {
+        status: 'failed',
+        error: error.message,
+        hint: 'poppler-utils might not be installed in Dockerfile'
+      };
+    }
+
     res.json(results);
   });
 
