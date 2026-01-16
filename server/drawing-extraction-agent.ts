@@ -91,10 +91,16 @@ I need a structured list of the rooms and their key features (doors, windows, fi
 
 KEY TASKS:
 1. List all the rooms you can see (e.g. Lounge, Kitchen).
+   - ALSO include structural areas if visible: "External", "Roof", "Foundations", "Structure".
 2. For each room, tell me what floor it is on (assume Ground if unsure).
-3. Identify the key elements in each room, such as "Window", "Door", "Toilet", "Sink".
+3. Identify the key elements in each room:
+   - "Window", "Door", "Toilet", "Sink" for internal rooms.
+   - "Roof Tiles", "Guttering", "Chimney" for Roof.
+   - "Concrete Floor", "Screed", "DPC" for Structure/Floors.
+   - "External Wall", "Cladding" for External.
+   
    - If you see a code like "W01" or "D01", please include it.
-   - If you don't see a code, that is okay! Just list "Window" or "Door".
+   - If you don't see a code, that is okay! Just list the item type.
    - It is important that I know if a room has a window or door, so please Infer one if it's a "Bedroom", "Lounge", or "Kitchen".
 
 FORMATTING:
@@ -102,11 +108,12 @@ Please provide the data in this exact JSON format so I can save it to my notes:
 {
   "success": true,
   "rooms": [
-    { "name": "Lounge", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] }
+    { "name": "Lounge", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] },
+    { "name": "External", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] }
   ],
   "detailedElements": [
     { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge" },
-    { "code": "D-Lounge", "type": "door", "description": "Internal Access Door", "room": "Lounge" }
+    { "code": "ROOF-01", "type": "roof", "description": "Tiled Roof Construction", "room": "External" }
   ]
 }
 Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
