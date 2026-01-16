@@ -101,7 +101,7 @@ Respond ONLY with valid JSON:
 
 
 /**
- * Extract elements from an image file using GPT-4 Vision
+ * Extract elements from an image or PDF file using GPT-4 Vision
  */
 export async function extractFromImage(imagePath: string): Promise<ExtractionResult> {
     try {
@@ -113,22 +113,69 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         if (!fs.existsSync(absolutePath)) {
             return {
                 success: false,
+                rooms: [],
                 elements: [],
                 rawResponse: '',
                 error: `File not found: ${absolutePath}`
             };
         }
 
-        const imageBuffer = fs.readFileSync(absolutePath);
-        const base64Image = imageBuffer.toString('base64');
-
-        // Determine MIME type from extension
         const ext = path.extname(imagePath).toLowerCase();
-        const mimeType = ext === '.png' ? 'image/png'
-            : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-                : ext === '.gif' ? 'image/gif'
-                    : ext === '.webp' ? 'image/webp'
-                        : 'image/png'; // default
+        let base64Image: string;
+        let mimeType: string;
+
+        // Handle PDF files by converting to image
+        if (ext === '.pdf') {
+            console.log(`📄 PDF detected, converting to image for Vision API...`);
+            try {
+                const pdfPoppler = await import('pdf-poppler');
+                const pdfOutputDir = path.dirname(absolutePath);
+                const pdfBaseName = path.basename(absolutePath, '.pdf');
+
+                const opts = {
+                    format: 'png',
+                    out_dir: pdfOutputDir,
+                    out_prefix: `${pdfBaseName}_converted`,
+                    page: 1  // Just first page for floor plans
+                };
+
+                await pdfPoppler.convert(absolutePath, opts);
+
+                // Read the converted image
+                const convertedPath = path.join(pdfOutputDir, `${pdfBaseName}_converted-1.png`);
+                if (fs.existsSync(convertedPath)) {
+                    const imageBuffer = fs.readFileSync(convertedPath);
+                    base64Image = imageBuffer.toString('base64');
+                    mimeType = 'image/png';
+                    console.log(`✅ PDF converted to image successfully`);
+
+                    // Clean up converted file
+                    fs.unlinkSync(convertedPath);
+                } else {
+                    throw new Error('PDF conversion failed - no output image');
+                }
+            } catch (pdfError: any) {
+                console.error(`❌ PDF conversion error:`, pdfError);
+                return {
+                    success: false,
+                    rooms: [],
+                    elements: [],
+                    rawResponse: '',
+                    error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image instead.`
+                };
+            }
+        } else {
+            // Regular image file
+            const imageBuffer = fs.readFileSync(absolutePath);
+            base64Image = imageBuffer.toString('base64');
+
+            // Determine MIME type from extension
+            mimeType = ext === '.png' ? 'image/png'
+                : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+                    : ext === '.gif' ? 'image/gif'
+                        : ext === '.webp' ? 'image/webp'
+                            : 'image/png'; // default
+        }
 
         console.log(`🔍 Analyzing drawing: ${path.basename(imagePath)}`);
 
