@@ -188,41 +188,51 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         let base64Image: string;
         let mimeType: string;
 
-        // Handle PDF files by converting to image
+        // Handle PDF files by converting to image using pdfjs-dist
         if (ext === '.pdf') {
-            console.log(`📄 PDF detected, converting to image for Vision API...`);
+            console.log(`📄 PDF detected, converting to image using pdfjs-dist...`);
             try {
-                const pdfPoppler = await import('pdf-poppler');
-                const pdfOutputDir = path.dirname(absolutePath);
-                const pdfBaseName = path.basename(absolutePath, '.pdf');
+                // Dynamic import pdfjs-dist
+                const pdfjsLib = await import('pdfjs-dist');
+                const { createCanvas } = await import('canvas');
 
-                const opts = {
-                    format: 'png',
-                    out_dir: pdfOutputDir,
-                    out_prefix: `${pdfBaseName}_converted`,
-                    page: 1  // Just first page for floor plans
-                };
+                // Read PDF data
+                const pdfData = new Uint8Array(fs.readFileSync(absolutePath));
 
-                await pdfPoppler.convert(absolutePath, opts);
+                // Load PDF document
+                const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+                const pdfDoc = await loadingTask.promise;
 
-                // Read the converted image
-                const convertedPath = path.join(pdfOutputDir, `${pdfBaseName}_converted-1.png`);
-                if (fs.existsSync(convertedPath)) {
-                    const imageBuffer = fs.readFileSync(convertedPath);
-                    base64Image = imageBuffer.toString('base64');
-                    mimeType = 'image/png';
-                    console.log(`✅ PDF converted to image successfully`);
+                console.log(`   PDF has ${pdfDoc.numPages} pages, extracting first page...`);
 
-                    // Clean up converted file
-                    fs.unlinkSync(convertedPath);
-                } else {
-                    throw new Error('PDF conversion failed - no output image');
-                }
+                // Get first page
+                const page = await pdfDoc.getPage(1);
+                const viewport = page.getViewport({ scale: 2.0 }); // Scale up for quality
+
+                // Create canvas
+                const canvas = createCanvas(viewport.width, viewport.height);
+                const context = canvas.getContext('2d');
+
+                // Render PDF page to canvas
+                await page.render({
+                    canvasContext: context as any,
+                    viewport: viewport
+                }).promise;
+
+                // Convert canvas to base64 PNG
+                const pngBuffer = canvas.toBuffer('image/png');
+                base64Image = pngBuffer.toString('base64');
+                mimeType = 'image/png';
+
+                console.log(`✅ PDF converted to image successfully (${pngBuffer.length} bytes)`);
+
             } catch (pdfError: any) {
                 console.error(`❌ PDF conversion error:`, pdfError);
                 return {
                     success: false,
                     rooms: [],
+                    instructions: [],
+                    detailedElements: [],
                     elements: [],
                     rawResponse: '',
                     error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image instead.`
