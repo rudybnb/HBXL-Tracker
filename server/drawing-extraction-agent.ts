@@ -86,63 +86,30 @@ export interface ExtractionResult {
 
 
 
-const EXTRACTION_PROMPT = `You are an expert construction QS analyzing a construction blueprint/floor plan.
-Perform a comprehensive 4-stage extraction:
+const EXTRACTION_PROMPT = `Please analyze this floor plan image to help me understand the layout for renovation planning.
+I need a structured list of the rooms and their key features (doors, windows, fixtures).
 
-=== STAGE 1: ROOMS & LAYOUT ===
-- Identify ALL rooms with their names (Lounge, Kitchen, Bathroom, Bedroom, etc.)
-- Extract dimensions if shown (in mm or m)
-- Calculate floor area from dimensions
-- Note which floor level (Ground, First, Second, etc.)
+KEY TASKS:
+1. List all the rooms you can see (e.g. Lounge, Kitchen).
+2. For each room, tell me what floor it is on (assume Ground if unsure).
+3. Identify the key elements in each room, such as "Window", "Door", "Toilet", "Sink".
+   - If you see a code like "W01" or "D01", please include it.
+   - If you don't see a code, that is okay! Just list "Window" or "Door".
+   - It is important that I know if a room has a window or door, so please Infer one if it's a "Bedroom", "Lounge", or "Kitchen".
 
-=== STAGE 2: INSTRUCTIONS & NOTES ===
-- Extract ALL text notes, specifications, and annotations visible on the drawing
-- Identify material callouts (e.g., "100mm concrete slab", "12.5mm plasterboard")
-- Read any legend or key information
-- Note any special requirements or tolerances
-
-=== STAGE 3: ELEMENTS & ITEMS ===
-For each room, identify:
-- Doors with codes (D01, D02, D03...) - note size if shown
-- Windows with codes (W01, W02...) - note size if shown
-- Sanitaryware: WC, Basin, Shower, Bath
-- Electrical: Sockets, Switches, Light points
-- Kitchen fittings: Units, Worktop, Appliances
-- Heating: Radiators, UFH zones
-
-=== STAGE 4: WORK FLOW ANALYSIS ===
-Based on the elements identified, suggest:
-- Construction sequence (what gets built first)
-- Trades required (Electrician, Plumber, Carpenter, etc.)
-- Dependencies (e.g., "First fix electrical before plastering")
-
-**IMPORTANT:**
-- Do NOT invent costs or prices
-- Only extract what you can see in the drawing
-- If something is unclear, mark as "unclear" or omit
-
-Respond with valid JSON ONLY:
+FORMATTING:
+Please provide the data in this exact JSON format so I can save it to my notes:
 {
+  "success": true,
   "rooms": [
     { "name": "Lounge", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] }
   ],
-  "instructions": [
-    {
-      "type": "note/specification/material",
-      "text": "The actual text from drawing",
-      "location": "Where on drawing (optional)"
-    }
-  ],
   "detailedElements": [
     { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge" },
-    { "code": "WC-01", "type": "sanitary", "description": "Toilet", "room": "Bathroom" }
-  ],
-  "workFlow": {
-    "sequence": ["Substructure", "Superstructure", "First Fix Electrical", "First Fix Plumbing", "Plastering", "Second Fix"],
-    "trades": ["Groundworker", "Bricklayer", "Electrician", "Plumber", "Plasterer", "Joiner"],
-    "notes": ["Any construction sequence notes"]
-  }
-}`;
+    { "code": "D-Lounge", "type": "door", "description": "Internal Access Door", "room": "Lounge" }
+  ]
+}
+Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
 
 
 
@@ -162,7 +129,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 rooms: [],
                 elements: [],
                 rawResponse: '',
-                error: `File not found: ${absolutePath}`
+                error: `File not found: ${absolutePath} `
             };
         }
 
@@ -176,7 +143,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             const { promisify } = await import('util');
             const execAsync = promisify(exec);
 
-            console.log(`📄 PDF detected, converting to image using native poppler-utils (pdftocairo)...`);
+            console.log(`📄 PDF detected, converting to image using native poppler-utils(pdftocairo)...`);
 
             try {
                 const os = await import('os');
@@ -184,17 +151,17 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 // Use system temp directory to avoid permission issues
                 // tempOutputPrefix will be like /tmp/extract_123456789
                 const tempDir = os.tmpdir();
-                const tempOutputPrefix = path.join(tempDir, `extract_${Date.now()}_${Math.random().toString(36).substring(7)}`);
+                const tempOutputPrefix = path.join(tempDir, `extract_${Date.now()}_${Math.random().toString(36).substring(7)} `);
 
                 // Command to convert first page of PDF to PNG
                 // -png: Output PNG format
                 // -singlefile: Output only the first page
-                const command = `pdftocairo -png -singlefile -r 300 "${absolutePath}" "${tempOutputPrefix}"`;
+                const command = `pdftocairo - png - singlefile - r 300 "${absolutePath}" "${tempOutputPrefix}"`;
 
-                console.log(`🐳 PDF Conversion Details:`);
+                console.log(`🐳 PDF Conversion Details: `);
                 console.log(`   Source: ${absolutePath} (Exists: ${fs.existsSync(absolutePath)})`);
-                console.log(`   Target Prefix: ${tempOutputPrefix}`);
-                console.log(`   Command: ${command}`);
+                console.log(`   Target Prefix: ${tempOutputPrefix} `);
+                console.log(`   Command: ${command} `);
 
                 const { stdout, stderr } = await execAsync(command);
                 if (stdout) console.log('   stdout:', stdout);
@@ -209,16 +176,16 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     base64Image = pngBuffer.toString('base64');
                     mimeType = 'image/png';
 
-                    console.log(`✅ PDF converted to image successfully via pdftocairo (${pngBuffer.length} bytes)`);
+                    console.log(`✅ PDF converted to image successfully via pdftocairo(${pngBuffer.length} bytes)`);
 
                     // Clean up temp file
                     fs.unlinkSync(expectedOutputFile);
                 } else {
-                    throw new Error(`Output file not created: ${expectedOutputFile}`);
+                    throw new Error(`Output file not created: ${expectedOutputFile} `);
                 }
 
             } catch (pdfError: any) {
-                console.error(`❌ PDF conversion error (pdftocairo):`, pdfError);
+                console.error(`❌ PDF conversion error(pdftocairo): `, pdfError);
                 return {
                     success: false,
                     rooms: [],
@@ -226,7 +193,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     detailedElements: [],
                     elements: [],
                     rawResponse: '',
-                    error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image instead.`
+                    error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG / PNG image instead.`
                 };
             }
         } else {
@@ -242,7 +209,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                             : 'image/png'; // default
         }
 
-        console.log(`🔍 Analyzing drawing: ${path.basename(imagePath)}`);
+        console.log(`🔍 Analyzing drawing: ${path.basename(imagePath)} `);
 
         const response = await getOpenAIClient().chat.completions.create({
             model: 'gpt-4o', // GPT-4 with vision
@@ -254,7 +221,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                         {
                             type: 'image_url',
                             image_url: {
-                                url: `data:${mimeType};base64,${base64Image}`,
+                                url: `data:${mimeType}; base64, ${base64Image} `,
                                 detail: 'high' // High detail for construction drawings
                             }
                         }
@@ -266,7 +233,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         });
 
         const content = response.choices[0]?.message?.content || '';
-        console.log(`📊 GPT-4 Vision response received (${content.length} chars)`);
+        console.log(`📊 GPT - 4 Vision response received(${content.length} chars)`);
 
         // Parse JSON response
         try {
@@ -307,8 +274,10 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             }
 
             // Stage 3: Parse detailed elements (doors, windows, fixtures)
-            if (parsed.elements && Array.isArray(parsed.elements)) {
-                for (const elem of parsed.elements) {
+            // Handle both "detailedElements" (new prompt) and "elements" (legacy/hallucinated)
+            const aiElements = parsed.detailedElements || parsed.elements;
+            if (aiElements && Array.isArray(aiElements)) {
+                for (const elem of aiElements) {
                     detailedElements.push({
                         code: elem.code || 'Unknown',
                         type: elem.type || 'unknown',
@@ -328,14 +297,14 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 };
             }
 
-            console.log(`✅ Comprehensive extraction complete:`);
-            console.log(`   📍 Rooms: ${rooms.length}`);
-            console.log(`   📝 Instructions: ${instructions.length}`);
-            console.log(`   🚪 Elements: ${detailedElements.length}`);
-            console.log(`   🔧 Work Flow: ${workFlow ? 'Yes' : 'No'}`);
+            console.log(`✅ Comprehensive extraction complete: `);
+            console.log(`   📍 Rooms: ${rooms.length} `);
+            console.log(`   📝 Instructions: ${instructions.length} `);
+            console.log(`   🚪 Elements: ${detailedElements.length} `);
+            console.log(`   🔧 Work Flow: ${workFlow ? 'Yes' : 'No'} `);
 
             for (const room of rooms) {
-                console.log(`   📍 ${room.name}: ${room.dimensions || 'no dimensions'}, ${room.area ? room.area + ' sqm' : 'no area'}`);
+                console.log(`   📍 ${room.name}: ${room.dimensions || 'no dimensions'}, ${room.area ? room.area + ' sqm' : 'no area'} `);
             }
 
             return {
@@ -357,7 +326,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 detailedElements: [],
                 elements: [],
                 rawResponse: content,
-                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)} `
             };
         }
 
@@ -380,7 +349,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
  */
 export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult> {
     try {
-        console.log(`🔍 Analyzing drawing from URL: ${imageUrl}`);
+        console.log(`🔍 Analyzing drawing from URL: ${imageUrl} `);
 
         const response = await getOpenAIClient().chat.completions.create({
             model: 'gpt-4o',
@@ -436,7 +405,7 @@ export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult
                 success: false,
                 elements: [],
                 rawResponse: content,
-                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)} `
             };
         }
 
