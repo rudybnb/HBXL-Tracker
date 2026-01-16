@@ -6169,5 +6169,65 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
 
 
 
+
+  // DEBUG ENDPOINT - Add this to verify production environment
+  app.get("/api/debug-system", async (req, res) => {
+    const results: any = {
+      timestamp: new Date().toISOString(),
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        hasOpenAIKey: !!process.env.OPENAI_API_KEY,
+        hasDatabaseUrl: !!process.env.DATABASE_URL
+      },
+      canvas: {
+        status: 'pending',
+        error: null
+      },
+      csvParsing: {
+        status: 'pending',
+        result: null
+      }
+    };
+
+    // Check Canvas (Native Dependencies)
+    try {
+      console.log('🔍 DEBUG: Attempting to import canvas...');
+      const { createCanvas } = await import('canvas');
+      const canvas = createCanvas(100, 100);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'red';
+      ctx.fillRect(0, 0, 50, 50);
+      results.canvas.status = 'success';
+      results.canvas.message = 'Canvas created successfully';
+    } catch (error: any) {
+      console.error('❌ DEBUG: Canvas import failed:', error);
+      results.canvas.status = 'failed';
+      results.canvas.error = error.message;
+      results.canvas.stack = error.stack;
+    }
+
+    // Check CSV Parsing
+    try {
+      console.log('🔍 DEBUG: Testing CSV parsing...');
+      // Sample data simulation
+      const sampleLines = [
+        "Name,Test Client",
+        "Address,123 Test St",
+        "Post code,TE1 5ST",
+        "Project Type,Test Build",
+        "Order Date,Date Required,Build Phase,Type of Resource,Resource Description"
+      ];
+      const parsed = parseEnhancedCSV(sampleLines);
+      results.csvParsing.status = 'success';
+      results.csvParsing.result = parsed?.metadata;
+    } catch (error: any) {
+      console.error('❌ DEBUG: CSV parsing failed:', error);
+      results.csvParsing.status = 'failed';
+      results.csvParsing.error = error.message;
+    }
+
+    res.json(results);
+  });
+
   return httpServer;
 }
