@@ -33,6 +33,12 @@ interface EnhancedJobData {
     weeklyBreakdown: WeeklyBreakdown;
   };
   resources: EnhancedResource[];
+  metadata?: {
+    clientName?: string;
+    projectType?: string;
+    address?: string;
+    postcode?: string;
+  };
 }
 
 export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
@@ -52,6 +58,34 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
   const phaseTaskData: { [key: string]: any[] } = {};
   const weeklyBreakdown: WeeklyBreakdown = {};
   const phases: string[] = [];
+
+  // Metadata Extraction (Scan first 20 lines)
+  let clientName: string | undefined;
+  let projectType: string | undefined;
+  let address: string | undefined;
+  let postcode: string | undefined;
+
+  // Scan for metadata before the header line
+  for (let i = 0; i < Math.min(enhancedFormatIndex, 20); i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    // Robust Regex Matching for Metadata
+    if (!clientName && line.match(/^(name|client|customer)\s*[,:]/i)) {
+      clientName = line.replace(/^(name|client|customer)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
+    }
+    else if (!projectType && line.match(/^(project type|job type|type)\s*[,:]/i)) {
+      projectType = line.replace(/^(project type|job type|type)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
+    }
+    else if (!address && line.match(/^(address|site address|location)\s*[,:]/i)) {
+      address = line.replace(/^(address|site address|location)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
+    }
+    else if (!postcode && line.match(/^(post\s*code|postcode|zip\s*code)\s*[,:]/i)) {
+      postcode = line.replace(/^(post\s*code|postcode|zip\s*code)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
+    }
+  }
+
+  console.log('🎯 Enhanced parser metadata:', { clientName, projectType, address, postcode });
 
   console.log('🎯 Using ENHANCED CSV parsing for accounting format');
 
@@ -187,6 +221,12 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
       grandTotal: totalLabourCost + totalMaterialCost,
       weeklyBreakdown
     },
-    resources: resources.filter(r => r.unitPrice !== undefined)
+    resources: resources.filter(r => r.unitPrice !== undefined),
+    metadata: {
+      clientName,
+      projectType,
+      address,
+      postcode
+    }
   };
 }

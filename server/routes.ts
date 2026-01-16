@@ -1154,10 +1154,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (enhancedData) {
             const phases = Object.keys(enhancedData.phases);
 
+            // Use metadata from parser if available, fallback to existing logic
+            if (enhancedData.metadata) {
+              if (enhancedData.metadata.clientName) jobName = enhancedData.metadata.clientName;
+              if (enhancedData.metadata.projectType) jobType = enhancedData.metadata.projectType;
+              if (enhancedData.metadata.address) jobAddress = enhancedData.metadata.address;
+              if (enhancedData.metadata.postcode) jobPostcode = enhancedData.metadata.postcode;
+            }
+
             console.log('🎯 Enhanced parsing results:', {
               phases: phases,
               totalLabourCost: enhancedData.financials.totalLabour,
-              grandTotal: enhancedData.financials.grandTotal
+              grandTotal: enhancedData.financials.grandTotal,
+              metadata: enhancedData.metadata
             });
 
             await storage.createJob({

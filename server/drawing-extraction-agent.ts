@@ -191,6 +191,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         // Handle PDF files by converting to image using pdfjs-dist
         if (ext === '.pdf') {
             console.log(`📄 PDF detected, converting to image using pdfjs-dist...`);
+            console.log(`🐳 DOCKER Check: Ensuring native dependencies are available for canvas...`);
             try {
                 // Dynamic import pdfjs-dist
                 const pdfjsLib = await import('pdfjs-dist');
