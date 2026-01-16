@@ -34,6 +34,29 @@ export interface ExtractedRoom {
     elements: string[];       // ["D01", "W01", "WC", "Basin"]
 }
 
+// Instruction/note extracted from drawing
+export interface ExtractedInstruction {
+    type: string;             // "note", "specification", "material"
+    text: string;             // The actual text content
+    location?: string;        // Where on drawing (optional)
+}
+
+// Detailed element with code (doors, windows, fixtures)
+export interface ExtractedDetailedElement {
+    code: string;             // "D01", "W01"
+    type: string;             // "door", "window", "fixture"
+    description: string;      // "Internal door 762mm"
+    room: string;             // Which room it belongs to
+    size?: string;            // "762 x 1981mm"
+}
+
+// Work flow analysis
+export interface ExtractedWorkFlow {
+    sequence: string[];       // Construction sequence
+    trades: string[];         // Required trades
+    notes: string[];          // Additional notes
+}
+
 // Legacy interface kept for backward compatibility
 export interface ExtractedElement {
     elementType: string;
@@ -52,52 +75,93 @@ export interface ExtractedElement {
 
 export interface ExtractionResult {
     success: boolean;
-    rooms: ExtractedRoom[];      // New: rooms from AI
-    elements: ExtractedElement[]; // Legacy: kept for compatibility
+    rooms: ExtractedRoom[];                    // Stage 1: Rooms
+    instructions: ExtractedInstruction[];       // Stage 2: Instructions/Notes
+    detailedElements: ExtractedDetailedElement[]; // Stage 3: Elements with codes
+    workFlow?: ExtractedWorkFlow;              // Stage 4: Work flow
+    elements: ExtractedElement[];              // Legacy: kept for compatibility
     rawResponse: string;
     error?: string;
 }
 
 
-const EXTRACTION_PROMPT = `You are analyzing a construction floor plan drawing.
-Your job is to IDENTIFY ROOMS and their DIMENSIONS only.
 
-**DO NOT:**
-- Generate costs or rates
-- Make up prices
-- Estimate quantities
+const EXTRACTION_PROMPT = `You are an expert construction QS analyzing a construction blueprint/floor plan.
+Perform a comprehensive 4-stage extraction:
 
-**DO:**
-- Identify all room names visible in the drawing (e.g., "Lounge", "Bathroom", "Kitchen", "Bedroom")
-- Extract room dimensions if shown (in mm or m)
-- Calculate approximate floor area from dimensions
-- Note any visible element codes (D01, W01, etc.) and which room they belong to
+=== STAGE 1: ROOMS & LAYOUT ===
+- Identify ALL rooms with their names (Lounge, Kitchen, Bathroom, Bedroom, etc.)
+- Extract dimensions if shown (in mm or m)
+- Calculate floor area from dimensions
+- Note which floor level (Ground, First, Second, etc.)
 
-**Look for:**
-- Room labels/names written on the drawing
-- Dimension text (e.g., "4850", "3600mm", "2.4m")
-- Door and window symbols with codes
-- Bathroom fixtures (WC, basin, shower symbols)
+=== STAGE 2: INSTRUCTIONS & NOTES ===
+- Extract ALL text notes, specifications, and annotations visible on the drawing
+- Identify material callouts (e.g., "100mm concrete slab", "12.5mm plasterboard")
+- Read any legend or key information
+- Note any special requirements or tolerances
 
-Respond ONLY with valid JSON:
+=== STAGE 3: ELEMENTS & ITEMS ===
+For each room, identify:
+- Doors with codes (D01, D02, D03...) - note size if shown
+- Windows with codes (W01, W02...) - note size if shown
+- Sanitaryware: WC, Basin, Shower, Bath
+- Electrical: Sockets, Switches, Light points
+- Kitchen fittings: Units, Worktop, Appliances
+- Heating: Radiators, UFH zones
+
+=== STAGE 4: WORK FLOW ANALYSIS ===
+Based on the elements identified, suggest:
+- Construction sequence (what gets built first)
+- Trades required (Electrician, Plumber, Carpenter, etc.)
+- Dependencies (e.g., "First fix electrical before plastering")
+
+**IMPORTANT:**
+- Do NOT invent costs or prices
+- Only extract what you can see in the drawing
+- If something is unclear, mark as "unclear" or omit
+
+Respond with valid JSON ONLY:
 {
   "rooms": [
     {
-      "name": "Lounge",
+      "name": "Room Name",
       "floor": "Ground",
       "dimensions": "4850mm x 3600mm",
       "area": 17.46,
-      "elements": ["D01", "W01"]
+      "elements": ["D01", "W01", "Radiator"]
+    }
+  ],
+  "instructions": [
+    {
+      "type": "note/specification/material",
+      "text": "The actual text from drawing",
+      "location": "Where on drawing (optional)"
+    }
+  ],
+  "elements": [
+    {
+      "code": "D01",
+      "type": "door",
+      "description": "Internal door 762mm",
+      "room": "Lounge",
+      "size": "762 x 1981mm"
     },
     {
-      "name": "Bathroom", 
-      "floor": "Ground",
-      "dimensions": "2980mm x 2485mm",
-      "area": 7.41,
-      "elements": ["D02", "WC", "Basin", "Shower"]
+      "code": "W01",
+      "type": "window",
+      "description": "Double glazed window",
+      "room": "Lounge",
+      "size": "1200 x 1050mm"
     }
-  ]
+  ],
+  "workFlow": {
+    "sequence": ["Substructure", "Superstructure", "First Fix Electrical", "First Fix Plumbing", "Plastering", "Second Fix"],
+    "trades": ["Groundworker", "Bricklayer", "Electrician", "Plumber", "Plasterer", "Joiner"],
+    "notes": ["Any construction sequence notes"]
+  }
 }`;
+
 
 
 /**
@@ -213,8 +277,11 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
             const parsed = JSON.parse(jsonMatch[0]);
             const rooms: ExtractedRoom[] = [];
+            const instructions: ExtractedInstruction[] = [];
+            const detailedElements: ExtractedDetailedElement[] = [];
+            let workFlow: ExtractedWorkFlow | undefined;
 
-            // Parse rooms from AI response (room-only format, no costs)
+            // Stage 1: Parse rooms from AI response
             if (parsed.rooms && Array.isArray(parsed.rooms)) {
                 for (const r of parsed.rooms) {
                     rooms.push({
@@ -227,7 +294,45 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 }
             }
 
-            console.log(`✅ Identified ${rooms.length} rooms from drawing`);
+            // Stage 2: Parse instructions/notes
+            if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                for (const inst of parsed.instructions) {
+                    instructions.push({
+                        type: inst.type || 'note',
+                        text: inst.text || '',
+                        location: inst.location
+                    });
+                }
+            }
+
+            // Stage 3: Parse detailed elements (doors, windows, fixtures)
+            if (parsed.elements && Array.isArray(parsed.elements)) {
+                for (const elem of parsed.elements) {
+                    detailedElements.push({
+                        code: elem.code || 'Unknown',
+                        type: elem.type || 'unknown',
+                        description: elem.description || '',
+                        room: elem.room || 'Unknown',
+                        size: elem.size
+                    });
+                }
+            }
+
+            // Stage 4: Parse work flow
+            if (parsed.workFlow) {
+                workFlow = {
+                    sequence: Array.isArray(parsed.workFlow.sequence) ? parsed.workFlow.sequence : [],
+                    trades: Array.isArray(parsed.workFlow.trades) ? parsed.workFlow.trades : [],
+                    notes: Array.isArray(parsed.workFlow.notes) ? parsed.workFlow.notes : []
+                };
+            }
+
+            console.log(`✅ Comprehensive extraction complete:`);
+            console.log(`   📍 Rooms: ${rooms.length}`);
+            console.log(`   📝 Instructions: ${instructions.length}`);
+            console.log(`   🚪 Elements: ${detailedElements.length}`);
+            console.log(`   🔧 Work Flow: ${workFlow ? 'Yes' : 'No'}`);
+
             for (const room of rooms) {
                 console.log(`   📍 ${room.name}: ${room.dimensions || 'no dimensions'}, ${room.area ? room.area + ' sqm' : 'no area'}`);
             }
@@ -235,6 +340,9 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             return {
                 success: true,
                 rooms,
+                instructions,
+                detailedElements,
+                workFlow,
                 elements: [], // Legacy: empty - costs come from CSV now
                 rawResponse: content
             };
@@ -244,6 +352,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             return {
                 success: false,
                 rooms: [],
+                instructions: [],
+                detailedElements: [],
                 elements: [],
                 rawResponse: content,
                 error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
@@ -255,6 +365,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         return {
             success: false,
             rooms: [],
+            instructions: [],
+            detailedElements: [],
             elements: [],
             rawResponse: '',
             error: error instanceof Error ? error.message : String(error)
