@@ -738,16 +738,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .limit(1);
 
           if (existing.length === 0) {
-            await db.insert(rooms).values({
+            const [newRoom] = await db.insert(rooms).values({
               jobId: file.jobId,
               name: room.name,
               floor: room.floor || 'Ground',
               status: 'not_started'
-            });
+            }).returning();
+
             roomsCreated++;
             console.log(`   📍 Created room: ${room.name}`);
+
+            // NEW: Process Detailed Elements for this room
+            if (result.detailedElements && result.detailedElements.length > 0) {
+              const roomElems = result.detailedElements.filter(e => e.room === room.name);
+              console.log(`      Found ${roomElems.length} elements for ${room.name}`);
+
+              for (const element of roomElems) {
+                // 1. Save to extractedElements (Traceability)
+                await db.insert(extractedElements).values({
+                  jobId: file.jobId,
+                  fileId: file.id,
+                  elementType: element.type,
+                  elementCode: element.code,
+                  description: element.description,
+                  roomName: room.name,
+                  quantity: "1",
+                  unit: "nr"
+                });
+
+                // 2. Create Room Element (UI Grouping)
+                const [newRoomElement] = await db.insert(roomElements).values({
+                  roomId: newRoom.id,
+                  name: element.code ? `${element.type} (${element.code})` : element.type,
+                  measurementSummary: "1 nr",
+                  subtotal: "0"
+                }).returning();
+
+                // 3. Create Payable Item (Assignable Task)
+                await db.insert(payableItems).values({
+                  elementId: newRoomElement.id,
+                  description: element.description,
+                  quantity: "1",
+                  unit: "nr",
+                  rate: "0",
+                  total: "0",
+                  status: "not_started"
+                });
+              }
+            }
+
           } else {
             console.log(`   📍 Room exists: ${room.name}`);
+            // Logic to add elements to existing room could go here if needed
           }
         }
         console.log(`✅ Created ${roomsCreated} new rooms for job`);
