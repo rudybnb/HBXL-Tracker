@@ -190,45 +190,43 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
         // Handle PDF files by converting to image using pdfjs-dist
         if (ext === '.pdf') {
-            console.log(`📄 PDF detected, converting to image using pdfjs-dist...`);
-            console.log(`🐳 DOCKER Check: Ensuring native dependencies are available for canvas...`);
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+
+            console.log(`📄 PDF detected, converting to image using native poppler-utils (pdftocairo)...`);
+
             try {
-                // Dynamic import pdfjs-dist
-                const pdfjsLib = await import('pdfjs-dist');
-                const { createCanvas } = await import('canvas');
+                // Determine output path (temp file)
+                const tempOutputPrefix = path.join(path.dirname(absolutePath), `temp_extract_${Date.now()}`);
 
-                // Read PDF data
-                const pdfData = new Uint8Array(fs.readFileSync(absolutePath));
+                // Command to convert first page of PDF to PNG
+                // -png: Output PNG format
+                // -singlefile: Output only the first page (or specified page)
+                // -r 300: Resolution 300 DPI for good quality
+                const command = `pdftocairo -png -singlefile -r 300 "${absolutePath}" "${tempOutputPrefix}"`;
 
-                // Load PDF document
-                const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-                const pdfDoc = await loadingTask.promise;
+                console.log(`🐳 Running native command: ${command}`);
+                await execAsync(command);
 
-                console.log(`   PDF has ${pdfDoc.numPages} pages, extracting first page...`);
+                const expectedOutputFile = `${tempOutputPrefix}.png`;
 
-                // Get first page
-                const page = await pdfDoc.getPage(1);
-                const viewport = page.getViewport({ scale: 2.0 }); // Scale up for quality
+                if (fs.existsSync(expectedOutputFile)) {
+                    // Read the generated PNG
+                    const pngBuffer = fs.readFileSync(expectedOutputFile);
+                    base64Image = pngBuffer.toString('base64');
+                    mimeType = 'image/png';
 
-                // Create canvas
-                const canvas = createCanvas(viewport.width, viewport.height);
-                const context = canvas.getContext('2d');
+                    console.log(`✅ PDF converted to image successfully via pdftocairo (${pngBuffer.length} bytes)`);
 
-                // Render PDF page to canvas
-                await page.render({
-                    canvasContext: context as any,
-                    viewport: viewport
-                }).promise;
-
-                // Convert canvas to base64 PNG
-                const pngBuffer = canvas.toBuffer('image/png');
-                base64Image = pngBuffer.toString('base64');
-                mimeType = 'image/png';
-
-                console.log(`✅ PDF converted to image successfully (${pngBuffer.length} bytes)`);
+                    // Clean up temp file
+                    fs.unlinkSync(expectedOutputFile);
+                } else {
+                    throw new Error(`Output file not created: ${expectedOutputFile}`);
+                }
 
             } catch (pdfError: any) {
-                console.error(`❌ PDF conversion error:`, pdfError);
+                console.error(`❌ PDF conversion error (pdftocairo):`, pdfError);
                 return {
                     success: false,
                     rooms: [],
