@@ -688,9 +688,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "File not found in database" });
       }
 
-      // Only extract from images
-      if (!file.fileType.startsWith('image/')) {
-        return res.status(400).json({ error: "Only image files can be extracted" });
+      // Only extract from images and PDFs
+      if (!file.fileType.startsWith('image/') && file.fileType !== 'application/pdf') {
+        return res.status(400).json({ error: "Only image and PDF files can be extracted" });
       }
 
       const filePath = path.join(uploadsDir, file.filename);
