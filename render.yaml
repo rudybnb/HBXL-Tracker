@@ -1,7 +1,7 @@
 services:
   # Node.js + React Frontend Service
   - type: web
-    name: erdesignandbuild-web
+    name: HBXL-Tracker
     runtime: docker
     env: docker
     dockerContext: .
