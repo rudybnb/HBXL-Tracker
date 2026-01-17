@@ -683,6 +683,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   // Process Nested Elements
                   if (room.elements && room.elements.length > 0) {
                     for (const element of room.elements) {
+                      // Price Lookup
+                      const roomPrice = lookupPrice({
+                        category: element.category || "General",
+                        subtype: element.item || element.description || "",
+                        unit: "nr",
+                        quantity: 1
+                      });
+
+                      // Validation Check
+                      if (roomPrice.source === 'default') {
+                        console.warn(`❌ Pricing Check Failed for Room Item: ${element.item}`);
+                        pricingValidationFailed = true;
+                      }
+
                       // Traceability
                       await db.insert(extractedElements).values({
                         jobId: req.params.id,
@@ -691,7 +705,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         description: element.description || element.item,
                         roomName: room.name,
                         quantity: element.quantity?.toString() || "1",
-                        unit: "nr"
+                        unit: "nr",
+                        rate: roomPrice.rate.toString(),
+                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString()
                       });
 
                       // UI Element
@@ -701,14 +717,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         measurementSummary: element.quantity || "1 nr",
                         subtotal: "0"
                       }).returning();
-
-                      // Price Lookup
-                      const roomPrice = lookupPrice({
-                        category: element.category || "General",
-                        subtype: element.item || element.description || "",
-                        unit: "nr",
-                        quantity: 1
-                      });
 
                       // Payable Item
                       await db.insert(payableItems).values({
@@ -722,19 +730,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       });
                       allNewElementIds.push(newRoomElement.id);
                     }
-                  } else {
-                    // Empty room fallback? Use default if needed
                   }
                 }
               }
 
+              // FINAL STATUS CHECK
+              if (pricingValidationFailed) {
+                console.log("🛑 VALIDATION FAILED: Pricing checks failed. Flagging for review.");
+                await db.update(jobFiles)
+                  .set({
+                    extractionStatus: 'failed',
+                    extractionError: "QS Validation Failed: Items found without approved CSV pricing. Review Required."
+                  })
+                  .where(eq(jobFiles.id, jobFile.id));
+              } else {
+                // Success
+                await db.update(jobFiles)
+                  .set({ extractionStatus: 'completed' })
+                  .where(eq(jobFiles.id, jobFile.id));
+                console.log(`✅ Extraction & Validation Successful. Identified ${result.rooms?.length || 0} rooms.`);
+              }
 
-              // Update status to completed
-              await db.update(jobFiles)
-                .set({ extractionStatus: 'completed' })
-                .where(eq(jobFiles.id, jobFile.id));
-
-              console.log(`✅ Identified ${result.rooms.length} rooms from ${uniqueFilename}`);
+              return; // End Processing Loop
             } else {
               // Update status to failed
               const errorMsg = result.error || 'No elements found in image';
