@@ -86,53 +86,39 @@ export interface ExtractionResult {
 
 
 
-const EXTRACTION_PROMPT = `You are the QS MANDATORY CHECKLIST AGENT (State Machine Enforcer).
-You must execute the following STATE MACHINE. You cannot skip steps.
+const EXTRACTION_PROMPT = `You are a STRICT TEXT-BASED EXTRACTION AGENT.
+Your job is to read the drawing and extract ONLY what is explicitly written and visible.
+DO NOT INFER. DO NOT GUESS. DO NOT HALLUCINATE.
 
-STATES:
-1. FOUNDATIONS (Look for: concrete, trench, footing, reinforcement)
-2. FOUNDATION_BUILD_UP (Look for: blockwork, brickwork below DPC)
-3. DPC (Look for: damp proof course, membrane)
-4. FLOOR_BUILD_UP (Look for: insulation, hardcore, sand blinding)
-5. CONCRETE_SLAB (Look for: slab, concrete, mesh)
-6. SCREED (Look for: screed, insulation, finish)
-7. EXTERNAL_WALLS (Look for: brick, block, cavity, ties, insulation)
-8. ROOF (Look for: tiles, slate, rafters, truss, felt, battens, lead)
-9. INTERNAL_ROOMS (Iterate every room)
+TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
+- FOUNDATIONS (trench, concrete, footing)
+- ROOF (tiles, slate, rafters, truss)
+- WALLS (brick, block, cavity)
+- FLOORS (screed, insulation, slab)
 
-CRITICAL INSTRUCTION:
-You must extract GLOBAL ELEMENTS (States 1-8) before processing Rooms.
-Do not lazily skip these. Read the notes, specifications, and legends.
-
-For each STATE 1-8 (GLOBAL):
-- Identify items.
-- verify: "Are all checks complete?"
-- Output items with quantity.
-
-For STATE 9 (INTERNAL ROOMS):
-- Iterate every room.
-- For each room, verify: Electrical, Plumbing, Doors, Finishes.
-- COUNT strictly (e.g. 5x Sockets).
+TASK 2: ROOM IDENTIFICATION (STRICT EVIDENCE RULE)
+- You must ONLY identifying rooms that have a clear TEXT LABEL on the drawing.
+- Examples: "Bedroom 1", "Kitchen", "Bathroom", "Conservatory".
+- CRITICAL: NO LABEL = NO ROOM. Do not invent "Lounge" or "Living Room" if the text is not there.
+- Do not infer a room type from furniture (e.g. seeing a bed does NOT make it a Bedroom unless labeled "Bedroom").
 
 FORMAT:
 Return ONLY purely valid JSON. No markdown.
-Return JSON:
 {
   "success": true,
   "stateMachine": {
-      "foundations": { "checked": true, "items": [ { "category": "Foundations", "item": "...", "quantity": "..." } ] },
-      "roof": { "checked": true, "items": [...] },
-      ... include all states ...
+      "foundations": { "checked": true, "items": [...] },
+      "roof": { "checked": true, "items": [...] }
   },
   "rooms": [
       {
-          "name": "Bathroom",
-          "checks": { "electrical": true, "plumbing": true, "doors": true, "finishes": true },
-          "elements": [ ...items... ]
+          "name": "EXACT TEXT FROM DRAWING",
+          "floor": "Ground",
+          "elements": []
       }
   ]
 }
-If a section is genuinely not visible, set "checked": true but items: empty.`;
+If you find no text label for a space, DO NOT CREATE A ROOM for it.`;
 
 
 
