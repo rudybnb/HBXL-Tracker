@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { DatabaseStorage } from "./database-storage";
+import { lookupPrice } from "./pricing-library";
 
 // Session interface for type safety
 interface SessionRequest extends Express.Request {
