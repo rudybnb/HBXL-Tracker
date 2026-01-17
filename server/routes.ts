@@ -31,6 +31,7 @@ interface MulterRequest extends ExpressRequest {
 }
 import { parse } from "csv-parse";
 import { parseEnhancedCSV } from "./enhanced-csv-parser";
+import { roomMapper } from "./room-mapper";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -769,6 +770,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     }
                   }
                 }
+              }
+
+              // 3. ALLOCATE CSV COSTS TO ROOMS (The Missing Link)
+              try {
+                const jobCostsForAllocation = await db.select().from(jobCostItems).where(eq(jobCostItems.jobId, req.params.id));
+                if (jobCostsForAllocation.length > 0) {
+                  console.log(`💰 Allocating ${jobCostsForAllocation.length} CSV cost items to created rooms...`);
+                  const phaseTaskData: Record<string, any[]> = {};
+
+                  for (const item of jobCostsForAllocation) {
+                    const phase = item.phase || "General";
+                    if (!phaseTaskData[phase]) phaseTaskData[phase] = [];
+
+                    phaseTaskData[phase].push({
+                      description: item.description || "Unspecified Item",
+                      total: item.total || "0",
+                      rate: item.rate,
+                      unit: item.unit,
+                      quantity: item.quantity
+                    });
+                  }
+
+                  await roomMapper.allocateCostsToRooms(req.params.id, phaseTaskData);
+                  console.log("✅ Cost allocation complete.");
+                } else {
+                  console.warn("⚠️ No CSV costs found to allocate. Upload CSV if needed.");
+                }
+              } catch (allocError) {
+                console.error("❌ Allocation failed:", allocError);
               }
 
               // FINAL STATUS CHECK
