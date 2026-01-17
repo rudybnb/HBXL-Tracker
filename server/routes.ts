@@ -588,72 +588,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
               let roomsCreated = 0;
               let pricingValidationFailed = false; // Initialized properly in scope
 
-              // 1. Process GLOBAL ELEMENTS (Foundations, Roof, etc.)
-              if (result.globalElements && result.globalElements.length > 0) {
-                console.log(`🌍 Found ${result.globalElements.length} global elements.`);
+              // 1. Process STATE MACHINE (Global Elements)
+              // Note: pricingValidationFailed is declared in outer scope
 
-                // Get or Create GLOBAL room
-                let globalRoomId;
-                const globalRoomName = "GLOBAL";
+              if (result.stateMachine) {
+                const settings = result.stateMachine;
+                const sections = Object.keys(settings);
 
-                const existingGlobal = await db.select().from(rooms)
-                  .where(and(eq(rooms.jobId, req.params.id), eq(rooms.name, globalRoomName)))
-                  .limit(1);
+                if (sections.length > 0) {
+                  // Get or Create GLOBAL room
+                  let globalRoomId;
+                  const globalRoomName = "GLOBAL";
 
-                if (existingGlobal.length === 0) {
-                  const [newGlobal] = await db.insert(rooms).values({
-                    jobId: req.params.id,
-                    name: globalRoomName,
-                    floor: 'Site',
-                    status: 'not_started'
-                  }).returning();
-                  globalRoomId = newGlobal.id;
-                  roomsCreated++;
-                } else {
-                  globalRoomId = existingGlobal[0].id;
-                }
+                  const existingGlobal = await db.select().from(rooms)
+                    .where(and(eq(rooms.jobId, req.params.id), eq(rooms.name, globalRoomName)))
+                    .limit(1);
 
-                // Insert Global Elements
-                for (const element of result.globalElements) {
-                  // Extract Traceability
-                  await db.insert(extractedElements).values({
-                    jobId: req.params.id,
-                    fileId: jobFile.id,
-                    elementType: element.category || "global",
-                    description: element.description || element.item,
-                    roomName: globalRoomName,
-                    quantity: element.quantity?.toString() || "1",
-                    unit: "nr"
-                  });
+                  if (existingGlobal.length === 0) {
+                    const [newGlobal] = await db.insert(rooms).values({
+                      jobId: req.params.id,
+                      name: globalRoomName,
+                      floor: 'Site',
+                      status: 'not_started'
+                    }).returning();
+                    globalRoomId = newGlobal.id;
+                    roomsCreated++;
+                  } else {
+                    globalRoomId = existingGlobal[0].id;
+                  }
 
-                  // Room Element
-                  const [newRoomElement] = await db.insert(roomElements).values({
-                    roomId: globalRoomId,
-                    name: element.item || element.category,
-                    measurementSummary: element.quantity || "1 nr",
-                    subtotal: "0"
-                  }).returning();
+                  // Iterate States (Foundations -> Roof)
+                  for (const sectionKey of sections) {
+                    const sectionData = settings[sectionKey];
+                    if (sectionData && sectionData.items && sectionData.items.length > 0) {
+                      console.log(`🌍 Processing Section: ${sectionKey} (${sectionData.items.length} items)`);
 
-                  // Price Lookup
-                  const globalPrice = lookupPrice({
-                    category: element.category || "General",
-                    subtype: element.item || element.description || "",
-                    unit: "nr",
-                    quantity: 1
-                  });
+                      for (const element of sectionData.items) {
+                        // Price Lookup
+                        const globalPrice = lookupPrice({
+                          category: element.category || sectionKey,
+                          subtype: element.item || element.description || "",
+                          unit: "nr",
+                          quantity: 1
+                        });
 
-                  // Payable Item
-                  await db.insert(payableItems).values({
-                    elementId: newRoomElement.id,
-                    description: element.description || element.item,
-                    quantity: element.quantity?.toString() || "1",
-                    unit: "nr",
-                    rate: globalPrice.rate.toString(),
-                    total: (globalPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
-                    status: "not_started"
-                  });
+                        // Validation Check
+                        if (globalPrice.source === 'default') {
+                          console.warn(`❌ Pricing Check Failed for: ${element.item}`);
+                          pricingValidationFailed = true;
+                        }
 
-                  allNewElementIds.push(newRoomElement.id);
+                        // Traceability
+                        await db.insert(extractedElements).values({
+                          jobId: req.params.id,
+                          fileId: jobFile.id,
+                          elementType: element.category || sectionKey,
+                          description: element.description || element.item,
+                          roomName: globalRoomName,
+                          quantity: element.quantity?.toString() || "1",
+                          unit: "nr",
+                          rate: globalPrice.rate.toString(),
+                          total: (globalPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
+                          rawJson: JSON.stringify(element)
+                        });
+
+                        // UI Element
+                        const [newRoomElement] = await db.insert(roomElements).values({
+                          roomId: globalRoomId,
+                          name: element.item || element.category,
+                          measurementSummary: element.quantity || "1 nr",
+                          subtotal: "0"
+                        }).returning();
+
+                        // Payable Item
+                        await db.insert(payableItems).values({
+                          elementId: newRoomElement.id,
+                          description: element.description || element.item,
+                          quantity: element.quantity?.toString() || "1",
+                          unit: "nr",
+                          rate: globalPrice.rate.toString(),
+                          total: (globalPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
+                          status: "not_started"
+                        });
+
+                        allNewElementIds.push(newRoomElement.id);
+                      }
+                    }
+                  }
                 }
               }
 
