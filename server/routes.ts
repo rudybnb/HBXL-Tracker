@@ -629,7 +629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       elementCode: element.code,
                       description: element.description,
                       roomName: room.name,
-                      quantity: "1",
+                      quantity: element.quantity?.toString() || "1",
                       unit: "nr"
                     });
 
@@ -645,7 +645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     await db.insert(payableItems).values({
                       elementId: newRoomElement.id,
                       description: element.description,
-                      quantity: "1",
+                      quantity: element.quantity?.toString() || "1",
                       unit: "nr",
                       rate: "0",
                       total: "0",

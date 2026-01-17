@@ -86,29 +86,36 @@ export interface ExtractionResult {
 
 
 
-const EXTRACTION_PROMPT = `Please analyze this floor plan image to help me understand the layout for renovation planning.
-I need a structured list of the rooms and any visible construction elements (doors, windows, fixtures).
+const EXTRACTION_PROMPT = `Please perform a COMMERCIAL QUANTITY TAKEOFF on this drawing.
+I need a "Bill of Quantities" style output.
 
-KEY TASKS:
-1. List all the rooms you can see (e.g. Lounge, Kitchen).
-2. For each room, identify visible elements like Windows, Doors, Toilets, Sinks, Sockets, and Lights.
-   
-- If you see a code like "W01" or "D01", please include it.
-- If you don't see a code, just list the item type (e.g. "socket", "window").
+PART 1: ROOMS
+List every room. For each room, ID visible distinct items (windows, doors, electrical).
+- COUNT the items. If you see 3 sockets, say quantity: 3.
+- If you see a code (e.g. W01), use it.
 
-FORMATTING:
-Please provide the data in this exact JSON format:
+PART 2: GLOBAL/STRUCTURAL ELEMENTS
+List major building elements that are not "in" a room, such as:
+- External Walls (perimeter)
+- Roof (tiles, trusses)
+- Foundations
+- Floor Slab
+
+FORMAT:
+Return JSON only:
 {
   "success": true,
   "rooms": [
-    { "name": "Lounge", "floor": "Ground", "dimensions": "...", "area": 0, "elements": [] }
+    { "name": "Lounge", "floor": "Ground" },
+    { "name": "GLOBAL", "floor": "Site" } 
   ],
   "detailedElements": [
-    { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge" },
-    { "code": null, "type": "socket", "description": "Socket", "room": "Lounge" }
+    { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge", "quantity": "1" },
+    { "code": null, "type": "socket", "description": "Double Socket", "room": "Lounge", "quantity": "3" },
+    { "code": null, "type": "wall", "description": "External Brick Wall", "room": "GLOBAL", "quantity": "1" },
+    { "code": null, "type": "roof", "description": "Tiled Roof", "room": "GLOBAL", "quantity": "1" }
   ]
-}
-Do not include markdown formatting like \`\`\`json. Return raw JSON only.`;
+}`;
 
 
 
