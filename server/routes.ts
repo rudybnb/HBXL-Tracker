@@ -586,6 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (result.success) {
               const allNewElementIds: number[] = [];
               let roomsCreated = 0;
+              let pricingValidationFailed = false; // Initialized properly in scope
 
               // 1. Process GLOBAL ELEMENTS (Foundations, Roof, etc.)
               if (result.globalElements && result.globalElements.length > 0) {
