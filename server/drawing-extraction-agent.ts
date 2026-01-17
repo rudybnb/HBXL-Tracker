@@ -150,8 +150,18 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
             try {
                 // Dynamic imports to ensure they are available
-                const pdfjsLib = await import('pdfjs-dist');
+                const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
                 const { createCanvas } = await import('canvas');
+
+                // Polyfill DOMMatrix if missing (needed for pdfjs-dist legacy in Node)
+                if (!global.DOMMatrix) {
+                    // @ts-ignore
+                    global.DOMMatrix = class DOMMatrix {
+                        constructor() {
+                            this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+                        }
+                    }
+                }
 
                 // Read file buffer
                 const fileBuffer = fs.readFileSync(absolutePath);
@@ -163,7 +173,9 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 const loadingTask = pdfjsLib.getDocument({
                     data,
                     // Disable font face rules which can cause issues in Node canvas
-                    disableFontFace: true
+                    disableFontFace: true,
+                    // Legacy build verbosity control to avoid warning spam
+                    verbosity: 0
                 });
 
                 const doc = await loadingTask.promise;
