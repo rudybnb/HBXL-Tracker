@@ -632,14 +632,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     subtotal: "0"
                   }).returning();
 
+                  // Price Lookup
+                  const globalPrice = lookupPrice({
+                    category: element.category || "General",
+                    subtype: element.item || element.description || "",
+                    unit: "nr",
+                    quantity: 1
+                  });
+
                   // Payable Item
                   await db.insert(payableItems).values({
                     elementId: newRoomElement.id,
                     description: element.description || element.item,
                     quantity: element.quantity?.toString() || "1",
                     unit: "nr",
-                    rate: "0",
-                    total: "0",
+                    rate: globalPrice.rate.toString(),
+                    total: (globalPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
                     status: "not_started"
                   });
 
@@ -693,14 +701,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         subtotal: "0"
                       }).returning();
 
+                      // Price Lookup
+                      const roomPrice = lookupPrice({
+                        category: element.category || "General",
+                        subtype: element.item || element.description || "",
+                        unit: "nr",
+                        quantity: 1
+                      });
+
                       // Payable Item
                       await db.insert(payableItems).values({
                         elementId: newRoomElement.id,
                         description: element.description || element.item,
                         quantity: element.quantity?.toString() || "1",
                         unit: "nr",
-                        rate: "0",
-                        total: "0",
+                        rate: roomPrice.rate.toString(),
+                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
                         status: "not_started"
                       });
                       allNewElementIds.push(newRoomElement.id);
