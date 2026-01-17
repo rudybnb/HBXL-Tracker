@@ -163,9 +163,12 @@ export function resetToDefaultPricing(): void {
 /**
  * Look up price for a component
  */
-export function lookupPrice(component: ResolvedComponent): { rate: number; source: 'csv' | 'default' } {
+export function lookupPrice(component: ResolvedComponent, customLibrary?: PricingEntry[]): { rate: number; source: 'csv' | 'default' } {
+    // Determine which library to use (Custom/DB or Memory/Default)
+    const activeLibrary = customLibrary && customLibrary.length > 0 ? customLibrary : pricingLibrary;
+
     // Try exact match first
-    const exactMatch = pricingLibrary.find(
+    const exactMatch = activeLibrary.find(
         p => p.category.toLowerCase() === component.category.toLowerCase() &&
             p.subtype.toLowerCase() === component.subtype.toLowerCase()
     );
@@ -174,8 +177,8 @@ export function lookupPrice(component: ResolvedComponent): { rate: number; sourc
         return { rate: exactMatch.rate, source: 'csv' };
     }
 
-    // Try partial match on subtype
-    const partialMatch = pricingLibrary.find(
+    // Try partial match on subtype (Bidirectional)
+    const partialMatch = activeLibrary.find(
         p => component.subtype.toLowerCase().includes(p.subtype.toLowerCase()) ||
             p.subtype.toLowerCase().includes(component.subtype.toLowerCase())
     );
@@ -185,7 +188,7 @@ export function lookupPrice(component: ResolvedComponent): { rate: number; sourc
     }
 
     // Default fallback rate
-    console.log(`⚠️ No pricing found for: ${component.category} - ${component.subtype}, using default`);
+    console.log(`⚠️ No pricing found in ${customLibrary ? 'JOB CSV' : 'DEFAULT LIB'} for: ${component.category} - ${component.subtype}, using default`);
     return { rate: 50.00, source: 'default' };
 }
 

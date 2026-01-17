@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { DatabaseStorage } from "./database-storage";
-import { lookupPrice } from "./pricing-library";
+import { lookupPrice, PricingEntry } from "./pricing-library";
 
 // Session interface for type safety
 interface SessionRequest extends Express.Request {
@@ -586,6 +586,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (result.success) {
               const allNewElementIds: number[] = [];
               let roomsCreated = 0;
+
+              // FETCH JOB SPECIFIC PRICING (Fix to ensure validation checks user CSV)
+              const jobCosts = await db.select().from(jobCostItems).where(eq(jobCostItems.jobId, req.params.id));
+              const jobSpecificLibrary: PricingEntry[] = jobCosts.map(c => ({
+                category: c.phase || "General", // Map 'phase' to 'category'
+                subtype: c.description || "",
+                unit: c.unit || "nr",
+                rate: parseFloat(c.rate || "0"),
+                lastUpdated: new Date().toISOString()
+              }));
+              console.log(`📊 Loaded ${jobSpecificLibrary.length} items from DB for validation.`);
+
+              let pricingValidationFailed = false; // Initialized properly in scope
               let pricingValidationFailed = false; // Initialized properly in scope
               const failedItems: string[] = [];
 
@@ -631,7 +644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                           subtype: element.item || element.description || "",
                           unit: "nr",
                           quantity: 1
-                        });
+                        }, jobSpecificLibrary);
 
                         // Validation Check
                         if (globalPrice.source === 'default') {
@@ -713,7 +726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         subtype: element.item || element.description || "",
                         unit: "nr",
                         quantity: 1
-                      });
+                      }, jobSpecificLibrary);
 
                       // Validation Check
                       if (roomPrice.source === 'default') {
