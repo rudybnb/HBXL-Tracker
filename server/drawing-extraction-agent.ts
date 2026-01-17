@@ -86,34 +86,57 @@ export interface ExtractionResult {
 
 
 
-const EXTRACTION_PROMPT = `Please perform a COMMERCIAL QUANTITY TAKEOFF on this drawing.
-I need a "Bill of Quantities" style output.
+const EXTRACTION_PROMPT = `You are the QS MANDATORY CHECKLIST AGENT.
+Your instructions are to performing a "pre-flight" quantity survey on this drawing.
+You must not skip steps. You must work sequentially.
 
-PART 1: ROOMS
-List every room. For each room, ID visible distinct items (windows, doors, electrical).
-- COUNT the items. If you see 3 sockets, say quantity: 3.
-- If you see a code (e.g. W01), use it.
+---
+MASTER SEQUENCE (LOCKED ORDER)
+1. Foundations (Excavation, Concrete, Blockwork)
+2. Foundation Build-Up (Hardcore, Blinding)
+3. Damp Proof Course (DPC)
+4. Ground Floor Build-Up (Insulation, DPM)
+5. Concrete Slab
+6. Screed
+7. External Walls / Brickwork (Perimeter, Inner/Outer Leaf)
+8. Roof (Trusses, Tiles, Fascias, Gutters)
+9. Internal Rooms (Sequentially)
+---
 
-PART 2: GLOBAL/STRUCTURAL ELEMENTS
-List major building elements that are not "in" a room, such as:
-- External Walls (perimeter)
-- Roof (tiles, trusses)
-- Foundations
-- Floor Slab
+INSTRUCTIONS:
+For Steps 1-8 (GLOBAL ELEMENTS):
+- Look for these specific items on the plan.
+- If found, list them with a QUANTITY (e.g., "120 sqm", "45 lm", "1 item").
+- If not explicitly dimensioned, ESTIMATE based on scale or Count items (e.g. "1 Roof").
+- Group these under "globalElements".
 
+For Step 9 (INTERNAL ROOMS):
+- Identify every room.
+- For EACH room, run this sub-checklist:
+   - Electrical: Sockets (Count), Lights (Count), Switches (Count)
+   - Plumbing: Radiators, Sanitaryware (WC, Basin, Shower)
+   - Doors: Internal doors
+   - Finishes: Floor/Wall type (if labeled)
+- Group these under "rooms".
+
+---
 FORMAT:
-Return JSON only:
+Return ONLY purely valid JSON. No markdown.
 {
   "success": true,
-  "rooms": [
-    { "name": "Lounge", "floor": "Ground" },
-    { "name": "GLOBAL", "floor": "Site" } 
+  "globalElements": [
+    { "category": "Foundations", "item": "Strip Foundation", "quantity": "45 lm", "description": "Standard strip foundation" },
+    { "category": "External Walls", "item": "Brickwork Outer Leaf", "quantity": "120 sqm", "description": "Facing brick" }
   ],
-  "detailedElements": [
-    { "code": "W01", "type": "window", "description": "Double glazed window", "room": "Lounge", "quantity": "1" },
-    { "code": null, "type": "socket", "description": "Double Socket", "room": "Lounge", "quantity": "3" },
-    { "code": null, "type": "wall", "description": "External Brick Wall", "room": "GLOBAL", "quantity": "1" },
-    { "code": null, "type": "roof", "description": "Tiled Roof", "room": "GLOBAL", "quantity": "1" }
+  "rooms": [
+    {
+      "name": "Lounge",
+      "floor": "Ground",
+      "elements": [
+         { "category": "Electrical", "item": "Double Socket", "quantity": "4", "description": "White plastic double socket" },
+         { "category": "Doors", "item": "Internal Door", "quantity": "1", "description": "Standard door leaf" }
+      ]
+    }
   ]
 }`;
 
