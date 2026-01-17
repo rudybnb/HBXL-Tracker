@@ -86,59 +86,49 @@ export interface ExtractionResult {
 
 
 
-const EXTRACTION_PROMPT = `You are the QS MANDATORY CHECKLIST AGENT.
-Your instructions are to performing a "pre-flight" quantity survey on this drawing.
-You must not skip steps. You must work sequentially.
+const EXTRACTION_PROMPT = `You are the QS MANDATORY CHECKLIST AGENT (State Machine Enforcer).
+You must execute the following STATE MACHINE. You cannot skip steps.
 
----
-MASTER SEQUENCE (LOCKED ORDER)
-1. Foundations (Excavation, Concrete, Blockwork)
-2. Foundation Build-Up (Hardcore, Blinding)
-3. Damp Proof Course (DPC)
-4. Ground Floor Build-Up (Insulation, DPM)
-5. Concrete Slab
-6. Screed
-7. External Walls / Brickwork (Perimeter, Inner/Outer Leaf)
-8. Roof (Trusses, Tiles, Fascias, Gutters)
-9. Internal Rooms (Sequentially)
----
+STATES:
+1. FOUNDATIONS
+2. FOUNDATION_BUILD_UP
+3. DPC
+4. FLOOR_BUILD_UP
+5. CONCRETE_SLAB
+6. SCREED
+7. EXTERNAL_WALLS
+8. ROOF
+9. INTERNAL_ROOMS
 
-INSTRUCTIONS:
-For Steps 1-8 (GLOBAL ELEMENTS):
-- Look for these specific items on the plan.
-- If found, list them with a QUANTITY (e.g., "120 sqm", "45 lm", "1 item").
-- If not explicitly dimensioned, ESTIMATE based on scale or Count items (e.g. "1 Roof").
-- Group these under "globalElements".
+INSTRUCTION:
+For each STATE 1-8 (GLOBAL):
+- Identify items.
+- verify: "Are all checks complete?"
+- Output items with quantity.
 
-For Step 9 (INTERNAL ROOMS):
-- Identify every room.
-- For EACH room, run this sub-checklist:
-   - Electrical: Sockets (Count), Lights (Count), Switches (Count)
-   - Plumbing: Radiators, Sanitaryware (WC, Basin, Shower)
-   - Doors: Internal doors
-   - Finishes: Floor/Wall type (if labeled)
-- Group these under "rooms".
+For STATE 9 (INTERNAL ROOMS):
+- Iterate every room.
+- For each room, verify: Electrical, Plumbing, Doors, Finishes.
+- COUNT strictly (e.g. 5x Sockets).
 
----
 FORMAT:
-Return ONLY purely valid JSON. No markdown.
+Return JSON:
 {
   "success": true,
-  "globalElements": [
-    { "category": "Foundations", "item": "Strip Foundation", "quantity": "45 lm", "description": "Standard strip foundation" },
-    { "category": "External Walls", "item": "Brickwork Outer Leaf", "quantity": "120 sqm", "description": "Facing brick" }
-  ],
+  "stateMachine": {
+      "foundations": { "checked": true, "items": [ { "category": "Foundations", "item": "...", "quantity": "..." } ] },
+      "roof": { "checked": true, "items": [...] },
+      ... include all states ...
+  },
   "rooms": [
-    {
-      "name": "Lounge",
-      "floor": "Ground",
-      "elements": [
-         { "category": "Electrical", "item": "Double Socket", "quantity": "4", "description": "White plastic double socket" },
-         { "category": "Doors", "item": "Internal Door", "quantity": "1", "description": "Standard door leaf" }
-      ]
-    }
+      {
+          "name": "Bathroom",
+          "checks": { "electrical": true, "plumbing": true, "doors": true, "finishes": true },
+          "elements": [ ...items... ]
+      }
   ]
-}`;
+}
+If a section is not visible, set "checked": true but items: empty (meaning you checked and found nothing).`;
 
 
 
