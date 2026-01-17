@@ -587,6 +587,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const allNewElementIds: number[] = [];
               let roomsCreated = 0;
               let pricingValidationFailed = false; // Initialized properly in scope
+              const failedItems: string[] = [];
 
               // 1. Process STATE MACHINE (Global Elements)
               // Note: pricingValidationFailed is declared in outer scope
@@ -636,6 +637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         if (globalPrice.source === 'default') {
                           console.warn(`❌ Pricing Check Failed for: ${element.item}`);
                           pricingValidationFailed = true;
+                          failedItems.push(element.item || element.description || "Unknown Item");
                         }
 
                         // Traceability
@@ -717,6 +719,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       if (roomPrice.source === 'default') {
                         console.warn(`❌ Pricing Check Failed for Room Item: ${element.item}`);
                         pricingValidationFailed = true;
+                        failedItems.push(element.item || element.description || "Unknown Room Item");
                       }
 
                       // Traceability
@@ -758,11 +761,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
               // FINAL STATUS CHECK
               if (pricingValidationFailed) {
-                console.log("🛑 VALIDATION FAILED: Pricing checks failed. Flagging for review.");
+                const uniqueFailedItems = [...new Set(failedItems)];
+                const failedItemsList = uniqueFailedItems.slice(0, 5).join(", ") + (uniqueFailedItems.length > 5 ? ", ..." : "");
+                console.log(`🛑 VALIDATION FAILED: Pricing checks failed for: ${failedItemsList}`);
+
                 await db.update(jobFiles)
                   .set({
                     extractionStatus: 'failed',
-                    extractionError: "QS Validation Failed: Items found without approved CSV pricing. Review Required."
+                    extractionError: `QS Validation Failed. Missing CSV pricing for: ${failedItemsList}. Review CSV.`
                   })
                   .where(eq(jobFiles.id, jobFile.id));
               } else {
