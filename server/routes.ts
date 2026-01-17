@@ -599,7 +599,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.log(`📊 Loaded ${jobSpecificLibrary.length} items from DB for validation.`);
 
               let pricingValidationFailed = false; // Initialized properly in scope
-              let pricingValidationFailed = false; // Initialized properly in scope
               const failedItems: string[] = [];
 
               // 1. Process STATE MACHINE (Global Elements)
