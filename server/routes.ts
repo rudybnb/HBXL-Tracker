@@ -584,6 +584,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             if (result.success && result.rooms && result.rooms.length > 0) {
               // Store extracted rooms (costs come from HBXL CSV, not AI)
+              console.log(`💾 Saving ${result.rooms.length} rooms for job ${req.params.id}`);
+              const allNewElementIds: number[] = [];
+              let roomsCreated = 0;
+
               for (const room of result.rooms) {
                 // Check if room already exists for this job
                 const existing = await db.select()
@@ -594,16 +598,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   ))
                   .limit(1);
 
+                let currentRoomId;
+
                 if (existing.length === 0) {
-                  await db.insert(rooms).values({
+                  const [newRoom] = await db.insert(rooms).values({
                     jobId: req.params.id,
                     name: room.name,
                     floor: room.floor || 'Ground',
                     status: 'not_started'
-                  });
+                  }).returning();
+                  currentRoomId = newRoom.id;
+                  roomsCreated++;
                   console.log(`   📍 Created room: ${room.name} (${room.dimensions || 'no dimensions'})`);
                 } else {
                   console.log(`   📍 Room exists: ${room.name}`);
+                  currentRoomId = existing[0].id;
+                }
+
+                // Process Detailed Elements for this room (Unified Logic)
+                if (result.detailedElements && result.detailedElements.length > 0) {
+                  const roomElems = result.detailedElements.filter(e => e.room === room.name);
+                  console.log(`      Found ${roomElems.length} elements for ${room.name}`);
+
+                  for (const element of roomElems) {
+                    // 1. Save to extractedElements (Traceability)
+                    await db.insert(extractedElements).values({
+                      jobId: req.params.id,
+                      fileId: jobFile.id,
+                      elementType: element.type,
+                      elementCode: element.code,
+                      description: element.description,
+                      roomName: room.name,
+                      quantity: "1",
+                      unit: "nr"
+                    });
+
+                    // 2. Create Room Element (UI Grouping)
+                    const [newRoomElement] = await db.insert(roomElements).values({
+                      roomId: currentRoomId,
+                      name: element.code ? `${element.type} (${element.code})` : element.type,
+                      measurementSummary: "1 nr",
+                      subtotal: "0"
+                    }).returning();
+
+                    // 3. Create Payable Item (Assignable Task)
+                    await db.insert(payableItems).values({
+                      elementId: newRoomElement.id,
+                      description: element.description,
+                      quantity: "1",
+                      unit: "nr",
+                      rate: "0",
+                      total: "0",
+                      status: "not_started"
+                    });
+
+                    // Track for cost matching
+                    allNewElementIds.push(newRoomElement.id);
+                  }
+                }
+
+                // FALLBACK: If no elements found for this room, create a default one
+                if (!result.detailedElements || result.detailedElements.filter(e => e.room === room.name).length === 0) {
+                  console.log(`      ⚠️ No elements found for ${room.name}, creating default container.`);
+
+                  // Check if default already exists
+                  const existingDefaults = await db.select().from(roomElements)
+                    .where(and(eq(roomElements.roomId, currentRoomId), eq(roomElements.name, "Room Construction")));
+
+                  if (existingDefaults.length === 0) {
+                    const [defaultElement] = await db.insert(roomElements).values({
+                      roomId: currentRoomId,
+                      name: "Room Construction",
+                      measurementSummary: "Item",
+                      subtotal: "0"
+                    }).returning();
+
+                    await db.insert(payableItems).values({
+                      elementId: defaultElement.id,
+                      description: "General construction works",
+                      quantity: "1",
+                      unit: "item",
+                      rate: "0",
+                      total: "0",
+                      status: "not_started"
+                    });
+
+                    allNewElementIds.push(defaultElement.id);
+                  }
                 }
               }
 
@@ -726,6 +807,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (result.success && result.rooms && result.rooms.length > 0) {
         // Store extracted rooms (costs come from HBXL CSV, not AI)
         console.log(`💾 Saving ${result.rooms.length} rooms for job ${file.jobId}`);
+        const allNewElementIds: number[] = [];
         let roomsCreated = 0;
         for (const room of result.rooms) {
           // Check if room already exists for this job
@@ -784,6 +866,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   total: "0",
                   status: "not_started"
                 });
+
+                // Track for cost matching
+                allNewElementIds.push(newRoomElement.id);
               }
             }
 
@@ -807,6 +892,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 total: "0",
                 status: "not_started"
               });
+
+              // Track for cost matching
+              allNewElementIds.push(defaultElement.id);
             }
 
           } else {
@@ -815,6 +903,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         console.log(`✅ Created ${roomsCreated} new rooms for job`);
+
+        // TRIGGER COST MATCHING (Missing Link)
+        if (allNewElementIds.length > 0) {
+          console.log(`💰 Triggering cost matching for ${allNewElementIds.length} new elements...`);
+          const { matchCostsToExtractedItems } = await import('./cost-matcher');
+          await matchCostsToExtractedItems(file.jobId, allNewElementIds);
+        }
 
         await db.update(jobFiles)
           .set({ extractionStatus: 'completed' })
@@ -1143,64 +1238,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
             totalItems: Object.values(phaseData).reduce((sum, items) => sum + items.length, 0)
           });
 
-          // Use filename as job name if not found in headers
-          if (jobName === "Data Missing from CSV") {
-            jobName = req.file.originalname.replace(/\.[^/.]+$/, '').replace(/-/g, ' ').trim();
-          }
 
-          // Create the job with financial summary
-          const newJob = await storage.createJob({
-            title: jobName,
-            description: `Materials Schedule Import - ${phases.length} work phases`,
-            location: `${jobAddress}, ${jobPostcode}`,
-            status: "pending",
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            notes: `Imported from ${req.file.originalname}`,
-            phases: phases.join(', '),
-            uploadId: csvUpload.id,
-            phaseTaskData: JSON.stringify({
-              phases: phaseData,
-              financials: {
-                totalLabour: Math.round(totalLabour * 100),
-                totalMaterial: Math.round(totalMaterial * 100),
-                totalPlant: Math.round(totalPlant * 100),
-                totalSubcontractor: Math.round(totalSubcontractor * 100),
-                grandTotal: Math.round(grandTotal * 100)
-              }
-            }),
-            financialSummary: JSON.stringify({
-              labour: Math.round(totalLabour * 100),
-              material: Math.round(totalMaterial * 100),
-              plant: Math.round(totalPlant * 100),
-              subcontractor: Math.round(totalSubcontractor * 100),
-              total: Math.round(grandTotal * 100)
-            }),
-            quotedAmount: Math.round(grandTotal * 100).toString()
+          // Unified Flow Logic: Check for existing job first
+          console.log(`🔍 Checking for existing job to merge: "${jobName}"`);
+
+          const allJobs = await storage.getJobs();
+          // Find match based on Name AND (Postcode OR Address)
+          // Relaxed matching for better UX
+          const existingJob = allJobs.find(j => {
+            const nameMatch = j.title.toLowerCase().trim() === jobName.toLowerCase().trim();
+            // Check if postcode is present in the location string
+            const postcodeMatch = jobPostcode !== "Data Missing from CSV" &&
+              j.location.toLowerCase().includes(jobPostcode.toLowerCase().trim());
+
+            return nameMatch && (postcodeMatch || !jobPostcode || jobPostcode === "Data Missing from CSV");
           });
 
-          // Create individual cost items
-          const { jobCostItems } = await import("@shared/schema");
-          for (const [phase, items] of Object.entries(phaseData)) {
-            for (const item of items) {
-              await db.insert(jobCostItems).values({
-                jobId: newJob.id,
-                category: item.category,
-                description: `[${phase}] ${item.description}`,
-                quantity: item.quantity.toString(),
-                unit: item.unit,
-                rate: item.rate.toString(),
-                total: item.total.toString(),
-                sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
-              });
+          if (existingJob) {
+            console.log(`✅ Found existing job: ${existingJob.id} ("${existingJob.title}") - MERGING DATA`);
+
+            // 1. Update the existing job with CSV financial data
+            const financialUpdates: any = {
+              uploadId: csvUpload.id, // Link the CSV
+              phaseTaskData: JSON.stringify({
+                phases: phaseData,
+                financials: {
+                  totalLabour: Math.round(totalLabour * 100),
+                  totalMaterial: Math.round(totalMaterial * 100),
+                  totalPlant: Math.round(totalPlant * 100),
+                  totalSubcontractor: Math.round(totalSubcontractor * 100),
+                  grandTotal: Math.round(grandTotal * 100)
+                }
+              }),
+              financialSummary: JSON.stringify({
+                labour: Math.round(totalLabour * 100),
+                material: Math.round(totalMaterial * 100),
+                plant: Math.round(totalPlant * 100),
+                subcontractor: Math.round(totalSubcontractor * 100),
+                total: Math.round(grandTotal * 100)
+              }),
+              quotedAmount: Math.round(grandTotal * 100).toString(),
+              // Update phases list if it creates a more complete list
+              phases: phases.length > (existingJob.phases?.split(',').length || 0) ? phases.join(', ') : existingJob.phases
+            };
+
+            // Update status if it was pending
+            if (existingJob.status === 'pending') {
+              // Keep as pending or update? Keep as pending waiting for assignment
             }
+
+            await storage.updateJob(existingJob.id, financialUpdates);
+            console.log(`💾 Updated financial data for job ${existingJob.id}`);
+
+            // 2. Create/Update Cost Items
+            // Delete old cost items for this job to avoid duplication on re-upload
+            const { jobCostItems } = await import("@shared/schema");
+            await db.delete(jobCostItems).where(eq(jobCostItems.jobId, existingJob.id));
+
+            for (const [phase, items] of Object.entries(phaseData)) {
+              for (const item of items) {
+                await db.insert(jobCostItems).values({
+                  jobId: existingJob.id,
+                  category: item.category,
+                  description: `[${phase}] ${item.description}`,
+                  quantity: item.quantity.toString(),
+                  unit: item.unit,
+                  rate: item.rate.toString(),
+                  total: item.total.toString(),
+                  sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
+                });
+              }
+            }
+            console.log(`💾 Refreshed cost items for job ${existingJob.id}`);
+
+            // 3. TRIGGER AUTOMATIC COST ALLOCATION
+            // Check if we have rooms from drawing extraction
+            const existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, existingJob.id));
+
+            if (existingRooms.length > 0) {
+              console.log(`🔄 Existing drawing data detected (${existingRooms.length} rooms). Triggering Auto-Allocation...`);
+              try {
+                const { roomMapper } = await import("./room-mapper");
+                await roomMapper.allocateCostsToRooms(existingJob.id, phaseData);
+                console.log(`✅ Auto-Allocation Complete: Costs distributed to rooms.`);
+              } catch (allocError) {
+                console.error(`⚠️ Auto-Allocation Failed:`, allocError);
+              }
+            } else {
+              console.log(`ℹ️ No drawing data (rooms) found. Skipping allocation. Upload a drawing to finish the process.`);
+            }
+
+            jobsCreated = 0; // We didn't create a new one, we merged.
+
+            // Update CSV upload status
+            await storage.updateCsvUpload(csvUpload.id, {
+              status: "processed",
+              jobsCount: "0 (Merged)"
+            });
+
+          } else {
+            // ORIGINAL LOGIC: Create new job
+            console.log(`🆕 No existing job found. Creating new job.`);
+
+            // Use filename as job name if not found in headers
+            if (jobName === "Data Missing from CSV") {
+              jobName = req.file.originalname.replace(/\.[^/.]+$/, '').replace(/-/g, ' ').trim();
+            }
+
+            // Create the job with financial summary
+            const newJob = await storage.createJob({
+              title: jobName,
+              description: `Materials Schedule Import - ${phases.length} work phases`,
+              location: `${jobAddress}, ${jobPostcode}`,
+              status: "pending",
+              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              notes: `Imported from ${req.file.originalname}`,
+              phases: phases.join(', '),
+              uploadId: csvUpload.id,
+              phaseTaskData: JSON.stringify({
+                phases: phaseData,
+                financials: {
+                  totalLabour: Math.round(totalLabour * 100),
+                  totalMaterial: Math.round(totalMaterial * 100),
+                  totalPlant: Math.round(totalPlant * 100),
+                  totalSubcontractor: Math.round(totalSubcontractor * 100),
+                  grandTotal: Math.round(grandTotal * 100)
+                }
+              }),
+              financialSummary: JSON.stringify({
+                labour: Math.round(totalLabour * 100),
+                material: Math.round(totalMaterial * 100),
+                plant: Math.round(totalPlant * 100),
+                subcontractor: Math.round(totalSubcontractor * 100),
+                total: Math.round(grandTotal * 100)
+              }),
+              quotedAmount: Math.round(grandTotal * 100).toString()
+            });
+
+            // Create individual cost items
+            const { jobCostItems } = await import("@shared/schema");
+            for (const [phase, items] of Object.entries(phaseData)) {
+              for (const item of items) {
+                await db.insert(jobCostItems).values({
+                  jobId: newJob.id,
+                  category: item.category,
+                  description: `[${phase}] ${item.description}`,
+                  quantity: item.quantity.toString(),
+                  unit: item.unit,
+                  rate: item.rate.toString(),
+                  total: item.total.toString(),
+                  sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
+                });
+              }
+            }
+
+            jobsCreated = 1;
+
+            await storage.updateCsvUpload(csvUpload.id, {
+              status: "processed",
+              jobsCount: "1"
+            });
           }
-
-          jobsCreated = 1;
-
-          await storage.updateCsvUpload(csvUpload.id, {
-            status: "processed",
-            jobsCount: "1"
-          });
 
         } else if (lines.findIndex(line => {
           const l = line.toLowerCase();
