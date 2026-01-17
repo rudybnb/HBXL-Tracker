@@ -785,8 +785,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
                     phaseTaskData[phase].push({
                       description: item.description || "Unspecified Item",
-                      total: item.total || "0",
-                      rate: item.rate,
+                      total: ((parseFloat(String(item.total || "0")) || 0) / 100).toString(),
+                      rate: ((parseFloat(String(item.rate || "0")) || 0) / 100).toString(),
                       unit: item.unit,
                       quantity: item.quantity
                     });

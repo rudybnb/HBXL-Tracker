@@ -29,13 +29,13 @@ function LogoutButton() {
 
 export default function ContractorOnboarding() {
   const [activeTab, setActiveTab] = useState("Send Form");
-  
+
   // Simple form to send invitation
   const [contractorName, setContractorName] = useState("");
   const [contractorEmail, setContractorEmail] = useState("");
   const [contractorPhone, setContractorPhone] = useState("");
   const [telegramId, setTelegramId] = useState("");
-  
+
   const [pendingApplications, setPendingApplications] = useState([
     {
       id: "1",
@@ -48,7 +48,7 @@ export default function ContractorOnboarding() {
       telegramId: "@james_contractor"
     },
     {
-      id: "2", 
+      id: "2",
       name: "Sarah Mason",
       phone: "07845123456",
       email: "sarah.mason@email.com",
@@ -58,11 +58,11 @@ export default function ContractorOnboarding() {
       telegramId: "@sarah_mason"
     }
   ]);
-  
+
   const [reviewedApplications, setReviewedApplications] = useState([
     {
       id: "3",
-      name: "Mike Electrician", 
+      name: "Mike Electrician",
       phone: "07567890123",
       email: "mike.elec@email.com",
       specialization: ["Electrical"],
@@ -88,7 +88,7 @@ export default function ContractorOnboarding() {
       // Generate unique form link
       const formId = Math.random().toString(36).substr(2, 9);
       const formLink = `${window.location.origin}/contractor-form?id=${formId}&name=${encodeURIComponent(contractorName)}`;
-      
+
       // Send Telegram message with link to professional onboarding form
       const telegramMessage = `📋 Contractor Onboarding - ER Build & Design
 
@@ -140,7 +140,7 @@ You've been invited to join our construction team. Please complete your contract
         }
       } else {
         toast({
-          title: "Form Link Generated", 
+          title: "Form Link Generated",
           description: `Professional registration form link prepared for ${contractorName}. Share via any contact method.`,
         });
       }
@@ -178,7 +178,7 @@ You've been invited to join our construction team. Please complete your contract
     if (application) {
       setReviewedApplications(prev => [...prev, { ...application, status: "approved", reviewedDate: new Date().toLocaleDateString('en-GB') }]);
       setPendingApplications(prev => prev.filter(app => app.id !== applicationId));
-      
+
       toast({
         title: "Application Approved",
         description: `${application.name} has been approved and added to the contractor network.`,
@@ -190,7 +190,7 @@ You've been invited to join our construction team. Please complete your contract
     const application = pendingApplications.find(app => app.id === applicationId);
     if (application) {
       setPendingApplications(prev => prev.filter(app => app.id !== applicationId));
-      
+
       toast({
         title: "Application Rejected",
         description: `${application.name}'s application has been rejected.`,
@@ -209,7 +209,7 @@ You've been invited to join our construction team. Please complete your contract
         <p className="text-slate-400 mb-4 text-sm">
           Send onboarding form to new contractors via Telegram
         </p>
-        
+
         <div className="space-y-4">
           <div>
             <label className="block text-yellow-400 text-sm font-medium mb-2">Contractor Name *</label>
@@ -221,7 +221,7 @@ You've been invited to join our construction team. Please complete your contract
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white placeholder-slate-500 focus:border-yellow-500 focus:outline-none text-sm"
             />
           </div>
-          
+
           <div>
             <label className="block text-yellow-400 text-sm font-medium mb-2">Telegram ID *</label>
             <input
@@ -238,7 +238,7 @@ You've been invited to join our construction team. Please complete your contract
             <div className="flex items-start space-x-2">
               <div className="w-5 h-5 mt-0.5">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="text-blue-400">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
                 </svg>
               </div>
               <div className="flex-1">
@@ -288,14 +288,14 @@ You've been invited to join our construction team. Please complete your contract
                     {application.telegramId && <p>💬 {application.telegramId}</p>}
                   </div>
                 </div>
-                <Badge 
-                  variant="secondary" 
+                <Badge
+                  variant="secondary"
                   className="bg-orange-600 text-white"
                 >
                   {application.status}
                 </Badge>
               </div>
-              
+
               <div className="flex space-x-3">
                 <Button
                   onClick={() => handleApproveApplication(application.id)}
@@ -353,7 +353,7 @@ You've been invited to join our construction team. Please complete your contract
                   Approved
                 </Badge>
               </div>
-              
+
               <div className="flex flex-wrap gap-2">
                 {contractor.specialization.map((spec, index) => (
                   <Badge key={index} variant="outline" className="border-yellow-500 text-yellow-400">
@@ -367,21 +367,7 @@ You've been invited to join our construction team. Please complete your contract
       )}
     </div>
   );
-                <Button
-                  onClick={() => handleRejectApplication(application.id)}
-                  variant="destructive"
-                  className="flex-1 flex items-center justify-center space-x-2"
-                >
-                  <XCircle className="w-4 h-4" />
-                  <span>Reject</span>
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+
 
   const renderApprovedTab = () => (
     <div className="space-y-4">
@@ -416,7 +402,7 @@ You've been invited to join our construction team. Please complete your contract
                   Approved
                 </Badge>
               </div>
-              
+
               <div className="flex flex-wrap gap-2">
                 {contractor.specialization.map((spec, index) => (
                   <Badge key={index} variant="outline" className="border-yellow-500 text-yellow-400">
@@ -434,7 +420,7 @@ You've been invited to join our construction team. Please complete your contract
   return (
     <div className="min-h-screen bg-slate-900 text-white relative">
       <LogoutButton />
-      
+
       {/* Header */}
       <div className="bg-orange-600 text-white p-4">
         <div className="max-w-4xl mx-auto flex items-center space-x-3">
@@ -470,11 +456,10 @@ You've been invited to join our construction team. Please complete your contract
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`py-3 px-1 text-sm font-medium border-b-2 ${
-                  activeTab === tab.key
+                className={`py-3 px-1 text-sm font-medium border-b-2 ${activeTab === tab.key
                     ? "border-yellow-500 text-yellow-400"
                     : "border-transparent text-slate-400 hover:text-slate-300"
-                }`}
+                  }`}
               >
                 {tab.label}
               </button>
@@ -496,7 +481,7 @@ You've been invited to join our construction team. Please complete your contract
           <a href="/" className="flex flex-col items-center py-2 px-4">
             <div className="w-6 h-6 mb-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="text-slate-400">
-                <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+                <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
               </svg>
             </div>
             <span className="text-xs text-slate-400">Dashboard</span>
@@ -504,7 +489,7 @@ You've been invited to join our construction team. Please complete your contract
           <a href="/jobs" className="flex flex-col items-center py-2 px-4">
             <div className="w-6 h-6 mb-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="text-slate-400">
-                <path d="M20 6h-2.18c.11-.31.18-.65.18-1a2.996 2.996 0 0 0-5.5-1.65l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z"/>
+                <path d="M20 6h-2.18c.11-.31.18-.65.18-1a2.996 2.996 0 0 0-5.5-1.65l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" />
               </svg>
             </div>
             <span className="text-xs text-slate-400">Jobs</span>
@@ -512,7 +497,7 @@ You've been invited to join our construction team. Please complete your contract
           <a href="/admin" className="flex flex-col items-center py-2 px-4">
             <div className="w-6 h-6 mb-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="text-yellow-400">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
               </svg>
             </div>
             <span className="text-xs text-yellow-400">Admin</span>
@@ -520,7 +505,7 @@ You've been invited to join our construction team. Please complete your contract
           <a href="/upload-job" className="flex flex-col items-center py-2 px-4">
             <div className="w-6 h-6 mb-1">
               <svg viewBox="0 0 24 24" fill="currentColor" className="text-slate-400">
-                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
               </svg>
             </div>
             <span className="text-xs text-slate-400">Upload Job</span>
