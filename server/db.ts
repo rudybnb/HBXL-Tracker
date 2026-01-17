@@ -102,6 +102,10 @@ export async function initManusSchema(): Promise<void> {
         description TEXT NOT NULL,
         dimensions TEXT,
         quantity TEXT DEFAULT '1',
+        unit TEXT DEFAULT 'nr',
+        rate NUMERIC DEFAULT '0',
+        total NUMERIC DEFAULT '0',
+        room_name TEXT,
         location TEXT,
         material TEXT,
         notes TEXT,
@@ -109,6 +113,15 @@ export async function initManusSchema(): Promise<void> {
         raw_json TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
+    `);
+
+    // Add columns if table already exists (Schema Patch)
+    await db.execute(sql`
+      ALTER TABLE extracted_elements
+      ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'nr',
+      ADD COLUMN IF NOT EXISTS rate NUMERIC DEFAULT '0',
+      ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT '0',
+      ADD COLUMN IF NOT EXISTS room_name TEXT;
     `);
 
     // Create room_status enum for Room-Based Commercial Model
