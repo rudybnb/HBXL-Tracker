@@ -274,10 +274,17 @@ export default function RoomWorkPackages() {
     }
 
     // Calculate totals
-    const grandTotal = data.rooms.reduce((sum, room) => sum + room.totalValue, 0);
-    const totalItems = data.rooms.reduce((sum, room) =>
+    // Calculate totals dynamically from items (ignoring potentially stale room totals)
+    const processedRooms = data.rooms.map(room => {
+        const calculatedTotal = room.elements.reduce((rSum, el) =>
+            rSum + el.items.reduce((iSum, item) => iSum + (item.total || 0), 0), 0);
+        return { ...room, totalValue: calculatedTotal };
+    });
+
+    const grandTotal = processedRooms.reduce((sum, room) => sum + room.totalValue, 0);
+    const totalItems = processedRooms.reduce((sum, room) =>
         sum + room.elements.reduce((eSum, el) => eSum + el.items.length, 0), 0);
-    const completedItems = data.rooms.reduce((sum, room) =>
+    const completedItems = processedRooms.reduce((sum, room) =>
         sum + room.elements.reduce((eSum, el) =>
             eSum + el.items.filter(item => item.status === 'complete').length, 0), 0);
 
@@ -378,7 +385,7 @@ export default function RoomWorkPackages() {
             {/* Room Cards */}
             <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
                 <div className="space-y-4">
-                    {data.rooms.length === 0 ? (
+                    {processedRooms.length === 0 ? (
                         <div className="bg-slate-800 border border-slate-700 rounded-lg p-12 text-center">
                             <Home className="h-12 w-12 text-slate-600 mx-auto mb-4" />
                             <h3 className="text-lg font-medium text-slate-400 mb-2">No Rooms Generated</h3>
@@ -387,7 +394,7 @@ export default function RoomWorkPackages() {
                             </p>
                         </div>
                     ) : (
-                        data.rooms.map(room => (
+                        processedRooms.map(room => (
                             <RoomCard key={room.id} room={room} />
                         ))
                     )}
