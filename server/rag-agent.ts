@@ -11,7 +11,7 @@ export class RagAgent {
      * Generates a response to a user question about a specific drawing file.
      * dynamically assembles context from the database.
      */
-    async chatAboutDrawing(fileId: number, userMessage: string): Promise<string> {
+    async chatAboutDrawing(fileId: string, userMessage: string): Promise<string> {
         try {
             // 1. Fetch Context
             // Get File Info

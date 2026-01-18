@@ -31,7 +31,7 @@ interface DrawingViewerProps {
     fileType: string;
     smartElements?: SmartElement[];
     onElementClick?: (element: SmartElement) => void;
-    fileId?: number;
+    fileId?: string;
 }
 
 export default function DrawingViewer({ fileUrl, fileType, smartElements = [], onElementClick, fileId }: DrawingViewerProps) {

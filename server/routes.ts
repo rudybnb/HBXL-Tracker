@@ -6657,7 +6657,7 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
   // AI Chat Endpoint (New SKI)
   app.post("/api/chat/drawing/:fileId", async (req, res) => {
     try {
-      const fileId = parseInt(req.params.fileId);
+      const fileId = req.params.fileId;
       const { message } = req.body;
 
       if (!message) {

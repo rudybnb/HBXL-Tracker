@@ -15,7 +15,7 @@ interface Message {
 }
 
 interface AiAssistantChatProps {
-    fileId: number;
+    fileId: string;
     open: boolean;
     onClose?: () => void;
 }
@@ -103,8 +103,8 @@ export default function AiAssistantChat({ fileId, open }: AiAssistantChatProps) 
                         >
                             <div
                                 className={`max-w-[85%] rounded-lg p-3 text-sm ${msg.role === 'user'
-                                        ? 'bg-amber-600 text-white'
-                                        : 'bg-slate-800 text-slate-200 border border-slate-700'
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-slate-800 text-slate-200 border border-slate-700'
                                     }`}
                             >
                                 {msg.content}
