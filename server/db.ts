@@ -121,7 +121,9 @@ export async function initManusSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS unit TEXT DEFAULT 'nr',
       ADD COLUMN IF NOT EXISTS rate NUMERIC DEFAULT '0',
       ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT '0',
-      ADD COLUMN IF NOT EXISTS room_name TEXT;
+      ADD COLUMN IF NOT EXISTS room_name TEXT,
+      ADD COLUMN IF NOT EXISTS page INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS bbox TEXT;
     `);
 
     // Create room_status enum for Room-Based Commercial Model
@@ -138,13 +140,24 @@ export async function initManusSchema(): Promise<void> {
       CREATE TABLE IF NOT EXISTS rooms (
         id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
         job_id VARCHAR(36) NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        file_id VARCHAR(36) REFERENCES job_files(id),
         name TEXT NOT NULL,
         floor TEXT,
         notes TEXT,
         status room_status NOT NULL DEFAULT 'not_started',
         total_value TEXT DEFAULT '0',
+        page INTEGER DEFAULT 1,
+        bbox TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       )
+    `);
+
+    // Add columns to rooms table
+    await db.execute(sql`
+      ALTER TABLE rooms
+      ADD COLUMN IF NOT EXISTS page INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS bbox TEXT,
+      ADD COLUMN IF NOT EXISTS file_id VARCHAR(36) REFERENCES job_files(id);
     `);
 
     // Create room_elements table (Elements within rooms)
