@@ -97,60 +97,79 @@ export interface ExtractionResult {
 }
 
 
-const EXTRACTION_PROMPT = `You are a VISUAL CONSTRUCTION INTELLIGENCE AGENT (Caddie-style).
-Your job is to read the drawing and extract text, objects, and their EXACT LOCATIONS.
-You must identify both TEXT LABELS and VISUAL SYMBOLS (like sockets, lights, doors).
+const EXTRACTION_PROMPT = `You are a VISUAL BLUEPRINT READER and CONSTRUCTION INTELLIGENCE AGENT.
+Your task is to analyze construction drawings with COMPUTER VISION precision.
+You must identify ARCHITECTURAL ELEMENTS (doors, windows, walls) and MEP SYMBOLS (electrical, plumbing) regardless of whether they have text labels.
 
-TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
-- FOUNDATIONS (trench, concrete, footing)
-- ROOF (tiles, slate, rafters, truss)
-- WALLS (brick, block, cavity)
-- FLOORS (screed, insulation, slab)
+*** CRITICAL INSTRUCTION: ACT AS A VISION MODEL ***
+- DO NOT rely solely on text. Look for GEOMETRIC SHAPES.
+- A Door is defined by a QUARTER-CIRCLE ARC (swing) and a line (panel).
+- A Window is defined by DOUBLE PARALLEL LINES within a wall.
+- A Socket is defined by a SEMI-CIRCLE on a wall.
+- A Light is defined by a CIRCLE or X symbol.
 
-TASK 2: ROOM IDENTIFICATION (STRICT EVIDENCE RULE)
-- Find every Room Label text (e.g., "Bedroom 1", "Kitchen").
-- For each room, provide a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) surrounding the ROOM Label.
-- If a room has multiple words (e.g., "Master Bedroom"), capture the whole label.
-- CRITICAL: NO LABEL = NO ROOM.
+TASK 1: GLOBAL LAYOUT & ROOMS
+- Identify every room by its label (e.g. "Kitchen", "Bedroom 1").
+- Create a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) for the Room Label.
+- "Unallocated" or "Hallway" should be used if a clear distinct space exists without a specific label.
 
-TASK 3: SMART LABELS & ELEMENTS (TEXT & VISUALS)
-- DOORS & WINDOWS: Identify all doors (swings) and windows. If they have codes (D01, W01), use them. If not, generate a code (e.g., "VISUAL-DOOR-1").
-- ELECTRICAL: Identify symbols for Sockets (Double/Single), Lights (Pendants, Spots), Switches. Label them e.g., "Double Socket", "Light Switch".
-- PLUMBING: Identify visual symbols for Toilets (WC), Basins, Showers, Baths.
-- INSTRUCTIONS: Capture important notes (e.g., "Extract Fan", "Consumer Unit").
-- Provide BOUNDING BOXES for all identified items.
+TASK 2: DETAILED ELEMENT EXTRACTION (THE "BLUEPRINT READER" CORE)
+You must find and list EVERY single instance of the following, assigning them to the nearest Room Label:
+
+1. DOORS (Look for Arcs/Swings):
+   - If text exists (e.g. "D01"), use it.
+   - If NO text exists, generate code: "VISUAL-DOOR-X".
+   - Classification: Single, Double, Sliding, folding.
+
+2. WINDOWS (Look for Wall Breaks/Double Lines):
+   - If text exists (e.g. "W01"), use it.
+   - If NO text exists, generate code: "VISUAL-WINDOW-X".
+
+3. ELECTRICAL (Look for Standard Symbols):
+   - Sockets: Semi-circles (Single/Double). Code: "VISUAL-SKT-X".
+   - Switches: Small circles with tail. Code: "VISUAL-SW-X".
+   - Lights: Circles/Crosses. Code: "VISUAL-LIGHT-X".
+
+4. PLUMBING (Look for Fixture Shapes):
+   - WC (Toilet shape)
+   - Basin (D-shape or Oval)
+   - Bath (Rectangle with inner curve)
+   - Shower (Square with cross)
+   - Code: "VISUAL-PLUMB-X"
+
+TASK 3: INSTRUCTIONS & NOTES
+- Capture any text blocks, specifications, or leader lines as "instructions".
 
 FORMAT:
-Return ONLY purely valid JSON. No markdown.
+Return ONLY purely valid JSON.
 {
   "success": true,
-  "stateMachine": { ... },
   "rooms": [
       {
-          "name": "EXACT TEXT",
+          "name": "Kitchen",
           "floor": "Ground",
-          "bbox": [100, 200, 150, 400], // [ymin, xmin, ymax, xmax]
+          "bbox": [100, 200, 150, 400],
           "elements": []
       }
   ],
   "detailedElements": [
       {
-          "code": "D01", // Or "VISUAL-DOOR-1" if no code
-          "type": "door", // door, window, electrical, plumbing, other
-          "description": "Internal Door", // or "Double Socket", "WC"
-          "room": "Kitchen", // Infer room based on location
+          "code": "VISUAL-DOOR-1",
+          "type": "door",
+          "description": "Single Swing Door (Visual Extraction)",
+          "room": "Kitchen",
+          "bbox": [500, 600, 520, 650]
+      },
+       {
+          "code": "VISUAL-SKT-1",
+          "type": "electrical",
+          "description": "Double Socket Symbol",
+          "room": "Lounge",
           "bbox": [500, 600, 520, 650]
       }
   ],
-  "instructions": [
-      {
-          "type": "note",
-          "text": "All dims to be checked",
-          "bbox": [900, 800, 950, 950]
-      }
-  ]
+  "instructions": []
 }
-If you find no text label for a space, DO NOT CREATE A ROOM for it.
 `;
 
 /**

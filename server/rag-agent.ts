@@ -39,9 +39,23 @@ export class RagAgent {
             }
 
             if (elements.length > 0) {
-                context += `Extracted Elements from THIS Drawing:\n`;
+                context += `BLUEPRINT READER FINDINGS (Visual & Text):\n`;
+
+                // Group elements by room for spatial context
+                const elementsByRoom: Record<string, any[]> = {};
                 elements.forEach(e => {
-                    context += `- ${e.description || e.elementType} in ${e.roomName} (Qty: ${e.quantity})\n`;
+                    const room = e.roomName || "Unallocated";
+                    if (!elementsByRoom[room]) elementsByRoom[room] = [];
+                    elementsByRoom[room].push(e);
+                });
+
+                // Output categorized lists
+                Object.keys(elementsByRoom).sort().forEach(room => {
+                    context += `\n📍 ROOM: ${room.toUpperCase()}\n`;
+                    elementsByRoom[room].forEach(e => {
+                        const code = e.elementCode || "No Code";
+                        context += `   - [${code}] ${e.description || e.elementType} (Qty: ${e.quantity})\n`;
+                    });
                 });
             } else {
                 context += `No specific elements were extracted from this drawing yet.\n`;
