@@ -222,11 +222,11 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                                         </div>
 
                                         {!readOnly && (
-                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="absolute top-2 right-2 transition-opacity">
                                                 <Button
                                                     variant="destructive"
                                                     size="icon"
-                                                    className="h-8 w-8 rounded-full"
+                                                    className="h-8 w-8 rounded-full shadow-md"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         deleteMutation.mutate(file.id);

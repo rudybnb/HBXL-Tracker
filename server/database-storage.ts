@@ -211,7 +211,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteJobFile(id: string): Promise<void> {
+    console.log(`🗑️ Deleting Job File: ${id} and related records...`);
+
+    // 1. Get rooms linked to this file
+    const fileRooms = await db.select().from(rooms).where(eq(rooms.fileId, id));
+
+    for (const room of fileRooms) {
+      // 2. Get elements for this room
+      const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+      for (const element of elements) {
+        // 3. Delete payable items
+        await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
+      }
+      // 4. Delete elements
+      await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
+    }
+
+    // 5. Delete rooms
+    await db.delete(rooms).where(eq(rooms.fileId, id));
+
+    // 6. Delete extracted elements
+    await db.delete(extractedElements).where(eq(extractedElements.fileId, id));
+
+    // 7. Delete the file
     await db.delete(jobFiles).where(eq(jobFiles.id, id));
+    console.log(`   ✅ Deleted file ${id}`);
   }
 
   // CSV Uploads
