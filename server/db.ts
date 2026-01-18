@@ -160,6 +160,18 @@ export async function initManusSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS file_id VARCHAR(36) REFERENCES job_files(id);
     `);
 
+    // CLEAN UP ORPHANS (Fixes "Key (job_id)=(...) is not present in table jobs")
+    // If a job doesn't exist, its children should be removed before we enforce FK constraints
+    console.log('🧹 Cleaning up database orphans...');
+    await db.execute(sql`
+      DELETE FROM payable_items WHERE element_id IN (SELECT id FROM room_elements WHERE room_id IN (SELECT id FROM rooms WHERE job_id NOT IN (SELECT id FROM jobs)));
+      DELETE FROM room_elements WHERE room_id IN (SELECT id FROM rooms WHERE job_id NOT IN (SELECT id FROM jobs));
+      DELETE FROM rooms WHERE job_id NOT IN (SELECT id FROM jobs);
+      DELETE FROM extracted_elements WHERE job_id NOT IN (SELECT id FROM jobs);
+      DELETE FROM job_cost_items WHERE job_id NOT IN (SELECT id FROM jobs);
+      DELETE FROM job_files WHERE job_id NOT IN (SELECT id FROM jobs);
+    `);
+
     // FIX: Update Foreign Keys to CASCADE DELETE (Fixes "Failed to delete job")
     await db.execute(sql`
       DO $$ BEGIN
