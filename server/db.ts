@@ -160,6 +160,50 @@ export async function initManusSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS file_id VARCHAR(36) REFERENCES job_files(id);
     `);
 
+    // FIX: Update Foreign Keys to CASCADE DELETE (Fixes "Failed to delete job")
+    await db.execute(sql`
+      DO $$ BEGIN
+        -- extracted_elements -> jobs
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'extracted_elements_job_id_jobs_id_fk') THEN
+          ALTER TABLE extracted_elements DROP CONSTRAINT extracted_elements_job_id_jobs_id_fk;
+        END IF;
+        
+        -- extracted_elements -> job_files
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'extracted_elements_file_id_job_files_id_fk') THEN
+          ALTER TABLE extracted_elements DROP CONSTRAINT extracted_elements_file_id_job_files_id_fk;
+        END IF;
+
+        -- rooms -> jobs
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'rooms_job_id_jobs_id_fk') THEN
+          ALTER TABLE rooms DROP CONSTRAINT rooms_job_id_jobs_id_fk;
+        END IF;
+
+        -- rooms -> job_files
+        IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'rooms_file_id_job_files_id_fk') THEN
+          ALTER TABLE rooms DROP CONSTRAINT rooms_file_id_job_files_id_fk;
+        END IF;
+      END $$;
+    `);
+
+    // Re-add constraints with CASCADE
+    await db.execute(sql`
+      ALTER TABLE extracted_elements 
+      ADD CONSTRAINT extracted_elements_job_id_jobs_id_fk 
+      FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+      ALTER TABLE extracted_elements 
+      ADD CONSTRAINT extracted_elements_file_id_job_files_id_fk 
+      FOREIGN KEY (file_id) REFERENCES job_files(id) ON DELETE CASCADE;
+
+      ALTER TABLE rooms 
+      ADD CONSTRAINT rooms_job_id_jobs_id_fk 
+      FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+      ALTER TABLE rooms 
+      ADD CONSTRAINT rooms_file_id_job_files_id_fk 
+      FOREIGN KEY (file_id) REFERENCES job_files(id) ON DELETE CASCADE;
+    `);
+
     // Create room_elements table (Elements within rooms)
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS room_elements (
