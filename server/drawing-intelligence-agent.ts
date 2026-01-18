@@ -84,7 +84,7 @@ export async function processDrawing(imagePath: string): Promise<DrawingIntellig
         for (const room of extractionResult.rooms) {
             // Get detailed elements for this room
             const roomElements = (extractionResult.detailedElements || [])
-                .filter(e => e.room.toLowerCase() === room.name.toLowerCase());
+                .filter(e => areRoomsSame(e.room, room.name));
 
             // Also include elements listed in the room's element codes
             const codeElements: ExtractedDetailedElement[] = room.elements.map(code => ({
@@ -193,3 +193,12 @@ function inferTypeFromCode(code: string): string {
 }
 
 console.log('✅ Drawing Intelligence Agent ready');
+
+/**
+ * Fuzzy check if two room names refer to the same room
+ * e.g. "Bedroom 1" == "Bedroom1" == "Bed 1"
+ */
+function areRoomsSame(room1: string, room2: string): boolean {
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '').replace('bedroom', 'bed');
+    return normalize(room1) === normalize(room2);
+}

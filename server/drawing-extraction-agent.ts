@@ -113,19 +113,20 @@ TASK 0: LEGEND & KEY ANALYSIS (CRITICAL)
 TASK 1: GLOBAL LAYOUT & ROOMS
 - Identify every room by its label (e.g. "Kitchen", "Bedroom 1").
 - Create a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) for the Room Label.
+- CRITICAL: Return the exact Room Name as it appears on the drawing.
 
 TASK 2: DETAILED VISUAL EXTRACTION (THE "BLUEPRINT READER" CORE)
 Search the drawing grid-by-grid. You are looking for:
 
-1. ELECTRICAL SYMBOLS (Small, often red/blue/black):
+1. ARCHITECTURAL ELEMENTS (CRITICAL - DO NOT MISS):
+   - DOORS: Quarter-circle arcs showing swing. EVERY ROOM USUALLY HAS A DOOR. If you find a room without a door, Look Again.
+   - WINDOWS: Double parallel lines in walls.
+
+2. ELECTRICAL SYMBOLS (Small, often red/blue/black):
    - Sockets (Semi-circles, often on walls). Code: "VISUAL-SKT".
    - Switches (Small circles/triangles near doors). Code: "VISUAL-SW".
    - Lights (Ceiling Roses, Pendants - Crosses/Circles in center of room). Code: "VISUAL-LIGHT".
    - Smoke Alarms, Extractor Fans, Consumer Units.
-
-2. ARCHITECTURAL ELEMENTS:
-   - DOORS: Quarter-circle arcs showing swing.
-   - WINDOWS: Double parallel lines in walls.
 
 3. PLUMBING:
    - WC, Basin, Shower, Bath shapes.
@@ -134,6 +135,8 @@ REQUIREMENT:
 - You must attempt to find AT LEAST 5-10 ELEMENTS per room if possible.
 - If you see a symbol but are unsure, GUESS based on context (e.g. circle in center of ceiling = Light).
 - Generate a "code" for every item (e.g. "VISUAL-SKT-1", "VISUAL-LIGHT-2").
+- CRITICAL: The "room" field for each element must EXACTLY match one of the "rooms" identified in Task 1.
+- If an element is physically located inside the boundary of "Bedroom 4", assign it to "Bedroom 4", even if the text label is far away.
 
 FORMAT:
 Return ONLY purely valid JSON.
