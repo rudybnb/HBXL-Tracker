@@ -99,46 +99,41 @@ export interface ExtractionResult {
 
 const EXTRACTION_PROMPT = `You are a VISUAL BLUEPRINT READER and CONSTRUCTION INTELLIGENCE AGENT.
 Your task is to analyze construction drawings with COMPUTER VISION precision.
-You must identify ARCHITECTURAL ELEMENTS (doors, windows, walls) and MEP SYMBOLS (electrical, plumbing) regardless of whether they have text labels.
 
-*** CRITICAL INSTRUCTION: ACT AS A VISION MODEL ***
-- DO NOT rely solely on text. Look for GEOMETRIC SHAPES.
-- A Door is defined by a QUARTER-CIRCLE ARC (swing) and a line (panel).
-- A Window is defined by DOUBLE PARALLEL LINES within a wall.
-- A Socket is defined by a SEMI-CIRCLE on a wall.
-- A Light is defined by a CIRCLE or X symbol.
+*** SUPREME DIRECTIVE: YOU MUST FIND VISUAL SYMBOLS ***
+The user has reported that previously you only found rooms. THIS IS UNACCEPTABLE.
+You MUST look for the small symbols (Sockets, Lights, Switches, Doors) and extract them.
+If you see a LEGEND or KEY on the drawing, READ IT FIRST to understand what the symbols mean.
+
+TASK 0: LEGEND & KEY ANALYSIS (CRITICAL)
+- Scan the drawing edges for a Legend/Key.
+- Learn the symbols for specific Electrical/Plumbing items.
+- Apply this knowledge to validatethe symbols you see in the plan.
 
 TASK 1: GLOBAL LAYOUT & ROOMS
 - Identify every room by its label (e.g. "Kitchen", "Bedroom 1").
 - Create a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) for the Room Label.
-- "Unallocated" or "Hallway" should be used if a clear distinct space exists without a specific label.
 
-TASK 2: DETAILED ELEMENT EXTRACTION (THE "BLUEPRINT READER" CORE)
-You must find and list EVERY single instance of the following, assigning them to the nearest Room Label:
+TASK 2: DETAILED VISUAL EXTRACTION (THE "BLUEPRINT READER" CORE)
+Search the drawing grid-by-grid. You are looking for:
 
-1. DOORS (Look for Arcs/Swings):
-   - If text exists (e.g. "D01"), use it.
-   - If NO text exists, generate code: "VISUAL-DOOR-X".
-   - Classification: Single, Double, Sliding, folding.
+1. ELECTRICAL SYMBOLS (Small, often red/blue/black):
+   - Sockets (Semi-circles, often on walls). Code: "VISUAL-SKT".
+   - Switches (Small circles/triangles near doors). Code: "VISUAL-SW".
+   - Lights (Ceiling Roses, Pendants - Crosses/Circles in center of room). Code: "VISUAL-LIGHT".
+   - Smoke Alarms, Extractor Fans, Consumer Units.
 
-2. WINDOWS (Look for Wall Breaks/Double Lines):
-   - If text exists (e.g. "W01"), use it.
-   - If NO text exists, generate code: "VISUAL-WINDOW-X".
+2. ARCHITECTURAL ELEMENTS:
+   - DOORS: Quarter-circle arcs showing swing.
+   - WINDOWS: Double parallel lines in walls.
 
-3. ELECTRICAL (Look for Standard Symbols):
-   - Sockets: Semi-circles (Single/Double). Code: "VISUAL-SKT-X".
-   - Switches: Small circles with tail. Code: "VISUAL-SW-X".
-   - Lights: Circles/Crosses. Code: "VISUAL-LIGHT-X".
+3. PLUMBING:
+   - WC, Basin, Shower, Bath shapes.
 
-4. PLUMBING (Look for Fixture Shapes):
-   - WC (Toilet shape)
-   - Basin (D-shape or Oval)
-   - Bath (Rectangle with inner curve)
-   - Shower (Square with cross)
-   - Code: "VISUAL-PLUMB-X"
-
-TASK 3: INSTRUCTIONS & NOTES
-- Capture any text blocks, specifications, or leader lines as "instructions".
+REQUIREMENT:
+- You must attempt to find AT LEAST 5-10 ELEMENTS per room if possible.
+- If you see a symbol but are unsure, GUESS based on context (e.g. circle in center of ceiling = Light).
+- Generate a "code" for every item (e.g. "VISUAL-SKT-1", "VISUAL-LIGHT-2").
 
 FORMAT:
 Return ONLY purely valid JSON.
@@ -156,7 +151,7 @@ Return ONLY purely valid JSON.
       {
           "code": "VISUAL-DOOR-1",
           "type": "door",
-          "description": "Single Swing Door (Visual Extraction)",
+          "description": "Single Swing Door",
           "room": "Kitchen",
           "bbox": [500, 600, 520, 650]
       },
@@ -165,7 +160,14 @@ Return ONLY purely valid JSON.
           "type": "electrical",
           "description": "Double Socket Symbol",
           "room": "Lounge",
-          "bbox": [500, 600, 520, 650]
+          "bbox": [520, 610, 540, 630]
+      },
+      {
+          "code": "VISUAL-LIGHT-1",
+          "type": "lighting",
+          "description": "Ceiling Rose / Light",
+          "room": "Lounge",
+          "bbox": [550, 400, 570, 420]
       }
   ],
   "instructions": []
