@@ -515,7 +515,10 @@ export class RoomMapper {
                 floor: room.floor || undefined,
                 status: room.status,
                 totalValue: parseFloat(room.totalValue || '0') / 100, // Convert from pence
-                elements: elementData
+                elements: elementData,
+                fileId: room.fileId || undefined,
+                page: room.page || 1,
+                bbox: room.bbox ? JSON.parse(room.bbox) : undefined
             });
         }
 
@@ -531,6 +534,9 @@ export interface RoomData {
     status: string;
     totalValue: number;
     elements: ElementData[];
+    fileId?: string;
+    page?: number;
+    bbox?: number[];
 }
 
 export interface ElementData {

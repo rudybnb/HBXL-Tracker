@@ -664,7 +664,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                           unit: "nr",
                           rate: globalPrice.rate.toString(),
                           total: (globalPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
-                          rawJson: JSON.stringify(element)
+                          rawJson: JSON.stringify(element),
+                          page: 1,
+                          bbox: JSON.stringify((element as any).bbox || [])
                         });
 
                         // UI Element
@@ -707,9 +709,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   if (existing.length === 0) {
                     const [newRoom] = await db.insert(rooms).values({
                       jobId: req.params.id,
+                      fileId: jobFile.id,
                       name: room.name,
                       floor: room.floor || 'Ground',
-                      status: 'not_started'
+                      status: 'not_started',
+                      page: room.page || 1,
+                      bbox: JSON.stringify(room.bbox || [])
                     }).returning();
                     currentRoomId = newRoom.id;
                     roomsCreated++;
@@ -745,7 +750,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                         quantity: element.quantity?.toString() || "1",
                         unit: "nr",
                         rate: roomPrice.rate.toString(),
-                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString()
+                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
+                        page: (element as any).page || room.page || 1,
+                        bbox: JSON.stringify((element as any).bbox || [])
                       });
 
                       // UI Element

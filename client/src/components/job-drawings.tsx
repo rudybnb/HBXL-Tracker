@@ -298,7 +298,11 @@ function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
     // Map rooms to smart elements if they have bounding boxes
     if (roomsData?.rooms) {
         roomsData.rooms.forEach((room: any) => {
-            if (room.bbox) {
+            // Only show smart labels for this specific file
+            // (Fallback to showing if fileId is missing, for legacy compatibility)
+            const belongsToFile = !room.fileId || room.fileId === file.id;
+
+            if (room.bbox && belongsToFile) {
                 smartElements.push({
                     id: room.id,
                     type: 'room',

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint, numeric, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -101,6 +101,8 @@ export const extractedElements = pgTable("extracted_elements", {
   notes: text("notes"), // Additional notes from drawing
   linkedCostItemId: varchar("linked_cost_item_id").references(() => jobCostItems.id), // Link to cost item if matched
   rawJson: text("raw_json"), // Full AI response for debugging
+  page: integer("page").default(1),
+  bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -117,11 +119,14 @@ export const roomStatusEnum = pgEnum("room_status", ["not_started", "in_progress
 export const rooms = pgTable("rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   jobId: varchar("job_id").notNull().references(() => jobs.id),
+  fileId: varchar("file_id").references(() => jobFiles.id),
   name: text("name").notNull(),        // e.g., "Bathroom", "Lounge", "External"
   floor: text("floor"),                 // e.g., "Ground Floor", "First Floor"
   notes: text("notes"),
   status: roomStatusEnum("status").notNull().default("not_started"),
   totalValue: text("total_value").default("0"), // Sum of all payable items in pence
+  page: integer("page").default(1),
+  bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
