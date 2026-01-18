@@ -312,18 +312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/jobs/:id", async (req, res) => {
     try {
       const jobId = req.params.id;
-
-      // Delete associated data first (cascading)
-      await db.delete(extractedElements).where(eq(extractedElements.jobId, jobId));
-      await db.delete(jobFiles).where(eq(jobFiles.jobId, jobId));
-
-      // Delete job cost items
-      const { jobCostItems } = await import("@shared/schema");
-      await db.delete(jobCostItems).where(eq(jobCostItems.jobId, jobId));
-
-      // Delete the job itself
-      const { jobs } = await import("@shared/schema");
-      await db.delete(jobs).where(eq(jobs.id, jobId));
+      await storage.deleteJob(jobId);
 
       res.status(204).send();
     } catch (error) {
