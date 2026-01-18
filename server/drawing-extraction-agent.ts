@@ -1,6 +1,8 @@
 /**
  * Drawing Extraction Agent
  * Uses GPT-4 Vision to analyze construction drawings and extract element data
+ * 
+ * UPGRADED: Multi-Page Support + Bounding Box Coordinates (Caddie/BildAI Features)
  */
 
 import OpenAI from 'openai';
@@ -18,12 +20,15 @@ function getOpenAIClient(): OpenAI {
         }
         openai = new OpenAI({
             apiKey,
-            timeout: 60000,  // 60 second timeout to prevent infinite hangs
-            maxRetries: 2    // Retry failed requests up to 2 times
+            timeout: 120000, // Increased timeout for multi-page processing
+            maxRetries: 2
         });
     }
     return openai;
 }
+
+// Bounding Box: [ymin, xmin, ymax, xmax] as 0-1000 integers (normalized)
+export type BoundingBox = [number, number, number, number];
 
 // Room extracted from drawing (no costs - costs come from HBXL CSV)
 export interface ExtractedRoom {
@@ -32,6 +37,8 @@ export interface ExtractedRoom {
     dimensions: string | null; // "4850mm x 3600mm"
     area: number | null;      // 17.46 sqm
     elements: string[];       // ["D01", "W01", "WC", "Basin"]
+    page: number;             // Page number (1-based)
+    bbox?: BoundingBox;       // Location of room label
 }
 
 // Instruction/note extracted from drawing
@@ -39,6 +46,8 @@ export interface ExtractedInstruction {
     type: string;             // "note", "specification", "material"
     text: string;             // The actual text content
     location?: string;        // Where on drawing (optional)
+    page: number;
+    bbox?: BoundingBox;
 }
 
 // Detailed element with code (doors, windows, fixtures)
@@ -48,6 +57,8 @@ export interface ExtractedDetailedElement {
     description: string;      // "Internal door 762mm"
     room: string;             // Which room it belongs to
     size?: string;            // "762 x 1981mm"
+    page: number;
+    bbox?: BoundingBox;
 }
 
 // Work flow analysis
@@ -82,13 +93,12 @@ export interface ExtractionResult {
     elements: ExtractedElement[];              // Legacy: kept for compatibility
     rawResponse: string;
     error?: string;
+    pageCount: number;
 }
 
 
-
-const EXTRACTION_PROMPT = `You are a STRICT TEXT-BASED EXTRACTION AGENT.
-Your job is to read the drawing and extract ONLY what is explicitly written and visible.
-DO NOT INFER. DO NOT GUESS. DO NOT HALLUCINATE.
+const EXTRACTION_PROMPT = `You are a VISUAL CONSTRUCTION INTELLIGENCE AGENT (Caddie-style).
+Your job is to read the drawing and extract text, objects, and their EXACT LOCATIONS.
 
 TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
 - FOUNDATIONS (trench, concrete, footing)
@@ -97,33 +107,51 @@ TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
 - FLOORS (screed, insulation, slab)
 
 TASK 2: ROOM IDENTIFICATION (STRICT EVIDENCE RULE)
-- You must ONLY identifying rooms that have a clear TEXT LABEL on the drawing.
-- Examples: "Bedroom 1", "Kitchen", "Bathroom", "Conservatory".
-- CRITICAL: NO LABEL = NO ROOM. Do not invent "Lounge" or "Living Room" if the text is not there.
-- Do not infer a room type from furniture (e.g. seeing a bed does NOT make it a Bedroom unless labeled "Bedroom").
+- Find every Room Label text (e.g., "Bedroom 1", "Kitchen").
+- For each room, provide a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) surrounding the ROOM Label.
+- CRITICAL: NO LABEL = NO ROOM.
+
+TASK 3: SMART LABELS & ELEMENTS
+- Find every Element Code (e.g., "D01", "W12", "L1").
+- Find important notes/instructions.
+- Provide BOUNDING BOXES for all identified text elements.
 
 FORMAT:
 Return ONLY purely valid JSON. No markdown.
 {
   "success": true,
-  "stateMachine": {
-      "foundations": { "checked": true, "items": [...] },
-      "roof": { "checked": true, "items": [...] }
-  },
+  "stateMachine": { ... },
   "rooms": [
       {
-          "name": "EXACT TEXT FROM DRAWING",
+          "name": "EXACT TEXT",
           "floor": "Ground",
+          "bbox": [100, 200, 150, 400], // [ymin, xmin, ymax, xmax]
           "elements": []
+      }
+  ],
+  "detailedElements": [
+      {
+          "code": "D01",
+          "type": "door",
+          "description": "Internal Door",
+          "room": "Kitchen",
+          "bbox": [500, 600, 520, 650]
+      }
+  ],
+  "instructions": [
+      {
+          "type": "note",
+          "text": "All dims to be checked",
+          "bbox": [900, 800, 950, 950]
       }
   ]
 }
-If you find no text label for a space, DO NOT CREATE A ROOM for it.`;
-
-
+If you find no text label for a space, DO NOT CREATE A ROOM for it.
+`;
 
 /**
  * Extract elements from an image or PDF file using GPT-4 Vision
+ * Supports MULTI-PAGE processing for PDFs.
  */
 export async function extractFromImage(imagePath: string): Promise<ExtractionResult> {
     try {
@@ -136,19 +164,21 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             return {
                 success: false,
                 rooms: [],
+                instructions: [],
+                detailedElements: [],
                 elements: [],
                 rawResponse: '',
-                error: `File not found: ${absolutePath} `
+                error: `File not found: ${absolutePath}`,
+                pageCount: 0
             };
         }
 
         const ext = path.extname(imagePath).toLowerCase();
-        let base64Image: string;
-        let mimeType: string;
+        let imagesToProcess: { base64: string; mimeType: string, pageNumber: number }[] = [];
 
         // Handle PDF files by converting to image using pdfjs-dist + canvas (Node.js compatiable)
         if (ext === '.pdf') {
-            console.log(`📄 PDF detected, converting to image using pdfjs-dist & canvas...`);
+            console.log(`📄 PDF detected, converting ALL PAGES to images...`);
 
             try {
                 // Dynamic imports to ensure they are available
@@ -169,44 +199,47 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const data = new Uint8Array(fileBuffer);
 
-                // Load PDF document
-                // Note: In Node environments, we might need to set workerSrc or disable worker
-                // For simplified usage, we'll try standard loading which works given the dependencies are present
                 const loadingTask = pdfjsLib.getDocument({
                     data,
-                    // Disable font face rules which can cause issues in Node canvas
                     disableFontFace: true,
-                    // Legacy build verbosity control to avoid warning spam
                     verbosity: 0
                 });
 
                 const doc = await loadingTask.promise;
-                console.log(`   PDF Loaded. Pages: ${doc.numPages}`);
+                console.log(`   PDF Loaded. Total Pages: ${doc.numPages}`);
 
-                // Get first page
-                const page = await doc.getPage(1);
+                // PROCESS ALL PAGES
+                for (let i = 1; i <= doc.numPages; i++) {
+                    // Limit to 10 pages for now to prevent massive timeouts
+                    if (i > 10) {
+                        console.log('   ⚠️ Reached page limit (10). Stopping extraction.');
+                        break;
+                    }
 
-                // Set scale for good resolution (2.0 = 200% size, good for text extraction)
-                const scale = 2.0;
-                const viewport = page.getViewport({ scale });
+                    const page = await doc.getPage(i);
+                    // Scale 2.0 = 200% size, good for text extraction
+                    const scale = 2.0;
+                    const viewport = page.getViewport({ scale });
 
-                console.log(`   Rendering Page 1 (Size: ${viewport.width}x${viewport.height})...`);
+                    console.log(`   Rendering Page ${i} (Size: ${viewport.width}x${viewport.height})...`);
 
-                // Create Node Canvas
-                const canvas = createCanvas(viewport.width, viewport.height);
-                const context = canvas.getContext('2d');
+                    const canvas = createCanvas(viewport.width, viewport.height);
+                    const context = canvas.getContext('2d');
 
-                // Render PDF page to canvas
-                await page.render({
-                    canvasContext: context as any,
-                    viewport: viewport
-                }).promise;
+                    await page.render({
+                        canvasContext: context as any,
+                        viewport: viewport
+                    }).promise;
 
-                // Convert to PNG buffer
-                base64Image = canvas.toBuffer('image/png').toString('base64');
-                mimeType = 'image/png';
-
-                console.log(`✅ PDF converted to image successfully via pdfjs-dist`);
+                    // Convert to PNG buffer
+                    const base64Image = canvas.toBuffer('image/png').toString('base64');
+                    imagesToProcess.push({
+                        base64: base64Image,
+                        mimeType: 'image/png',
+                        pageNumber: i
+                    });
+                }
+                console.log(`✅ PDF converted. ${imagesToProcess.length} pages ready for AI analysis.`);
 
             } catch (pdfError: any) {
                 console.error(`❌ PDF conversion error (pdfjs-dist):`, pdfError);
@@ -217,142 +250,151 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     detailedElements: [],
                     elements: [],
                     rawResponse: '',
-                    error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image.`
+                    error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image.`,
+                    pageCount: 0
                 };
             }
         } else {
-            // Regular image file
+            // Regular image file (Single Page)
             const imageBuffer = fs.readFileSync(absolutePath);
-            base64Image = imageBuffer.toString('base64');
+            const base64Image = imageBuffer.toString('base64');
 
             // Determine MIME type from extension
-            mimeType = ext === '.png' ? 'image/png'
+            const mimeType = ext === '.png' ? 'image/png'
                 : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
                     : ext === '.gif' ? 'image/gif'
                         : ext === '.webp' ? 'image/webp'
                             : 'image/png'; // default
+
+            imagesToProcess.push({ base64: base64Image, mimeType, pageNumber: 1 });
         }
 
-        console.log(`🔍 Analyzing drawing: ${path.basename(imagePath)} `);
+        // ============================================
+        // PROCESS EACH PAGE WITH GPT-4 VISION
+        // ============================================
 
-        const response = await getOpenAIClient().chat.completions.create({
-            model: 'gpt-4o', // GPT-4 with vision
-            messages: [
-                {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: EXTRACTION_PROMPT },
+        const allRooms: ExtractedRoom[] = [];
+        const allInstructions: ExtractedInstruction[] = [];
+        const allDetailedElements: ExtractedDetailedElement[] = [];
+        let combinedRawResponse = '';
+        let lastWorkFlow: ExtractedWorkFlow | undefined;
+
+        console.log(`🔍 Starting AI Analysis on ${imagesToProcess.length} pages...`);
+
+        for (const pageData of imagesToProcess) {
+            console.log(`   🚀 Analyzing Page ${pageData.pageNumber}...`);
+
+            try {
+                const response = await getOpenAIClient().chat.completions.create({
+                    model: 'gpt-4o', // GPT-4 with vision
+                    messages: [
                         {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:${mimeType}; base64, ${base64Image} `,
-                                detail: 'high' // High detail for construction drawings
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: `${EXTRACTION_PROMPT}\n\nTHIS IS PAGE ${pageData.pageNumber}.` },
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: `data:${pageData.mimeType}; base64, ${pageData.base64}`,
+                                        detail: 'high' // High detail for construction drawings
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens: 4096,
+                    temperature: 0.1 // Low temperature for consistent extraction
+                });
+
+                const content = response.choices[0]?.message?.content || '';
+                console.log(`      Response received (${content.length} chars)`);
+                combinedRawResponse += `\n--- PAGE ${pageData.pageNumber} ---\n${content}`;
+
+                // Parse JSON response
+                try {
+                    // Extract JSON from response (in case there's extra text)
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]);
+
+                        // Stage 1: Parse rooms
+                        if (parsed.rooms && Array.isArray(parsed.rooms)) {
+                            for (const r of parsed.rooms) {
+                                allRooms.push({
+                                    name: r.name || r.roomName || 'Unknown Room',
+                                    floor: r.floor || 'Ground',
+                                    dimensions: r.dimensions || null,
+                                    area: typeof r.area === 'number' ? r.area : (typeof r.roomArea === 'number' ? r.roomArea : null),
+                                    elements: Array.isArray(r.elements) ? r.elements : [],
+                                    page: pageData.pageNumber,
+                                    bbox: r.bbox // capture bounding box
+                                });
                             }
                         }
-                    ]
+
+                        // Stage 2: Parse instructions/notes
+                        if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                            for (const inst of parsed.instructions) {
+                                allInstructions.push({
+                                    type: inst.type || 'note',
+                                    text: inst.text || '',
+                                    location: inst.location,
+                                    page: pageData.pageNumber,
+                                    bbox: inst.bbox
+                                });
+                            }
+                        }
+
+                        // Stage 3: Parse detailed elements
+                        const aiElements = parsed.detailedElements || parsed.elements;
+                        if (aiElements && Array.isArray(aiElements)) {
+                            for (const elem of aiElements) {
+                                allDetailedElements.push({
+                                    code: elem.code || 'Unknown',
+                                    type: elem.type || 'unknown',
+                                    description: elem.description || '',
+                                    room: elem.room || 'Unknown',
+                                    size: elem.size,
+                                    page: pageData.pageNumber,
+                                    bbox: elem.bbox
+                                });
+                            }
+                        }
+
+                        // Capture workflow (usually same across pages, so just take last one found)
+                        if (parsed.workFlow) {
+                            lastWorkFlow = {
+                                sequence: Array.isArray(parsed.workFlow.sequence) ? parsed.workFlow.sequence : [],
+                                trades: Array.isArray(parsed.workFlow.trades) ? parsed.workFlow.trades : [],
+                                notes: Array.isArray(parsed.workFlow.notes) ? parsed.workFlow.notes : []
+                            };
+                        }
+                    }
+                } catch (jsonErr) {
+                    console.error(`      ⚠️ Failed to parse JSON for Page ${pageData.pageNumber}`, jsonErr);
+                    // Continue to next page rather than failing entire batch
                 }
-            ],
-            max_tokens: 4096,
-            temperature: 0.1 // Low temperature for consistent extraction
-        });
 
-        const content = response.choices[0]?.message?.content || '';
-        console.log(`📊 GPT - 4 Vision response received(${content.length} chars)`);
-
-        // Parse JSON response
-        try {
-            // Extract JSON from response (in case there's extra text)
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                throw new Error('No JSON found in response');
+            } catch (pageErr) {
+                console.error(`      ❌ Error analyzing Page ${pageData.pageNumber}`, pageErr);
             }
-
-            const parsed = JSON.parse(jsonMatch[0]);
-            const rooms: ExtractedRoom[] = [];
-            const instructions: ExtractedInstruction[] = [];
-            const detailedElements: ExtractedDetailedElement[] = [];
-            let workFlow: ExtractedWorkFlow | undefined;
-
-            // Stage 1: Parse rooms from AI response
-            if (parsed.rooms && Array.isArray(parsed.rooms)) {
-                for (const r of parsed.rooms) {
-                    rooms.push({
-                        name: r.name || r.roomName || 'Unknown Room',
-                        floor: r.floor || 'Ground',
-                        dimensions: r.dimensions || null,
-                        area: typeof r.area === 'number' ? r.area : (typeof r.roomArea === 'number' ? r.roomArea : null),
-                        elements: Array.isArray(r.elements) ? r.elements : []
-                    });
-                }
-            }
-
-            // Stage 2: Parse instructions/notes
-            if (parsed.instructions && Array.isArray(parsed.instructions)) {
-                for (const inst of parsed.instructions) {
-                    instructions.push({
-                        type: inst.type || 'note',
-                        text: inst.text || '',
-                        location: inst.location
-                    });
-                }
-            }
-
-            // Stage 3: Parse detailed elements (doors, windows, fixtures)
-            // Handle both "detailedElements" (new prompt) and "elements" (legacy/hallucinated)
-            const aiElements = parsed.detailedElements || parsed.elements;
-            if (aiElements && Array.isArray(aiElements)) {
-                for (const elem of aiElements) {
-                    detailedElements.push({
-                        code: elem.code || 'Unknown',
-                        type: elem.type || 'unknown',
-                        description: elem.description || '',
-                        room: elem.room || 'Unknown',
-                        size: elem.size
-                    });
-                }
-            }
-
-            // Stage 4: Parse work flow
-            if (parsed.workFlow) {
-                workFlow = {
-                    sequence: Array.isArray(parsed.workFlow.sequence) ? parsed.workFlow.sequence : [],
-                    trades: Array.isArray(parsed.workFlow.trades) ? parsed.workFlow.trades : [],
-                    notes: Array.isArray(parsed.workFlow.notes) ? parsed.workFlow.notes : []
-                };
-            }
-
-            console.log(`✅ Comprehensive extraction complete: `);
-            console.log(`   📍 Rooms: ${rooms.length} `);
-            console.log(`   📝 Instructions: ${instructions.length} `);
-            console.log(`   🚪 Elements: ${detailedElements.length} `);
-            console.log(`   🔧 Work Flow: ${workFlow ? 'Yes' : 'No'} `);
-
-            for (const room of rooms) {
-                console.log(`   📍 ${room.name}: ${room.dimensions || 'no dimensions'}, ${room.area ? room.area + ' sqm' : 'no area'} `);
-            }
-
-            return {
-                success: true,
-                rooms,
-                instructions,
-                detailedElements,
-                workFlow,
-                elements: [], // Legacy: empty - costs come from CSV now
-                rawResponse: content
-            };
-
-        } catch (parseError) {
-            console.error('❌ Failed to parse extraction response:', parseError);
-            return {
-                success: false,
-                rooms: [],
-                instructions: [],
-                detailedElements: [],
-                elements: [],
-                rawResponse: content,
-                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)} `
-            };
         }
+
+        console.log(`✅ All pages processed.`);
+        console.log(`   📍 Total Rooms: ${allRooms.length}`);
+        console.log(`   📝 Total Instructions: ${allInstructions.length}`);
+        console.log(`   🚪 Total Elements: ${allDetailedElements.length}`);
+
+        return {
+            success: true,
+            rooms: allRooms,
+            instructions: allInstructions,
+            detailedElements: allDetailedElements,
+            workFlow: lastWorkFlow,
+            elements: [], // Legacy: empty
+            rawResponse: combinedRawResponse,
+            pageCount: imagesToProcess.length
+        };
 
     } catch (error) {
         console.error('❌ Extraction error:', error);
@@ -363,13 +405,15 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             detailedElements: [],
             elements: [],
             rawResponse: '',
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            pageCount: 0
         };
     }
 }
 
 /**
  * Extract elements from a URL (for cloud-hosted images)
+ * Note: Still single-page for now as it's typically used for images not PDFs
  */
 export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult> {
     try {
@@ -416,20 +460,33 @@ export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult
                 notes: e.notes || null
             }));
 
-            console.log(`✅ Extracted ${elements.length} elements from URL`);
+            // Attempt to map to new structure as well if possible
+            const rooms: ExtractedRoom[] = (parsed.rooms || []).map((r: any) => ({
+                ...r,
+                page: 1,
+                bbox: r.bbox
+            }));
 
             return {
                 success: true,
+                rooms,
+                instructions: [],
+                detailedElements: [],
                 elements,
-                rawResponse: content
+                rawResponse: content,
+                pageCount: 1
             };
 
         } catch (parseError) {
             return {
                 success: false,
+                rooms: [],
+                instructions: [],
+                detailedElements: [],
                 elements: [],
                 rawResponse: content,
-                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)} `
+                error: `Failed to parse AI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+                pageCount: 1
             };
         }
 
@@ -437,9 +494,13 @@ export async function extractFromUrl(imageUrl: string): Promise<ExtractionResult
         console.error('❌ URL extraction error:', error);
         return {
             success: false,
+            rooms: [],
+            instructions: [],
+            detailedElements: [],
             elements: [],
             rawResponse: '',
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            pageCount: 0
         };
     }
 }

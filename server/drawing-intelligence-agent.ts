@@ -91,7 +91,8 @@ export async function processDrawing(imagePath: string): Promise<DrawingIntellig
                 code,
                 type: inferTypeFromCode(code),
                 description: code,
-                room: room.name
+                room: room.name,
+                page: room.page // Inherit page from room
             }));
 
             // Combine and deduplicate

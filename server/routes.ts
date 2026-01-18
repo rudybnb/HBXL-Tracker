@@ -6646,5 +6646,26 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
     res.json(results);
   });
 
+
+  // AI Chat Endpoint (New SKI)
+  app.post("/api/chat/drawing/:fileId", async (req, res) => {
+    try {
+      const fileId = parseInt(req.params.fileId);
+      const { message } = req.body;
+
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      const { ragAgent } = await import("./rag-agent");
+      const answer = await ragAgent.chatAboutDrawing(fileId, message);
+
+      res.json({ answer });
+    } catch (error) {
+      console.error("Chat Error:", error);
+      res.status(500).json({ error: "Failed to process chat request" });
+    }
+  });
+
   return httpServer;
 }

@@ -179,61 +179,70 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                             <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                         </div>
                     ) : files && files.length > 0 ? (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                            {files.map((file) => (
-                                <div key={file.id} className="group relative bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                                    <div className="aspect-square bg-slate-900 flex items-center justify-center cursor-pointer" onClick={() => setSelectedImage(file.fileUrl)}>
-                                        {file.fileType.startsWith('image/') ? (
-                                            <img
-                                                src={file.fileUrl}
-                                                alt={file.originalName}
-                                                className="w-full h-full object-cover"
-                                                onError={(e) => {
-                                                    // Fallback if image fails to load
-                                                    (e.target as HTMLImageElement).src = 'placeholder.png'; // Or logic to show icon
-                                                    (e.target as HTMLImageElement).style.display = 'none';
-                                                    (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                                                }}
-                                            />
-                                        ) : (
-                                            <FileText className="h-12 w-12 text-slate-500" />
+                        <div className="space-y-6">
+                            {/* File Grid */}
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-6">
+                                {files.map((file) => (
+                                    <div key={file.id} className="group relative bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                                        <div className="aspect-square bg-slate-900 flex items-center justify-center cursor-pointer" onClick={() => setSelectedImage(file.fileUrl)}>
+                                            {file.fileType.startsWith('image/') ? (
+                                                <img
+                                                    src={file.fileUrl}
+                                                    alt={file.originalName}
+                                                    className="w-full h-full object-cover"
+                                                    onError={(e) => {
+                                                        (e.target as HTMLImageElement).src = 'placeholder.png';
+                                                        (e.target as HTMLImageElement).style.display = 'none';
+                                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                                    }}
+                                                />
+                                            ) : (
+                                                <FileText className="h-12 w-12 text-slate-500" />
+                                            )}
+                                            <div className={`hidden absolute inset-0 flex items-center justify-center ${file.fileType.startsWith('image/') ? '' : 'flex'}`}>
+                                                <FileText className="h-12 w-12 text-slate-500" />
+                                            </div>
+
+                                            {/* Smart Label Indicator */}
+                                            {file.extractionStatus === 'completed' && (
+                                                <div className="absolute bottom-2 right-2 bg-green-500 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm font-medium flex items-center">
+                                                    <Layers className="h-3 w-3 mr-1" />
+                                                    SMART
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="p-3">
+                                            <p className="text-sm font-medium text-slate-200 truncate" title={file.originalName}>
+                                                {file.originalName}
+                                            </p>
+                                            <p className="text-xs text-slate-500 mt-1">
+                                                {new Date(file.createdAt).toLocaleDateString()}
+                                            </p>
+                                        </div>
+
+                                        {!readOnly && (
+                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <Button
+                                                    variant="destructive"
+                                                    size="icon"
+                                                    className="h-8 w-8 rounded-full"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        deleteMutation.mutate(file.id);
+                                                    }}
+                                                    disabled={deleteMutation.isPending}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         )}
-                                        {/* Fallback Icon if image fails or for PDFs */}
-                                        <div className={`hidden absolute inset-0 flex items-center justify-center ${file.fileType.startsWith('image/') ? '' : 'flex'}`}>
-                                            <FileText className="h-12 w-12 text-slate-500" />
-                                        </div>
                                     </div>
-
-                                    <div className="p-3">
-                                        <p className="text-sm font-medium text-slate-200 truncate" title={file.originalName}>
-                                            {file.originalName}
-                                        </p>
-                                        <p className="text-xs text-slate-500 mt-1">
-                                            {new Date(file.createdAt).toLocaleDateString()}
-                                        </p>
-                                    </div>
-
-                                    {!readOnly && (
-                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Button
-                                                variant="destructive"
-                                                size="icon"
-                                                className="h-8 w-8 rounded-full"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    deleteMutation.mutate(file.id);
-                                                }}
-                                                disabled={deleteMutation.isPending}
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
+                                ))}
+                            </div>
                         </div>
                     ) : (
-                        <div className="text-center py-10 bg-slate-800/50 rounded-lg border border-slate-700/50">
+                        <div className="text-center py-10 bg-slate-800/50 rounded-lg border border-slate-700/50 mt-6">
                             <ImageIcon className="h-12 w-12 text-slate-600 mx-auto mb-3" />
                             <p className="text-slate-400">No drawings uploaded yet</p>
                         </div>
@@ -245,23 +254,68 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                 </TabsContent>
             </Tabs>
 
-            {/* Image Preview Modal */}
-            {selectedImage && (
-                <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
-                    <button
-                        className="absolute top-4 right-4 text-white hover:text-slate-300 transition-colors"
-                        onClick={() => setSelectedImage(null)}
-                    >
-                        <X className="h-8 w-8" />
-                    </button>
-                    <img
-                        src={selectedImage}
-                        alt="Preview"
-                        className="max-w-full max-h-[90vh] object-contain rounded-lg"
-                        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking image
-                    />
+            {/* Smart Drawing Viewer Modal */}
+            {selectedImage && files && (
+                <div className="fixed inset-0 z-50 bg-black/95 flex flex-col p-4 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-slate-200">
+                            {files.find(f => f.fileUrl === selectedImage)?.originalName || 'Drawing Viewer'}
+                        </h2>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-slate-400 hover:text-white"
+                            onClick={() => setSelectedImage(null)}
+                        >
+                            <X className="h-6 w-6" />
+                        </Button>
+                    </div>
+
+                    <div className="flex-1 min-h-0 bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+                        <SmartDrawingLoader
+                            file={files.find(f => f.fileUrl === selectedImage)!}
+                            jobId={jobId}
+                        />
+                    </div>
                 </div>
             )}
         </div>
+    );
+}
+
+// Wrapper to fetch smart data for the viewer
+import DrawingViewer from "./drawing-viewer";
+
+function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
+    // Fetch extracted rooms to show as smart labels
+    const { data: roomsData } = useQuery({
+        queryKey: [`/api/jobs/${jobId}/rooms`],
+        enabled: !!file.id && file.extractionStatus === 'completed',
+    });
+
+    const smartElements = [];
+
+    // Map rooms to smart elements if they have bounding boxes
+    if (roomsData?.rooms) {
+        roomsData.rooms.forEach((room: any) => {
+            if (room.bbox) {
+                smartElements.push({
+                    id: room.id,
+                    type: 'room',
+                    label: room.name,
+                    bbox: room.bbox,
+                    page: room.page || 1
+                });
+            }
+        });
+    }
+
+    return (
+        <DrawingViewer
+            fileUrl={file.fileUrl}
+            fileType={file.fileType}
+            smartElements={smartElements}
+            onElementClick={(el) => console.log('Clicked:', el)}
+        />
     );
 }
