@@ -44,7 +44,7 @@ import {
   jobCostItems,
   jobFiles
 } from "@shared/schema";
-import { contractors, jobs, csvUploads, contractorApplications, workSessions, adminSettings, jobAssignments, contractorReports, adminInspections, inspectionNotifications, taskProgress, taskInspectionResults, projectCashflowWeekly, materialPurchases, projectMaster, calendarEvents, emailRecords, meetings } from "@shared/schema";
+import { contractors, jobs, csvUploads, contractorApplications, workSessions, adminSettings, jobAssignments, contractorReports, adminInspections, inspectionNotifications, taskProgress, taskInspectionResults, projectCashflowWeekly, materialPurchases, projectMaster, calendarEvents, emailRecords, meetings, jobFiles, jobCostItems, extractedElements, rooms, roomElements, payableItems } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, inArray, sql } from "drizzle-orm";
 import { IStorage, JobAssignment } from "./storage";
@@ -157,8 +157,41 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteJob(id: string): Promise<boolean> {
+    console.log(`🗑️ Deleting Job: ${id} and all related records (Cascading)...`);
+
+    // 1. Get all rooms for this job to find deeper dependencies
+    const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, id));
+    console.log(`   - Found ${jobRooms.length} rooms to cleanup`);
+
+    for (const room of jobRooms) {
+      // 2. Get all elements for this room
+      const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+
+      for (const element of elements) {
+        // 3. Delete payable items for each element
+        await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
+      }
+
+      // 4. Delete the elements themselves
+      await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
+    }
+
+    // 5. Delete the rooms
+    await db.delete(rooms).where(eq(rooms.jobId, id));
+
+    // 6. Delete Extracted Elements (Direct link to Job)
+    await db.delete(extractedElements).where(eq(extractedElements.jobId, id));
+
+    // 7. Delete Job Cost Items
+    await db.delete(jobCostItems).where(eq(jobCostItems.jobId, id));
+
+    // 8. Delete Job Files
+    await db.delete(jobFiles).where(eq(jobFiles.jobId, id));
+
+    // 9. Finally, delete the Job
     const result = await db.delete(jobs).where(eq(jobs.id, id));
-    console.log("🗑️ Deleted job:", id, "Affected rows:", result.rowCount);
+    console.log("   ✅ Deleted job:", id, "Affected rows:", result.rowCount);
+
     return result.rowCount > 0;
   }
 
