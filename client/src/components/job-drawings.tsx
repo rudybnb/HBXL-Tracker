@@ -287,28 +287,51 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 import DrawingViewer from "./drawing-viewer";
 
 function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
-    // Fetch extracted rooms to show as smart labels
+    // Fetch rooms (Orange Boxes)
     const { data: roomsData } = useQuery({
         queryKey: [`/api/jobs/${jobId}/rooms`],
         enabled: !!file.id && file.extractionStatus === 'completed',
     });
 
+    // Fetch detailed elements (Blue Boxes)
+    const { data: elementsData } = useQuery({
+        queryKey: [`/api/jobs/${jobId}/elements`],
+        enabled: !!file.id && file.extractionStatus === 'completed',
+    });
+
     const smartElements = [];
 
-    // Map rooms to smart elements if they have bounding boxes
+    // 1. Map Rooms (Orange)
     if (roomsData?.rooms) {
         roomsData.rooms.forEach((room: any) => {
-            // Only show smart labels for this specific file
-            // (Fallback to showing if fileId is missing, for legacy compatibility)
             const belongsToFile = !room.fileId || room.fileId === file.id;
-
             if (room.bbox && belongsToFile) {
                 smartElements.push({
-                    id: room.id,
-                    type: 'room',
+                    id: `room-${room.id}`,
+                    type: 'room', // Styling: Orange
                     label: room.name,
                     bbox: room.bbox,
                     page: room.page || 1
+                });
+            }
+        });
+    }
+
+    // 2. Map Elements (Blue)
+    if (elementsData && Array.isArray(elementsData)) {
+        elementsData.forEach((el: any) => {
+            // Check file ownership
+            const belongsToFile = el.fileId === file.id;
+
+            // Only show if it has a bounding box
+            if (belongsToFile && el.bbox) {
+                smartElements.push({
+                    id: `el-${el.id}`,
+                    type: 'element', // Styling: Blue
+                    label: el.description || el.elementType, // e.g. "Double Socket"
+                    bbox: el.bbox,
+                    page: el.page || 1,
+                    details: { ...el }
                 });
             }
         });
