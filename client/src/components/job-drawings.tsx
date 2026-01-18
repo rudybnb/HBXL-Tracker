@@ -316,6 +316,7 @@ function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
             fileType={file.fileType}
             smartElements={smartElements}
             onElementClick={(el) => console.log('Clicked:', el)}
+            fileId={file.id}
         />
     );
 }
