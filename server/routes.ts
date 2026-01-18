@@ -722,59 +722,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     currentRoomId = existing[0].id;
                   }
 
-                  // Process Nested Elements
-                  if (room.elements && room.elements.length > 0) {
-                    for (const element of room.elements) {
-                      // Price Lookup
-                      const roomPrice = lookupPrice({
-                        category: element.category || "General",
-                        subtype: element.item || element.description || "",
-                        unit: "nr",
-                        quantity: 1
-                      }, jobSpecificLibrary);
+                  // NOTE: room.elements is legacy/simplified string arrays. 
+                  // We also process 'detailedElements' separately below for richer data.
+                }
+              }
 
-                      // Validation Check
-                      if (roomPrice.source === 'default') {
-                        console.warn(`❌ Pricing Check Failed for Room Item: ${element.item}`);
-                        pricingValidationFailed = true;
-                        failedItems.push(element.item || element.description || "Unknown Room Item");
-                      }
+              // 3. Process DETAILED ELEMENTS (New Prompt Schema)
+              if (result.detailedElements && result.detailedElements.length > 0) {
+                console.log(`💾 Saving ${result.detailedElements.length} detailed elements (Smart Symbols)...`);
 
-                      // Traceability
-                      await db.insert(extractedElements).values({
-                        jobId: req.params.id,
-                        fileId: jobFile.id,
-                        elementType: element.category || "room_item",
-                        description: element.description || element.item,
-                        roomName: room.name,
-                        quantity: element.quantity?.toString() || "1",
-                        unit: "nr",
-                        rate: roomPrice.rate.toString(),
-                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
-                        page: (element as any).page || room.page || 1,
-                        bbox: JSON.stringify((element as any).bbox || [])
-                      });
+                for (const element of result.detailedElements) {
+                  // Find the room this element belongs to
+                  const targetRoomName = element.room || "Unallocated";
+                  let targetRoomId = globalRoomId || null; // Default to global if no match
 
-                      // UI Element
-                      const [newRoomElement] = await db.insert(roomElements).values({
-                        roomId: currentRoomId,
-                        name: element.item || element.category,
-                        measurementSummary: element.quantity || "1 nr",
-                        subtotal: "0"
-                      }).returning();
+                  const matchedRoom = await db.select().from(rooms)
+                    .where(and(eq(rooms.jobId, req.params.id), eq(rooms.name, targetRoomName)))
+                    .limit(1);
 
-                      // Payable Item
-                      await db.insert(payableItems).values({
-                        elementId: newRoomElement.id,
-                        description: element.description || element.item,
-                        quantity: element.quantity?.toString() || "1",
-                        unit: "nr",
-                        rate: roomPrice.rate.toString(),
-                        total: (roomPrice.rate * parseFloat(element.quantity?.toString() || "1")).toString(),
-                        status: "not_started"
-                      });
-                      allNewElementIds.push(newRoomElement.id);
-                    }
+                  if (matchedRoom.length > 0) {
+                    targetRoomId = matchedRoom[0].id;
+                  }
+
+                  // Proceed if we have a room to assign to
+                  if (targetRoomId) {
+                    // Price Lookup
+                    const elementPrice = lookupPrice({
+                      category: element.type || "General",
+                      subtype: element.description || element.code || "",
+                      unit: "nr",
+                      quantity: 1
+                    }, jobSpecificLibrary);
+
+                    // Traceability (Extracted Elements Table)
+                    await db.insert(extractedElements).values({
+                      jobId: req.params.id,
+                      fileId: jobFile.id,
+                      elementType: element.type || "visual_symbol",
+                      description: element.description || element.code || "Unknown Symbol",
+                      roomName: targetRoomName,
+                      quantity: "1",
+                      unit: "nr",
+                      rate: elementPrice.rate.toString(),
+                      total: elementPrice.rate.toString(),
+                      page: element.page || 1,
+                      bbox: JSON.stringify(element.bbox || []),
+                      rawJson: JSON.stringify(element)
+                    });
+
+                    // UI Element (Room Elements Table)
+                    const [newRoomElement] = await db.insert(roomElements).values({
+                      roomId: targetRoomId,
+                      name: element.description || element.code,
+                      measurementSummary: "1 nr",
+                      subtotal: "0"
+                    }).returning();
+
+                    // Payable Item
+                    await db.insert(payableItems).values({
+                      elementId: newRoomElement.id,
+                      description: element.description || element.code || "Visual Item",
+                      quantity: "1",
+                      unit: "nr",
+                      rate: elementPrice.rate.toString(),
+                      total: elementPrice.rate.toString(),
+                      status: "not_started"
+                    });
+
+                    allNewElementIds.push(newRoomElement.id);
                   }
                 }
               }

@@ -99,6 +99,7 @@ export interface ExtractionResult {
 
 const EXTRACTION_PROMPT = `You are a VISUAL CONSTRUCTION INTELLIGENCE AGENT (Caddie-style).
 Your job is to read the drawing and extract text, objects, and their EXACT LOCATIONS.
+You must identify both TEXT LABELS and VISUAL SYMBOLS (like sockets, lights, doors).
 
 TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
 - FOUNDATIONS (trench, concrete, footing)
@@ -109,12 +110,15 @@ TASK 1: GLOBAL ELEMENTS (Search strictly for these keywords in text/notes)
 TASK 2: ROOM IDENTIFICATION (STRICT EVIDENCE RULE)
 - Find every Room Label text (e.g., "Bedroom 1", "Kitchen").
 - For each room, provide a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) surrounding the ROOM Label.
+- If a room has multiple words (e.g., "Master Bedroom"), capture the whole label.
 - CRITICAL: NO LABEL = NO ROOM.
 
-TASK 3: SMART LABELS & ELEMENTS
-- Find every Element Code (e.g., "D01", "W12", "L1").
-- Find important notes/instructions.
-- Provide BOUNDING BOXES for all identified text elements.
+TASK 3: SMART LABELS & ELEMENTS (TEXT & VISUALS)
+- DOORS & WINDOWS: Identify all doors (swings) and windows. If they have codes (D01, W01), use them. If not, generate a code (e.g., "VISUAL-DOOR-1").
+- ELECTRICAL: Identify symbols for Sockets (Double/Single), Lights (Pendants, Spots), Switches. Label them e.g., "Double Socket", "Light Switch".
+- PLUMBING: Identify visual symbols for Toilets (WC), Basins, Showers, Baths.
+- INSTRUCTIONS: Capture important notes (e.g., "Extract Fan", "Consumer Unit").
+- Provide BOUNDING BOXES for all identified items.
 
 FORMAT:
 Return ONLY purely valid JSON. No markdown.
@@ -131,10 +135,10 @@ Return ONLY purely valid JSON. No markdown.
   ],
   "detailedElements": [
       {
-          "code": "D01",
-          "type": "door",
-          "description": "Internal Door",
-          "room": "Kitchen",
+          "code": "D01", // Or "VISUAL-DOOR-1" if no code
+          "type": "door", // door, window, electrical, plumbing, other
+          "description": "Internal Door", // or "Double Socket", "WC"
+          "room": "Kitchen", // Infer room based on location
           "bbox": [500, 600, 520, 650]
       }
   ],
