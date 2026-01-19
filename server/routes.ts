@@ -560,68 +560,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
         console.log(`📁 File path: ${filePath}`);
 
-        // Run in background - do not await
-        import('./drawing-extraction-agent').then(async (agent) => {
+        // Run Mixture of Experts (Structure + Electrical)
+        Promise.all([
+          import('./drawing-extraction-agent'),
+          import('./agents/electrical-expert')
+        ]).then(async ([structureAgent, electricalAgent]) => {
           try {
-            console.log("🚀 Starting extraction agent...");
-            const result = await agent.extractFromImage(filePath);
-            console.log("✅ Extraction complete:", result.success);
+            console.log("🚀 Starting Mixture of Experts Extraction...");
 
-            if (result.success && result.rooms) {
-              console.log(`🏠 Identified ${result.rooms.length} rooms`);
+            // Run Agents in Parallel
+            const [structureResult, electricalResult] = await Promise.all([
+              structureAgent.extractFromImage(filePath),
+              electricalAgent.extractElectrical(filePath)
+            ]);
 
+            console.log("✅ Agents finished.");
+            console.log(`   - Structure: ${structureResult.success ? 'Success' : 'Failed'}`);
+            console.log(`   - Electrical: ${electricalResult.success ? 'Success' : 'Failed'}`);
+
+            const success = structureResult.success || electricalResult.success;
+
+            if (success) {
               // 1. Update file status
               await db.update(jobFiles)
                 .set({ extractionStatus: 'completed' })
                 .where(eq(jobFiles.id, jobFile.id));
 
-              // 2. Save Room Bounding Boxes (as "rooms" table entries)
-              // Note: We need to map the AI room bbox to our DB schema if needed, 
-              // but for now, the "Smart Plan" viewer might use "extractedElements" with type="room"
-              // OR it might look at the "rooms" table.
+              // Helper to find which room an element belongs to
+              const findRoomForElement = (bbox: number[]) => {
+                if (!structureResult.rooms) return "Unassigned";
+                const [ex, ey, ex2, ey2] = bbox;
+                const cx = (ex + ex2) / 2;
+                const cy = (ey + ey2) / 2;
 
-              // Let's check how the UI reads rooms.
-              // The UI reads 'extractedElements' often for boxes.
-              // But 'rooms' table is for costs.
-              // We should save to BOTH or prioritize 'extractedElements' for the visual overlay.
+                for (const room of structureResult.rooms) {
+                  if (!room.bbox) continue;
+                  const [rx, ry, rx2, ry2] = room.bbox;
+                  // Simple point-in-rect check
+                  if (cx >= rx && cx <= rx2 && cy >= ry && cy <= ry2) {
+                    return room.name;
+                  }
+                }
+                return "Unassigned";
+              };
 
-              // SAVE AS EXTRACTED ELEMENTS (Visual Overlay)
-              for (const room of result.rooms) {
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: 'room', // This is what the UI likely looks for to draw boxes
-                  description: room.name,
-                  dimensions: JSON.stringify(room.bbox), // [x,y,w,h] or extraction format
-                  quantity: "1",
-                  unit: "nr",
-                  rate: "0",
-                  total: "0",
-                  roomName: room.name
-                });
-              }
-              console.log("💾 Saved rooms to extracted_elements");
-
-              // 3. Save Detailed Elements (Windows, Doors, etc.)
-              if (result.detailedElements && result.detailedElements.length > 0) {
-                console.log(`🧩 Identified ${result.detailedElements.length} detailed elements`);
-                for (const element of result.detailedElements) {
+              // 2. Save Rooms (from Structure Agent)
+              if (structureResult.rooms) {
+                console.log(`🏠 Identified ${structureResult.rooms.length} rooms`);
+                for (const room of structureResult.rooms) {
                   await db.insert(extractedElements).values({
                     jobId: req.params.id,
                     fileId: jobFile.id,
-                    elementType: element.type, // "window", "door", "socket"
-                    description: element.name || element.type || 'Unknown Element',
-                    dimensions: JSON.stringify(element.bbox),
+                    elementType: 'room',
+                    description: room.name,
+                    dimensions: JSON.stringify(room.bbox),
                     quantity: "1",
-                    unit: "nr",
-                    rate: "0",
-                    total: "0",
-                    roomName: element.room // Links it to the room visually
+                    unit: "nr", rate: "0", total: "0",
+                    roomName: room.name
                   });
                 }
-                console.log("💾 Saved detailed elements");
               }
+
+              // 3. Save Structural Elements (Windows/Doors from Structure Agent)
+              if (structureResult.detailedElements) {
+                for (const el of structureResult.detailedElements) {
+                  await db.insert(extractedElements).values({
+                    jobId: req.params.id,
+                    fileId: jobFile.id,
+                    elementType: el.type,
+                    description: el.name || el.type || 'Unknown Structure',
+                    dimensions: JSON.stringify(el.bbox),
+                    quantity: "1", unit: "nr", rate: "0", total: "0",
+                    roomName: el.room || findRoomForElement(el.bbox)
+                  });
+                }
+              }
+
+              // 4. Save Electrical Elements (from Electrical Expert)
+              if (electricalResult.success && electricalResult.elements) {
+                console.log(`⚡ Saving ${electricalResult.elements.length} electrical symbols...`);
+                for (const el of electricalResult.elements) {
+                  const assignedRoom = findRoomForElement(el.bbox);
+                  await db.insert(extractedElements).values({
+                    jobId: req.params.id,
+                    fileId: jobFile.id,
+                    elementType: el.type,
+                    description: el.name || el.type || 'Unknown Electrical',
+                    dimensions: JSON.stringify(el.bbox),
+                    quantity: "1", unit: "nr", rate: "0", total: "0",
+                    roomName: assignedRoom
+                  });
+                }
+              }
+              console.log("💾 All extraction data saved.");
+            } else {
+              throw new Error("Both agents failed to extract data.");
             }
+
           } catch (err) {
             console.error("❌ background extraction failed:", err);
             await db.update(jobFiles)

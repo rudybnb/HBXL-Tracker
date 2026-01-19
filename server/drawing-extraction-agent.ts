@@ -103,7 +103,7 @@ const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
 Your task:
 1. Parse a vector-based architectural drawing.
 2. Identify ROOMS (boundaries + labels).
-3. Identify DETAILED ELEMENTS with HIGH PRECISION.
+3. Identify STRUCTURAL ELEMENTS (Doors, Windows, Sanitary).
 
 CRITICAL - COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES based on a 0-1000 scale.
@@ -117,33 +117,33 @@ TASK 1: ROOM RECOGNITION
 - Box must cover the entire room area.
 - [xmin, ymin, xmax, ymax] (0-1000 scale)
 
-TASK 2: DETAILED ELEMENT EXTRACTION & COUNTING
-You must identify and COUNT the following symbols accurately. 
+TASK 2: STRUCTURAL ELEMENT EXTRACTION
+Identify boundaries and fixed building elements.
 
 SYMBOLS TO FIND:
-1. LIGHTS ("light"): 
-   - Visual: Circle with a cross/plus (+) inside it. 
-   - Scan the entire ceiling area. 
-   - Do not miss lights in the center or near text.
+1. WINDOWS ("window"):
+   - Double lines in walls, rectangular frames.
+   - Bay windows, sliding doors.
 
-2. SOCKETS ("socket"):
-   - Visual: Small square or rectangle attached to the wall line.
-   - Often has a small line or arc indicating pins.
-   - Count each individual square as 1 socket. 
+2. DOORS ("door"):
+   - Quarter-circle arc showing door swing.
+   - Sliding doors, French doors.
 
-3. SWITCHES ("switch"):
-   - Visual: Small circle or triangle near a door opening.
+3. SANITARYWARE ("sanitary"):
+   - Toilets (WC), Sinks (Basins), Showers, Baths.
+   - Identify these to help define room types (e.g. Bathroom).
 
-4. WINDOWS ("window") & DOORS ("door"):
-   - Standard architectural symbols.
+DO NOT EXTRACT:
+- Do NOT extract Lights, Sockets, or Switches. (Another agent handles these).
+- Do NOT extract Furniture (Sofas, Tables).
 
 OUTPUT FORMAT (JSON ONLY):
 {
   "success": true,
   "rooms": [ { "name": "Living Room", "bbox": [...] } ],
   "detailedElements": [
-      { "type": "light", "name": "Ceiling Light", "bbox": [400, 400, 450, 450], "room": "Living Room" },
-      { "type": "socket", "name": "Single Socket", "bbox": [10, 500, 30, 520], "room": "Living Room" }
+      { "type": "window", "name": "Standard Window", "bbox": [...], "room": "Living Room" },
+      { "type": "sanitary", "name": "WC", "bbox": [...], "room": "Bathroom" }
   ]
 }
 `;
