@@ -140,7 +140,10 @@ NOTE: The drawing may be blue/black line art on white background.
 
 REQUIREMENT:
 - VISUAL SCANNING IS MANDATORY: You are a computer vision model. Do not "guess" or read the text to find the quantity.
-- IGNORE TEXT SPECIFICATIONS: If a light says "4" next to it, that might mean "Type 4", NOT quantity 4. COUNT THE SYMBOLS.
+- NEGATIVE CONSTRAINT: Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities. These are often Circuit Numbers or Types.
+- YOU MUST IGNORE ALL TEXT NUMBERS for counting.
+- ONLY count the actual physical pictorial symbols you see.
+- If a light says "4" next to it, that might mean "Type 4", NOT quantity 4. COUNT THE SYMBOLS.
 - If you see 6 physical circle symbols, the count is 6.
 - DO NOT rely on cached data. Treat this image as brand new.
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
