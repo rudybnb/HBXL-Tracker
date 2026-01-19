@@ -101,9 +101,9 @@ const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
 
 Your task:
 1. Parse a vector-based architectural drawing (converted to image).
-2. Identify all construction symbols using geometry and pattern recognition.
-3. Classify each symbol using construction domain knowledge.
-4. Return ABSOLUTE PIXEL COORDINATES for all bounding boxes.
+2. Identify all ROOMS by their closed polyline boundaries and text labels.
+3. Classify the function of each room (e.g., Living Room, Kitchen).
+4. Return ABSOLUTE PIXEL COORDINATES for the room bounding boxes.
 
 CRITICAL - COORDINATE SYSTEM:
 - Do NOT use a normalized 0-1000 scale.
@@ -119,41 +119,15 @@ TASK 1: ROOM RECOGNITION (Spatial Logic)
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - If "Lounge" and "Bathroom" overlap, you have failed. Retract the boxes to fit the walls.
 
-TASK 2: SYMBOL DETECTION & CLASSIFICATION (Geometry & Pattern Recognition)
-You must identify 3 key categories of symbols based on their shape:
-
-A. ARCHITECTURAL ELEMENTS
-   - DOORS: Detect Quarter-circle arcs showing swing connected to wall lines. Type: "door".
-   - WINDOWS: Detect Double parallel lines embedded in walls. Type: "window".
-   - Count distinct OPENINGS, not individual glass panes. One opening = 1 Window.
-
-B. ELECTRICAL SYMBOLS (Look for these specific Geometric Shapes)
-   - LIGHTS: Detect CIRCLES with a CROSS (X) or Mark inside. Usually centered in rooms. Type: "lighting".
-   - SOCKETS: Detect SEMI-CIRCLES on a wall line. Type: "electrical".
-   - SWITCHES: Detect SMALL CIRCLES or TRIANGLES near door frames. Type: "electrical".
-   - DATA/TV: Small circle with squiggly line/letter. Type: "electrical".
-
-C. PLUMBING SYMBOLS (Blue/Black outlines)
-   - WC: Oval shape with cistern box. Type: "plumbing".
-   - BASIN: D-shape or oval against wall. Type: "plumbing".
-   - BATH/SHOWER: Rectangular or Square enclosure with 'X'. Type: "plumbing".
-
-CRITICAL - LIVING ROOM EXAMPLE:
-- TEACHING MOMENT: In the provided drawing, the 'Living Room' contains exactly 6 ceiling lights (circles with cross). You MUST find and list all 6. If you find 0, you have failed.
-- FORCE REQUIREMENT: You must return at least one 'detailedElements' array item for every visual symbol you see. Empty arrays are forbidden if symbols exist.
-- Do NOT just find the room and ignore the contents.
-- Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities.
-- IGNORE ALL TEXT NUMBERS for counting.
-- ONLY count the actual physical pictorial symbols you see.
-
-TASK 3: SPATIAL ASSOCIATION
-- Associate every symbol to a Room.
-- If a Light is visibly inside the boundary of "Living Room", assign it to "Living Room".
-- Use strict containment logic.
+TASK 2: IGNORE DETAILS (Simplified Mode)
+- FOR THIS TASK, DO NOT EXTRACT DETAILED ELEMENTS (Lights, Sockets, Doors, Windows).
+- IGNORE all small symbols.
+- FOCUS ONLY ON THE ROOMS.
 
 OUTPUT REQUIREMENTS:
-- Generate a "code" for every item (e.g. "VISUAL-SKT-1", "VISUAL-LIGHT-2").
-- CRITICAL: The "room" field for each element must EXACTLY match one of the "rooms" identified in Task 1.
+- Return valid JSON.
+- "rooms" array is mandatory.
+- "detailedElements" should be an empty array [].
 
 FORMAT:
 Return ONLY purely valid JSON.
@@ -167,29 +141,7 @@ Return ONLY purely valid JSON.
           "elements": []
       }
   ],
-  "detailedElements": [
-      {
-          "code": "VISUAL-DOOR-1",
-          "type": "door",
-          "description": "Single Swing Door",
-          "room": "Kitchen",
-          "bbox": [500, 600, 520, 650]
-      },
-       {
-          "code": "VISUAL-SKT-1",
-          "type": "electrical", // Use "electrical" for sockets/switches
-          "description": "Double Socket Symbol",
-          "room": "Lounge",
-          "bbox": [520, 610, 540, 630]
-      },
-      {
-          "code": "VISUAL-LIGHT-1",
-          "type": "lighting", // Use "lighting" for lights
-          "description": "Ceiling Rose / Light",
-          "room": "Lounge",
-          "bbox": [550, 400, 570, 420]
-      }, // Allowed types: "door", "window", "electrical", "lighting", "plumbing", "other"
-  ],
+  "detailedElements": [],
   "instructions": []
 }
 `;

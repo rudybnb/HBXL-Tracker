@@ -555,14 +555,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: "user"
       });
 
-      /*
-      // AI EXTRACTION DISABLED FOR REFACTORING - START FROM SCRATCH
-      // The previous logic was causing hangs and confusion.
-      // Uploading a file now strictly just saves it to disk/DB.
+      // Trigger async AI extraction (ROOMS ONLY MODE)
       if (req.file.mimetype.startsWith('image/')) {
-          console.log("🤖 AI Extraction is currently DISABLED by user request.");
+        console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
+        console.log(`📁 File path: ${filePath}`);
+
+        import('./drawing-extraction-agent').then(async (agent) => {
+          try {
+            console.log(`⏳ Setting extraction status to 'processing' for file: ${jobFile.id}`);
+            await db.update(jobFiles)
+              .set({ extractionStatus: 'processing' })
+              .where(eq(jobFiles.id, jobFile.id));
+
+            console.log(`🔍 Calling extractFromImage with path: ${filePath}`);
+            const result = await agent.extractFromImage(filePath);
+            console.log(`📊 Extraction result:`, { success: result.success, roomCount: result.rooms?.length });
+
+            if (result.success && result.rooms) {
+              console.log(`💾 Saving ${result.rooms.length} rooms...`);
+              for (const room of result.rooms) {
+                // Check/Create Room
+                const existing = await db.select().from(rooms)
+                  .where(and(eq(rooms.jobId, req.params.id), eq(rooms.name, room.name)))
+                  .limit(1);
+
+                if (existing.length === 0) {
+                  await db.insert(rooms).values({
+                    jobId: req.params.id,
+                    fileId: jobFile.id,
+                    name: room.name,
+                    floor: room.floor || 'Ground',
+                    status: 'not_started',
+                    page: room.page || 1,
+                    bbox: JSON.stringify(room.bbox || [])
+                  });
+                }
+              }
+              // Success
+              await db.update(jobFiles)
+                .set({ extractionStatus: 'completed' })
+                .where(eq(jobFiles.id, jobFile.id));
+              console.log(`✅ Room Extraction Successful.`);
+            } else {
+              // Failed
+              await db.update(jobFiles)
+                .set({
+                  extractionStatus: 'failed',
+                  extractionError: result.error || 'No rooms found'
+                })
+                .where(eq(jobFiles.id, jobFile.id));
+            }
+          } catch (err) {
+            console.error('AI Error:', err);
+            await db.update(jobFiles).set({ extractionStatus: 'failed', extractionError: String(err) }).where(eq(jobFiles.id, jobFile.id));
+          }
+        });
       }
-      */
 
       res.status(201).json(jobFile);
     } catch (error) {
