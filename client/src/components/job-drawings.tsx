@@ -327,11 +327,11 @@ function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
             if (belongsToFile && el.bbox) {
                 smartElements.push({
                     id: `el-${el.id}`,
-                    type: 'element', // Styling: Blue
+                    type: 'element', // Styling: Blue (default)
                     label: el.description || el.elementType, // e.g. "Double Socket"
                     bbox: el.bbox,
                     page: el.page || 1,
-                    details: { ...el }
+                    details: { ...el, type: el.elementType } // Ensure type is accessible
                 });
             }
         });

@@ -122,8 +122,8 @@ Search the drawing grid-by-grid. You are looking for specific symbols.
 NOTE: The drawing may be blue/black line art on white background.
 
 1. ARCHITECTURAL ELEMENTS (CRITICAL - DO NOT MISS):
-   - DOORS: Quarter-circle arcs showing swing. EVERY ROOM USUALLY HAS A DOOR.
-   - WINDOWS: Double parallel lines in walls.
+   - DOORS: Quarter-circle arcs showing swing.
+   - WINDOWS: Double parallel lines in walls. Count distinct OPENINGS, not individual glass panes. One opening = 1 Window.
 
 2. ELECTRICAL SYMBOLS (Look closely for these specific shapes):
    - SOCKETS: Semi-circle on a wall line (often with a cross or ticks). Code: "VISUAL-SKT".

@@ -129,6 +129,19 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
         return 'border-purple-500 hover:bg-purple-500/20';
     };
 
+    // Helper to get color based on element type
+    const getElementColor = (label: string, type: string) => {
+        const t = (type || '').toLowerCase();
+        const l = (label || '').toLowerCase();
+
+        if (t.includes('door') || l.includes('door')) return 'border-cyan-500 hover:bg-cyan-500/20';
+        if (t.includes('window') || l.includes('window')) return 'border-sky-500 hover:bg-sky-500/20';
+        if (t.includes('electr') || t.includes('light') || t.includes('socket') || t.includes('switch') || l.includes('light') || l.includes('socket')) return 'border-yellow-400 hover:bg-yellow-400/20';
+        if (t.includes('plumb') || t.includes('bath') || t.includes('wc') || t.includes('shower') || l.includes('basin')) return 'border-indigo-500 hover:bg-indigo-500/20';
+
+        return 'border-gray-500 hover:bg-gray-500/20';
+    };
+
     return (
         <div className="flex h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700">
             {/* Main Viewer Column */}
@@ -225,7 +238,7 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                                 <div
                                     key={`${el.id}-${idx}`}
                                     className={`absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto group
-                                        ${el.type === 'room' ? getRoomColor(el.label) : 'border-blue-500 hover:bg-blue-500/20'}
+                                        ${el.type === 'room' ? getRoomColor(el.label) : getElementColor(el.label, el.details?.type)}
                                     `}
                                     style={getOverlayStyle(el.bbox)}
                                     onClick={() => onElementClick?.(el)}
