@@ -138,6 +138,9 @@ NOTE: The drawing may be blue/black line art on white background.
 
 REQUIREMENT:
 - You must attempt to find AT LEAST 5-10 ELEMENTS per room if possible.
+- COUNTING IS CRITICAL: If you see 2 sockets, return 2 separate entries with DIFFERENT coordinates.
+- DO NOT hallucinate elements that aren't there.
+- DO NOT rely on previous knowledge. ONLY report what is visibly drawn.
 - If you see a symbol but are unsure, GUESS based on context (e.g. circle in center of ceiling = Light).
 - Generate a "code" for every item (e.g. "VISUAL-SKT-1", "VISUAL-LIGHT-2").
 - CRITICAL: The "room" field for each element must EXACTLY match one of the "rooms" identified in Task 1.
