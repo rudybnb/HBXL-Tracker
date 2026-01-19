@@ -105,14 +105,17 @@ Your task:
 2. Identify ROOMS (boundaries + labels).
 3. Identify DETAILED ELEMENTS with HIGH PRECISION.
 
-CRITICAL - COORDINATE SYSTEM (PIXEL PERFECT):
-- Analyze the ACTUAL image resolution.
-- Return ABSOLUTE PIXEL COORDINATES [xmin, ymin, xmax, ymax].
-- Values MUST imply real pixels (e.g. > 500).
+CRITICAL - COORDINATE SYSTEM:
+- Return NORMALIZED COORDINATES based on a 0-1000 scale.
+- 0 = Top/Left, 1000 = Bottom/Right.
+- Format: [xmin, ymin, xmax, ymax]
+- Example: A box covering the center 50% of the image would be [250, 250, 750, 750].
+- Do NOT return absolute pixels. ALWAYS normalize to 0-1000.
 
 TASK 1: ROOM RECOGNITION
 - Identify rooms by boundaries and labels.
 - Box must cover the entire room area.
+- [xmin, ymin, xmax, ymax] (0-1000 scale)
 
 TASK 2: DETAILED ELEMENT EXTRACTION & COUNTING
 You must identify and COUNT the following symbols accurately. 
@@ -121,7 +124,7 @@ SYMBOLS TO FIND:
 1. LIGHTS ("light"): 
    - Visual: Circle with a cross/plus (+) inside it. 
    - Often arranged in a grid pattern on the ceiling.
-   - SCAN CAREFULLY: Do not miss lights partially near text or edges.
+   - SCAN ENTIRE ROOM: Do not miss lights near edges or text.
    - Target Count check: Look for ALL occurrences.
 
 2. SOCKETS ("socket"):
@@ -141,8 +144,8 @@ OUTPUT FORMAT (JSON ONLY):
   "success": true,
   "rooms": [ { "name": "Living Room", "bbox": [...] } ],
   "detailedElements": [
-      { "type": "light", "name": "Ceiling Light", "bbox": [...], "room": "Living Room" },
-      { "type": "socket", "name": "Single Socket", "bbox": [...], "room": "Living Room" }
+      { "type": "light", "name": "Ceiling Light", "bbox": [400, 400, 450, 450], "room": "Living Room" },
+      { "type": "socket", "name": "Single Socket", "bbox": [10, 500, 30, 520], "room": "Living Room" }
   ]
 }
 `;
