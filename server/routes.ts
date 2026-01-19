@@ -555,18 +555,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: "user"
       });
 
-      /*
-      // AI EXTRACTION DISABLED. PURE FILE UPLOAD ONLY.
       // Trigger async AI extraction (ROOMS ONLY MODE)
       if (req.file.mimetype.startsWith('image/')) {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
         console.log(`📁 File path: ${filePath}`);
 
+        // Run in background - do not await
         import('./drawing-extraction-agent').then(async (agent) => {
-             // ... Code Disabled ...
+          try {
+            console.log("🚀 Starting extraction agent...");
+            const result = await agent.extractFromImage(filePath);
+            console.log("✅ Extraction complete:", result.success);
+
+            if (result.success && result.rooms) {
+              console.log(`🏠 Identified ${result.rooms.length} rooms`);
+
+              // 1. Update file status
+              await db.update(jobFiles)
+                .set({ extractionStatus: 'completed' })
+                .where(eq(jobFiles.id, jobFile.id));
+
+              // 2. Save Room Bounding Boxes (as "rooms" table entries)
+              // Note: We need to map the AI room bbox to our DB schema if needed, 
+              // but for now, the "Smart Plan" viewer might use "extractedElements" with type="room"
+              // OR it might look at the "rooms" table.
+
+              // Let's check how the UI reads rooms.
+              // The UI reads 'extractedElements' often for boxes.
+              // But 'rooms' table is for costs.
+              // We should save to BOTH or prioritize 'extractedElements' for the visual overlay.
+
+              // SAVE AS EXTRACTED ELEMENTS (Visual Overlay)
+              for (const room of result.rooms) {
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: 'room', // This is what the UI likely looks for to draw boxes
+                  description: room.name,
+                  dimensions: JSON.stringify(room.bbox), // [x,y,w,h] or extraction format
+                  quantity: "1",
+                  unit: "nr",
+                  rate: "0",
+                  total: "0",
+                  roomName: room.name
+                });
+              }
+              console.log("💾 Saved rooms to extracted_elements");
+            }
+          } catch (err) {
+            console.error("❌ background extraction failed:", err);
+            await db.update(jobFiles)
+              .set({
+                extractionStatus: 'failed',
+                extractionError: String(err)
+              })
+              .where(eq(jobFiles.id, jobFile.id));
+          }
         });
       }
-      */
 
       res.status(201).json(jobFile);
     } catch (error) {
