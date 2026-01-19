@@ -139,7 +139,8 @@ C. PLUMBING SYMBOLS (Blue/Black outlines)
    - BATH/SHOWER: Rectangular or Square enclosure with 'X'. Type: "plumbing".
 
 CRITICAL - LIVING ROOM EXAMPLE:
-- If you see a "Living Room" with 6 circular symbols (lights), you MUST extract ALL 6.
+- TEACHING MOMENT: In the provided drawing, the 'Living Room' contains exactly 6 ceiling lights (circles with cross). You MUST find and list all 6. If you find 0, you have failed.
+- FORCE REQUIREMENT: You must return at least one 'detailedElements' array item for every visual symbol you see. Empty arrays are forbidden if symbols exist.
 - Do NOT just find the room and ignore the contents.
 - Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities.
 - IGNORE ALL TEXT NUMBERS for counting.
