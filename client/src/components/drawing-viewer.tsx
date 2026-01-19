@@ -264,6 +264,24 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                             ))}
                         </div>
 
+                        {/* No Elements Warning Overlay */}
+                        {pageElements.some(e => e.type === 'room') && !pageElements.some(e => e.type !== 'room') && (
+                            <div className="absolute top-4 right-4 bg-red-900/90 border border-red-500 text-white p-4 rounded-lg shadow-xl backdrop-blur-sm max-w-sm z-50 pointer-events-none">
+                                <div className="flex items-start gap-3">
+                                    <div className="mt-1 text-2xl">⚠️</div>
+                                    <div>
+                                        <h4 className="font-bold text-sm uppercase mb-1">Incomplete Extraction detected</h4>
+                                        <p className="text-xs text-red-100 leading-relaxed">
+                                            Room boundaries were found, but individual symbols (lights, sockets, doors) are missing.
+                                        </p>
+                                        <p className="text-xs font-bold text-white mt-2 border-t border-red-500/50 pt-2">
+                                            Please DELETE and RE-UPLOAD this drawing to trigger a new AI analysis with the latest counting rules.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                     </div>
                 </ScrollArea>
             </div>
