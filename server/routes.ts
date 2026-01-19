@@ -592,15 +592,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const failedItems: string[] = [];
 
               // 1. Process STATE MACHINE (Global Elements)
-              // Note: pricingValidationFailed is declared in outer scope
+              let globalRoomId: number | null = null;
 
-              if (result.stateMachine) {
-                const settings = result.stateMachine;
+              if ((result as any).stateMachine) {
+                const settings = (result as any).stateMachine;
                 const sections = Object.keys(settings);
 
                 if (sections.length > 0) {
                   // Get or Create GLOBAL room
-                  let globalRoomId;
                   const globalRoomName = "GLOBAL";
 
                   const existingGlobal = await db.select().from(rooms)
