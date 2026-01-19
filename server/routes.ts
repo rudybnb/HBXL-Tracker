@@ -610,7 +610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     jobId: req.params.id,
                     fileId: jobFile.id,
                     elementType: element.type, // "window", "door", "socket"
-                    description: element.name,
+                    description: element.name || element.type || 'Unknown Element',
                     dimensions: JSON.stringify(element.bbox),
                     quantity: "1",
                     unit: "nr",

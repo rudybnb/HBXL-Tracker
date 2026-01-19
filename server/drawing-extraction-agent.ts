@@ -106,45 +106,49 @@ Your task:
 3. Identify DETAILED ELEMENTS (Doors, Windows, Sockets, Switches, Lights).
 
 CRITICAL - COORDINATE SYSTEM:
-- Return ABSOLUTE PIXEL COORDINATES [xmin, ymin, xmax, ymax].
-- Do NOT use normalized 0-1000 coordinates. Use the actual image resolution.
+- You MUST analyze the ACTUAL image resolution first.
+- Return ABSOLUTE PIXEL COORDINATES based on the real image dimensions.
+- Format: [xmin, ymin, xmax, ymax] where ALL values are in PIXELS
+- Example: If the image is 1920x1080, a box in the center might be [800, 400, 1100, 700]
+- Values MUST be > 1000 for at least width/height to indicate pixel coordinates
+- DO NOT use any normalized scale (0-100, 0-1000, etc.)
 
 TASK 1: ROOM RECOGNITION
-- Identify rooms by boundaries and labels.
-- Box must cover the entire room area up to the walls.
+- Identify rooms by their boundary lines and text labels
+- Bounding box should cover the entire room area INCLUDING walls
+- Return the room name exactly as shown on the drawing
 
 TASK 2: DETAILED ELEMENT EXTRACTION
-- Identify the following symbols and return their bounding boxes:
-  - "door": Curves causing gaps in walls.
-  - "window": Double lines within walls, usually with rects.
-  - "socket": Semicircle or square with pins (often small icons on walls).
-  - "switch": Small circles/triangles near doors.
-  - "light": Crosses (X) or circles in the center of rooms.
-  - "sanitary": Toilets, sinks, showers.
-
-- Associate each element with the Room it is located inside.
+- Identify these symbols with their bounding boxes:
+  - "light": X marks or circle symbols (usually ceiling lights)
+  - "socket": Rectangular or circular symbols on walls with pins
+  - "switch": Small circles or triangles near doors  
+  - "window": Double lines in walls, rectangular frames
+  - "door": Quarter-circle arc showing door swing
+  
+- For EACH element, specify which room it belongs to
 
 OUTPUT FORMAT (JSON ONLY):
 {
   "success": true,
   "rooms": [
       {
-          "name": "Kitchen",
-          "bbox": [100, 100, 500, 500]
+          "name": "Living Room",
+          "bbox": [300, 200, 1800, 1400]
       }
   ],
   "detailedElements": [
       {
-          "type": "socket",
-          "name": "Double Socket",
-          "bbox": [120, 480, 140, 500],
-          "room": "Kitchen"
+          "type": "light",
+          "name": "Ceiling Light",
+          "bbox": [900, 600, 950, 650],
+          "room": "Living Room"
       },
       {
-          "type": "door",
-          "name": "Internal Door",
-          "bbox": [450, 200, 500, 250],
-          "room": "Kitchen"
+          "type": "socket",
+          "name": "Double Socket",
+          "bbox": [350, 1200, 400, 1250],
+          "room": "Living Room"
       }
   ]
 }
