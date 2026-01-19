@@ -87,6 +87,24 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
             <p className="text-sm text-slate-600 mt-1">Manage and assign jobs to contractors</p>
           </div>
           <div className="flex space-x-3">
+            <Button
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/jobs/manual', { method: 'POST' });
+                  if (res.ok) {
+                    toast({ title: "Job Created", description: "Manual job shell created." });
+                    queryClient.invalidateQueries({ queryKey: ['/api/jobs'] });
+                  } else {
+                    toast({ title: "Error", description: "Failed to create manual job", variant: "destructive" });
+                  }
+                } catch (err) {
+                  console.error(err);
+                }
+              }}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              + Create Job
+            </Button>
             <div className="relative">
               <Input
                 type="text"

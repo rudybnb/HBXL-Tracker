@@ -6398,5 +6398,32 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
     }
   });
 
+  // Manual Job Creation (to bypass CSV requirement)
+  app.post("/api/jobs/manual", async (req, res) => {
+    try {
+      console.log("🛠️  Manually creating a new job...");
+      const timestamp = new Date().getTime().toString().slice(-4);
+      const jobName = `Manual Job ${timestamp}`;
+
+      // Basic shell job
+      const [newJob] = await db.insert(jobs).values({
+        title: jobName,
+        location: "Manual Location",
+        postcode: "TE1 1ST",
+        projectType: "Manual",
+        status: "pending",
+        work_areas: [],
+        phaseTaskData: JSON.stringify({ phases: [] }),
+        contractorId: null
+      }).returning();
+
+      console.log(`✅ Created manual job: ${newJob.id}`);
+      res.json(newJob);
+    } catch (error) {
+      console.error("Manual job creation failed:", error);
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   return httpServer;
 }
