@@ -138,7 +138,11 @@ NOTE: The drawing may be blue/black line art on white background.
    - BATH: Rectangular shape.
 
 REQUIREMENT:
-- VISUAL SCANNING IS MANDATORY: You are a computer vision model. Do not "guess". Look at the pixels.
+- VISUAL SCANNING IS MANDATORY: You are a computer vision model. Do not "guess" or read the text to find the quantity.
+- IGNORE TEXT SPECIFICATIONS: If a light says "4" next to it, that might mean "Type 4", NOT quantity 4. COUNT THE SYMBOLS.
+- If you see 6 physical circle symbols, the count is 6.
+- DO NOT rely on cached data. Treat this image as brand new.
+- WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - If "Lounge" and "Bathroom" overlap, you have failed. Retract the boxes to fit the walls.
 - COUNTING: Count exactly what you see. 3 Lights = 3 Entries. 1 Socket = 1 Entry.
