@@ -103,53 +103,46 @@ const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
 Your task:
 1. Parse a vector-based architectural drawing.
 2. Identify ROOMS (boundaries + labels).
-3. Identify DETAILED ELEMENTS (Doors, Windows, Sockets, Switches, Lights).
+3. Identify DETAILED ELEMENTS with HIGH PRECISION.
 
-CRITICAL - COORDINATE SYSTEM:
-- You MUST analyze the ACTUAL image resolution first.
-- Return ABSOLUTE PIXEL COORDINATES based on the real image dimensions.
-- Format: [xmin, ymin, xmax, ymax] where ALL values are in PIXELS
-- Example: If the image is 1920x1080, a box in the center might be [800, 400, 1100, 700]
-- Values MUST be > 1000 for at least width/height to indicate pixel coordinates
-- DO NOT use any normalized scale (0-100, 0-1000, etc.)
+CRITICAL - COORDINATE SYSTEM (PIXEL PERFECT):
+- Analyze the ACTUAL image resolution.
+- Return ABSOLUTE PIXEL COORDINATES [xmin, ymin, xmax, ymax].
+- Values MUST imply real pixels (e.g. > 500).
 
 TASK 1: ROOM RECOGNITION
-- Identify rooms by their boundary lines and text labels
-- Bounding box should cover the entire room area INCLUDING walls
-- Return the room name exactly as shown on the drawing
+- Identify rooms by boundaries and labels.
+- Box must cover the entire room area.
 
-TASK 2: DETAILED ELEMENT EXTRACTION
-- Identify these symbols with their bounding boxes:
-  - "light": X marks or circle symbols (usually ceiling lights)
-  - "socket": Rectangular or circular symbols on walls with pins
-  - "switch": Small circles or triangles near doors  
-  - "window": Double lines in walls, rectangular frames
-  - "door": Quarter-circle arc showing door swing
-  
-- For EACH element, specify which room it belongs to
+TASK 2: DETAILED ELEMENT EXTRACTION & COUNTING
+You must identify and COUNT the following symbols accurately. 
+
+SYMBOLS TO FIND:
+1. LIGHTS ("light"): 
+   - Visual: Circle with a cross/plus (+) inside it. 
+   - Often arranged in a grid pattern on the ceiling.
+   - SCAN CAREFULLY: Do not miss lights partially near text or edges.
+   - Target Count check: Look for ALL occurrences.
+
+2. SOCKETS ("socket"):
+   - Visual: Small square or rectangle attached to the wall line.
+   - Often has a small line or arc indicating pins.
+   - DISTINGUISH: Count each symbol individually. 
+   - A single symbol = 1 socket. Do not assume "double" unless visually distinct.
+
+3. SWITCHES ("switch"):
+   - Visual: Small circle or triangle near a door opening.
+
+4. WINDOWS ("window") & DOORS ("door"):
+   - Standard architectural symbols.
 
 OUTPUT FORMAT (JSON ONLY):
 {
   "success": true,
-  "rooms": [
-      {
-          "name": "Living Room",
-          "bbox": [300, 200, 1800, 1400]
-      }
-  ],
+  "rooms": [ { "name": "Living Room", "bbox": [...] } ],
   "detailedElements": [
-      {
-          "type": "light",
-          "name": "Ceiling Light",
-          "bbox": [900, 600, 950, 650],
-          "room": "Living Room"
-      },
-      {
-          "type": "socket",
-          "name": "Double Socket",
-          "bbox": [350, 1200, 400, 1250],
-          "room": "Living Room"
-      }
+      { "type": "light", "name": "Ceiling Light", "bbox": [...], "room": "Living Room" },
+      { "type": "socket", "name": "Single Socket", "bbox": [...], "room": "Living Room" }
   ]
 }
 `;
