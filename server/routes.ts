@@ -652,10 +652,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(extractedElements)
         .where(eq(extractedElements.jobId, req.params.id));
       console.log(`📊 Found ${elements.length} elements for job ${req.params.id}`);
-      res.json(elements);
+
+      // Parse dimensions JSON into bbox for UI
+      const elementsWithBbox = elements.map(el => ({
+        ...el,
+        bbox: el.dimensions ? JSON.parse(el.dimensions) : null
+      }));
+
+      res.json(elementsWithBbox);
     } catch (error) {
       console.error("Error fetching elements:", error);
       res.status(500).json({ error: "Failed to fetch elements" });
+    }
+  });
+
+  // Get extracted rooms for a job
+  app.get("/api/jobs/:id/rooms", async (req, res) => {
+    try {
+      console.log(`🔍 Fetching rooms for job: ${req.params.id}`);
+
+      // Fetch elements with type='room' 
+      const roomElements = await db.select()
+        .from(extractedElements)
+        .where(and(
+          eq(extractedElements.jobId, req.params.id),
+          eq(extractedElements.elementType, 'room')
+        ));
+
+      // Transform to UI format
+      const rooms = roomElements.map(el => ({
+        id: el.id,
+        name: el.roomName || el.description,
+        bbox: el.dimensions ? JSON.parse(el.dimensions) : null,
+        fileId: el.fileId,
+        floor: 'Ground', // default
+        status: 'identified',
+        createdAt: el.createdAt || new Date().toISOString()
+      }));
+
+      console.log(`📊 Found ${rooms.length} rooms for job ${req.params.id}`);
+      res.json({ rooms });
+    } catch (error) {
+      console.error("Error fetching rooms:", error);
+      res.status(500).json({ error: "Failed to fetch rooms" });
     }
   });
 
