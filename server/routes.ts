@@ -973,8 +973,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const roomElems = result.detailedElements.filter(e => e.room === room.name);
               console.log(`      Found ${roomElems.length} elements for ${room.name}`);
 
+              // AGGREGATION: Group identical elements for cleaner UI (e.g. "Socket (2 nr)")
+              const roomGroups = new Map<string, {
+                type: string,
+                description: string,
+                code: string,
+                count: number
+              }>();
+
               for (const element of roomElems) {
-                // 1. Save to extractedElements (Traceability)
+                // 1. Save to extractedElements (Traceability - INDIVIDUAL)
                 await db.insert(extractedElements).values({
                   jobId: file.jobId,
                   fileId: file.id,
@@ -983,22 +991,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   description: element.description,
                   roomName: room.name,
                   quantity: "1",
-                  unit: "nr"
+                  unit: "nr",
+                  rawJson: JSON.stringify(element)
                 });
 
-                // 2. Create Room Element (UI Grouping)
+                // 2. Add to Group
+                // Group by description (e.g. "Double Socket Symbol")
+                const key = element.description || element.code || "Item";
+                if (!roomGroups.has(key)) {
+                  roomGroups.set(key, {
+                    type: element.type,
+                    description: element.description,
+                    code: element.code,
+                    count: 0
+                  });
+                }
+                const group = roomGroups.get(key)!;
+                group.count++;
+              }
+
+              // 3. Create Grouped UI Elements
+              for (const group of roomGroups.values()) {
                 const [newRoomElement] = await db.insert(roomElements).values({
                   roomId: newRoom.id,
-                  name: element.code ? `${element.type} (${element.code})` : element.type,
-                  measurementSummary: "1 nr",
+                  name: group.description || group.type, // Use readable description
+                  measurementSummary: `${group.count} nr`,
                   subtotal: "0"
                 }).returning();
 
-                // 3. Create Payable Item (Assignable Task)
                 await db.insert(payableItems).values({
                   elementId: newRoomElement.id,
-                  description: element.description,
-                  quantity: "1",
+                  description: group.description || "Visual Item",
+                  quantity: group.count.toString(),
                   unit: "nr",
                   rate: "0",
                   total: "0",
