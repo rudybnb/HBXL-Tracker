@@ -95,10 +95,16 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
                     toast({ title: "Job Created", description: "Manual job shell created." });
                     queryClient.invalidateQueries({ queryKey: ['/api/jobs'] });
                   } else {
-                    toast({ title: "Error", description: "Failed to create manual job", variant: "destructive" });
+                    const errorData = await res.json().catch(() => ({}));
+                    toast({
+                      title: "Creation Failed",
+                      description: errorData.error || "Server error occurred",
+                      variant: "destructive"
+                    });
                   }
                 } catch (err) {
                   console.error(err);
+                  toast({ title: "Network Error", description: String(err), variant: "destructive" });
                 }
               }}
               className="bg-green-600 hover:bg-green-700 text-white"
