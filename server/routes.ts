@@ -719,6 +719,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
               if (result.detailedElements && result.detailedElements.length > 0) {
                 console.log(`💾 Saving ${result.detailedElements.length} detailed elements (Smart Symbols)...`);
 
+                // AGGREGATION: Group identical elements for cleaner UI
+                const elementGroups = new Map<string, {
+                  roomId: number,
+                  roomName: string,
+                  type: string,
+                  description: string,
+                  count: number,
+                  totalRate: number
+                }>();
+
                 for (const element of result.detailedElements) {
                   // Find the room this element belongs to
                   const targetRoomName = element.room || "Unallocated";
@@ -742,7 +752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       quantity: 1
                     }, jobSpecificLibrary);
 
-                    // Traceability (Extracted Elements Table)
+                    // Traceability (Extracted Elements Table) - KEEP INDIVIDUAL
                     await db.insert(extractedElements).values({
                       jobId: req.params.id,
                       fileId: jobFile.id,
@@ -758,27 +768,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       rawJson: JSON.stringify(element)
                     });
 
-                    // UI Element (Room Elements Table)
-                    const [newRoomElement] = await db.insert(roomElements).values({
-                      roomId: targetRoomId,
-                      name: element.description || element.code,
-                      measurementSummary: "1 nr",
-                      subtotal: "0"
-                    }).returning();
-
-                    // Payable Item
-                    await db.insert(payableItems).values({
-                      elementId: newRoomElement.id,
-                      description: element.description || element.code || "Visual Item",
-                      quantity: "1",
-                      unit: "nr",
-                      rate: elementPrice.rate.toString(),
-                      total: elementPrice.rate.toString(),
-                      status: "not_started"
-                    });
-
-                    allNewElementIds.push(newRoomElement.id);
+                    // Aggregate for UI
+                    const groupKey = `${targetRoomId}::${element.description || element.code}`;
+                    if (!elementGroups.has(groupKey)) {
+                      elementGroups.set(groupKey, {
+                        roomId: targetRoomId,
+                        roomName: targetRoomName,
+                        type: element.type || "Element",
+                        description: element.description || element.code || "Visual Item",
+                        count: 0,
+                        totalRate: 0
+                      });
+                    }
+                    const group = elementGroups.get(groupKey)!;
+                    group.count++;
+                    group.totalRate += elementPrice.rate;
                   }
+                }
+
+                // Create Grouped UI Elements
+                for (const group of elementGroups.values()) {
+                  // UI Element (Room Elements Table)
+                  const [newRoomElement] = await db.insert(roomElements).values({
+                    roomId: group.roomId,
+                    name: group.description, // Use readable description
+                    measurementSummary: `${group.count} nr`,
+                    subtotal: "0"
+                  }).returning();
+
+                  // Payable Item
+                  await db.insert(payableItems).values({
+                    elementId: newRoomElement.id,
+                    description: group.description,
+                    quantity: group.count.toString(),
+                    unit: "nr",
+                    rate: (group.totalRate / group.count).toString(),
+                    total: group.totalRate.toString(),
+                    status: "not_started"
+                  });
+
+                  allNewElementIds.push(newRoomElement.id);
                 }
               }
 
