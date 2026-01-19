@@ -104,18 +104,33 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
     };
 
     // Calculate style for overlay based on bounding box
-    // Bbox is [xmin, ymin, xmax, ymax] in 0-1000 coordinates (Standard Cartesian)
     const getOverlayStyle = (bbox: number[]) => {
         // Fallback for empty/malformed bbox
         if (!bbox || bbox.length < 4) return { display: 'none' };
 
         const [xmin, ymin, xmax, ymax] = bbox;
-        return {
-            left: `${xmin / 10}%`,
-            top: `${ymin / 10}%`,
-            width: `${(xmax - xmin) / 10}%`,
-            height: `${(ymax - ymin) / 10}%`,
-        };
+
+        // Detect Coordinate System
+        // If values are > 1000, we assume PIXEL coordinates (New AI)
+        // If values are <= 1000, we assume NORMALIZED 0-1000 scale (Legacy/Fallback)
+        const isPixelScale = Math.max(xmin, ymin, xmax, ymax) > 1000;
+
+        if (isPixelScale) {
+            return {
+                left: `${xmin}px`,
+                top: `${ymin}px`,
+                width: `${xmax - xmin}px`,
+                height: `${ymax - ymin}px`,
+            };
+        } else {
+            // Legacy 0-1000 scale logic
+            return {
+                left: `${xmin / 10}%`,
+                top: `${ymin / 10}%`,
+                width: `${(xmax - xmin) / 10}%`,
+                height: `${(ymax - ymin) / 10}%`,
+            };
+        }
     };
 
     // Helper to get color based on room name
