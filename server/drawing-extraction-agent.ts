@@ -116,20 +116,25 @@ TASK 1: GLOBAL LAYOUT & ROOMS
 - CRITICAL: Return the exact Room Name as it appears on the drawing.
 
 TASK 2: DETAILED VISUAL EXTRACTION (THE "BLUEPRINT READER" CORE)
-Search the drawing grid-by-grid. You are looking for:
+Search the drawing grid-by-grid. You are looking for specific symbols. 
+NOTE: The drawing may be blue/black line art on white background.
 
 1. ARCHITECTURAL ELEMENTS (CRITICAL - DO NOT MISS):
-   - DOORS: Quarter-circle arcs showing swing. EVERY ROOM USUALLY HAS A DOOR. If you find a room without a door, Look Again.
+   - DOORS: Quarter-circle arcs showing swing. EVERY ROOM USUALLY HAS A DOOR.
    - WINDOWS: Double parallel lines in walls.
 
-2. ELECTRICAL SYMBOLS (Small, often red/blue/black):
-   - Sockets (Semi-circles, often on walls). Code: "VISUAL-SKT".
-   - Switches (Small circles/triangles near doors). Code: "VISUAL-SW".
-   - Lights (Ceiling Roses, Pendants - Crosses/Circles in center of room). Code: "VISUAL-LIGHT".
-   - Smoke Alarms, Extractor Fans, Consumer Units.
+2. ELECTRICAL SYMBOLS (Look closely for these specific shapes):
+   - SOCKETS: Semi-circle on a wall line (often with a cross or ticks). Code: "VISUAL-SKT".
+   - SWITCHES: Small circle or triangle near a door frame. Code: "VISUAL-SW".
+   - LIGHTS: Circle with a cross (X) inside, usually in the center of a room. Code: "VISUAL-LIGHT".
+   - DATA/TV: Small circle with a squiggly line or letter inside. Code: "VISUAL-DATA".
+   - CONSUMER UNIT: Box with text 'CU' or 'Fuse'.
 
-3. PLUMBING:
-   - WC, Basin, Shower, Bath shapes.
+3. PLUMBING (Blue/Black outlines):
+   - WC: Oval shape with cistern box against wall.
+   - BASIN: D-shape or oval against wall.
+   - SHOWER: Square enclosure, often with an 'X' (tray) or corner markings.
+   - BATH: Rectangular shape.
 
 REQUIREMENT:
 - You must attempt to find AT LEAST 5-10 ELEMENTS per room if possible.
