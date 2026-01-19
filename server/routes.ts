@@ -601,6 +601,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 });
               }
               console.log("💾 Saved rooms to extracted_elements");
+
+              // 3. Save Detailed Elements (Windows, Doors, etc.)
+              if (result.detailedElements && result.detailedElements.length > 0) {
+                console.log(`🧩 Identified ${result.detailedElements.length} detailed elements`);
+                for (const element of result.detailedElements) {
+                  await db.insert(extractedElements).values({
+                    jobId: req.params.id,
+                    fileId: jobFile.id,
+                    elementType: element.type, // "window", "door", "socket"
+                    description: element.name,
+                    dimensions: JSON.stringify(element.bbox),
+                    quantity: "1",
+                    unit: "nr",
+                    rate: "0",
+                    total: "0",
+                    roomName: element.room // Links it to the room visually
+                  });
+                }
+                console.log("💾 Saved detailed elements");
+              }
             }
           } catch (err) {
             console.error("❌ background extraction failed:", err);

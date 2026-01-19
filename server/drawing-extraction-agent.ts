@@ -100,49 +100,52 @@ export interface ExtractionResult {
 const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
 
 Your task:
-1. Parse a vector-based architectural drawing (converted to image).
-2. Identify all ROOMS by their closed polyline boundaries and text labels.
-3. Classify the function of each room (e.g., Living Room, Kitchen).
-4. Return ABSOLUTE PIXEL COORDINATES for the room bounding boxes.
+1. Parse a vector-based architectural drawing.
+2. Identify ROOMS (boundaries + labels).
+3. Identify DETAILED ELEMENTS (Doors, Windows, Sockets, Switches, Lights).
 
 CRITICAL - COORDINATE SYSTEM:
-- Do NOT use a normalized 0-1000 scale.
-- You MUST return ABSOLUTE PIXEL COORDINATES based on the actual image resolution.
-- If the image is 2400x1800, a box in the middle is [1200, 900, ...], NOT [500, 500].
-- Bounding Format: [xmin, ymin, xmax, ymax] (Pixels).
+- Return ABSOLUTE PIXEL COORDINATES [xmin, ymin, xmax, ymax].
+- Do NOT use normalized 0-1000 coordinates. Use the actual image resolution.
 
-TASK 1: ROOM RECOGNITION (Spatial Logic)
-- Identify rooms by closed polyline boundaries and text labels.
-- Create a BOUNDING BOX [xmin, ymin, xmax, ymax] effectively COVERING THE ENTIRE ROOM AREA.
-- The box should ENCOMPASS all walls and internal space of that room.
-- Return the exact Room Name as it appears on the drawing.
-- WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
-- If "Lounge" and "Bathroom" overlap, you have failed. Retract the boxes to fit the walls.
+TASK 1: ROOM RECOGNITION
+- Identify rooms by boundaries and labels.
+- Box must cover the entire room area up to the walls.
 
-TASK 2: IGNORE DETAILS (Simplified Mode)
-- FOR THIS TASK, DO NOT EXTRACT DETAILED ELEMENTS (Lights, Sockets, Doors, Windows).
-- IGNORE all small symbols.
-- FOCUS ONLY ON THE ROOMS.
+TASK 2: DETAILED ELEMENT EXTRACTION
+- Identify the following symbols and return their bounding boxes:
+  - "door": Curves causing gaps in walls.
+  - "window": Double lines within walls, usually with rects.
+  - "socket": Semicircle or square with pins (often small icons on walls).
+  - "switch": Small circles/triangles near doors.
+  - "light": Crosses (X) or circles in the center of rooms.
+  - "sanitary": Toilets, sinks, showers.
 
-OUTPUT REQUIREMENTS:
-- Return valid JSON.
-- "rooms" array is mandatory.
-- "detailedElements" should be an empty array [].
+- Associate each element with the Room it is located inside.
 
-FORMAT:
-Return ONLY purely valid JSON.
+OUTPUT FORMAT (JSON ONLY):
 {
   "success": true,
   "rooms": [
       {
           "name": "Kitchen",
-          "floor": "Ground",
-          "bbox": [200, 100, 400, 150],
-          "elements": []
+          "bbox": [100, 100, 500, 500]
       }
   ],
-  "detailedElements": [],
-  "instructions": []
+  "detailedElements": [
+      {
+          "type": "socket",
+          "name": "Double Socket",
+          "bbox": [120, 480, 140, 500],
+          "room": "Kitchen"
+      },
+      {
+          "type": "door",
+          "name": "Internal Door",
+          "bbox": [450, 200, 500, 250],
+          "room": "Kitchen"
+      }
+  ]
 }
 `;
 
