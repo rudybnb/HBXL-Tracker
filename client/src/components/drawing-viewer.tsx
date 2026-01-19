@@ -246,22 +246,78 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                             style={fileType !== 'application/pdf' ? { transform: `scale(${scale})`, transformOrigin: 'top left', width: '100%', height: '100%' } : {}}
                         >
                             {/* We need a wrapper that matches the exact dimensions of the rendered content */}
-                            {pageElements.map((el, idx) => (
-                                <div
-                                    key={`${el.id}-${idx}`}
-                                    className={`absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto group
-                                        ${el.type === 'room' ? getRoomColor(el.label) : getElementColor(el.label, el.details?.type)}
-                                    `}
-                                    style={getOverlayStyle(el.bbox)}
-                                    onClick={() => onElementClick?.(el)}
-                                >
-                                    {/* Tooltip label on hover */}
-                                    <div className="hidden group-hover:block absolute -top-8 left-0 bg-slate-900 text-white text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap z-50 border border-slate-700">
-                                        <span className="font-bold text-amber-400">{el.type.toUpperCase()}: </span>
-                                        {el.label}
+                            {pageElements.map((el, idx) => {
+                                // Dynamic Count Logic: How many of this specific item are in this specific room?
+                                const countInRoom = pageElements.filter(other =>
+                                    other.label === el.label &&
+                                    other.details?.roomName === el.details?.roomName &&
+                                    other.type === 'element'
+                                ).length;
+
+                                // Icon Logic
+                                const getIcon = (type: string) => {
+                                    const t = (type || '').toLowerCase();
+                                    if (t.includes('light')) return <div className="text-yellow-500"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-1 1.5-2 1.5-3.5a6 6 0 0 0-11 0c0 1.5.5 2.5 1.5 3.5.9.8 1.3 1.5 1.5 2.5" /><path d="M9 18h6" /><path d="M10 22h4" /></svg></div>;
+                                    if (t.includes('door')) return <div className="text-cyan-500"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14" /><path d="M2 20h3" /><path d="M13 20h9" /><path d="M10 12v.01" /><path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561Z" /></svg></div>;
+                                    if (t.includes('window')) return <div className="text-sky-500"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 10v14" /><path d="M12 10a12.8 12.8 0 0 0 6 3 12.8 12.8 0 1 0-6-3" /><path d="M12 10a12.8 12.8 0 0 1-6 3 12.8 12.8 0 1 1 6-3" /></svg></div>;
+                                    if (t.includes('socket') || t.includes('switch')) return <div className="text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="12" x="3" y="6" rx="2" /><path d="M9 12h.01" /><path d="M15 12h.01" /></svg></div>;
+                                    if (t.includes('room')) return <div className="text-blue-500"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 20v-8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8" /><path d="M12 2v14" /><path d="M17 14h-4" /><path d="M7 14h.01" /></svg></div>;
+                                    return <div className="text-slate-400">●</div>;
+                                };
+
+                                // Base element style
+                                let className = "absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto group ";
+                                if (el.type === 'room') {
+                                    // Permanent fill for rooms (opacity 10%), darker on hover
+                                    if (el.label.toLowerCase().includes('living') || el.label.toLowerCase().includes('lounge')) className += "border-orange-500 bg-orange-500/10 hover:bg-orange-500/20 ";
+                                    else if (el.label.toLowerCase().includes('bed')) className += "border-blue-500 bg-blue-500/10 hover:bg-blue-500/20 ";
+                                    else if (el.label.toLowerCase().includes('kitchen')) className += "border-red-500 bg-red-500/10 hover:bg-red-500/20 ";
+                                    else if (el.label.toLowerCase().includes('bath') || el.label.toLowerCase().includes('wc')) className += "border-green-500 bg-green-500/10 hover:bg-green-500/20 ";
+                                    else className += "border-purple-500 bg-purple-500/10 hover:bg-purple-500/20 ";
+                                } else {
+                                    // Elements (no fill default, fill on hover)
+                                    className += getElementColor(el.label, el.details?.type);
+                                }
+
+                                return (
+                                    <div
+                                        key={`${el.id}-${idx}`}
+                                        className={className}
+                                        style={getOverlayStyle(el.bbox)}
+                                        onClick={() => onElementClick?.(el)}
+                                    >
+                                        {/* RICH TOOLTIP CARD (Matches User Screenshot) */}
+                                        <div className="hidden group-hover:block absolute z-[60] bottom-full left-0 mb-2 min-w-[180px]">
+                                            <div className="bg-white text-slate-900 rounded-lg shadow-xl border border-slate-200 p-3 flex flex-col gap-1">
+                                                {/* Header: Icon + Title */}
+                                                <div className="flex items-center gap-2 border-b border-slate-100 pb-2 mb-1">
+                                                    {getIcon(el.details?.type || (el.type === 'room' ? 'room' : ''))}
+                                                    <span className="font-bold text-sm leading-none">{el.label}</span>
+                                                </div>
+
+                                                {/* Details: Count & Room */}
+                                                {el.type !== 'room' && (
+                                                    <>
+                                                        <div className="font-semibold text-xs text-slate-700">
+                                                            {countInRoom} {el.label}{countInRoom !== 1 ? 's' : ''}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500">
+                                                            Room: {el.details?.roomName || "Unassigned"}
+                                                        </div>
+                                                    </>
+                                                )}
+                                                {el.type === 'room' && (
+                                                    <div className="text-xs text-slate-500">
+                                                        Total Area: {Math.round((el.bbox[2] - el.bbox[0]) * (el.bbox[3] - el.bbox[1]) / 1000)} m² (Est)
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {/* Arrow */}
+                                            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-white ml-4"></div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         {/* No Elements Warning Overlay */}
