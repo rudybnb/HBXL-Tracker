@@ -6409,11 +6409,12 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
       const [newJob] = await db.insert(jobs).values({
         title: jobName,
         location: "Manual Location",
+        phases: JSON.stringify([]),
+        phaseTaskData: JSON.stringify({ phases: [] }),
+        dueDate: new Date().toISOString(),
         postcode: "TE1 1ST",
         projectType: "Manual",
         status: "pending",
-        work_areas: [],
-        phaseTaskData: JSON.stringify({ phases: [] }),
         contractorId: null
       }).returning();
 
