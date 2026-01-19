@@ -109,14 +109,8 @@ CRITICAL - COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES based on a 0-1000 scale.
 - 0 = Top/Left, 1000 = Bottom/Right.
 - Format: [xmin, ymin, xmax, ymax]
-- Example: [250, 250, 750, 750].
-
-STRATEGY: MENTAL GRID SCAN (CRITICAL FOR COUNTING)
-- Divide the room into a 3x3 grid mentally.
-- Scan EACH sector individually from Top-Left to Bottom-Right.
-- CHECK THE CENTER SECTORS CAREFULLY.
-- Do NOT summarize. If there are 6 lights, distinct 6 individual items must be returned.
-- Do NOT group "Row of lights" into one box. Box each light individually.
+- IMPORANT: 0-1000 scale applies to the FULL IMAGE CANVAS, including any white margins or borders.
+- Do NOT crop the image mentally. (0,0) is the top-left pixel of the file.
 
 TASK 1: ROOM RECOGNITION
 - Identify rooms by boundaries and labels.
@@ -129,14 +123,13 @@ You must identify and COUNT the following symbols accurately.
 SYMBOLS TO FIND:
 1. LIGHTS ("light"): 
    - Visual: Circle with a cross/plus (+) inside it. 
-   - Often arranged in a grid pattern (rows and columns).
-   - VERIFY COUNT: If you see a grid (e.g. 2x3), ensure you return ALL items (e.g. 6 total).
-   - Don't miss the ones in the middle of the room.
+   - Scan the entire ceiling area. 
+   - Do not miss lights in the center or near text.
 
 2. SOCKETS ("socket"):
    - Visual: Small square or rectangle attached to the wall line.
-   - Semicircle or small arc indicating pins.
-   - CHECK WALLS CAREFULLY. Scan the entire perimeter wall.
+   - Often has a small line or arc indicating pins.
+   - Count each individual square as 1 socket. 
 
 3. SWITCHES ("switch"):
    - Visual: Small circle or triangle near a door opening.
