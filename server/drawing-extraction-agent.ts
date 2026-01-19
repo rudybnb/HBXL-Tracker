@@ -180,18 +180,18 @@ Return ONLY purely valid JSON.
       },
        {
           "code": "VISUAL-SKT-1",
-          "type": "electrical",
+          "type": "electrical", // Use "electrical" for sockets/switches
           "description": "Double Socket Symbol",
           "room": "Lounge",
           "bbox": [520, 610, 540, 630]
       },
       {
           "code": "VISUAL-LIGHT-1",
-          "type": "lighting",
+          "type": "lighting", // Use "lighting" for lights
           "description": "Ceiling Rose / Light",
           "room": "Lounge",
           "bbox": [550, 400, 570, 420]
-      }
+      }, // Allowed types: "door", "window", "electrical", "lighting", "plumbing", "other"
   ],
   "instructions": []
 }
