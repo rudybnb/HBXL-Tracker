@@ -147,7 +147,9 @@ REQUIREMENT:
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - If "Lounge" and "Bathroom" overlap, you have failed. Retract the boxes to fit the walls.
 - COUNTING: Count exactly what you see. 3 Lights = 3 Entries. 1 Socket = 1 Entry.
-- Do not make up text data. If you see 3 lights, report 3 lights.
+- NO GROUPING: You MUST return a separate JSON object for EACH physical symbol.
+- If there are 6 lights, I expect 6 items in the "detailedElements" array, each with its own unique bounding box.
+- DO NOT return a single item with "quantity: 6". This will be rejected.
 - COUNTING IS CRITICAL: If you see 2 sockets, return 2 separate entries with DIFFERENT coordinates.
 - DO NOT hallucinate elements that aren't there.
 - DO NOT rely on previous knowledge. ONLY report what is visibly drawn.
