@@ -112,7 +112,8 @@ TASK 0: LEGEND & KEY ANALYSIS (CRITICAL)
 
 TASK 1: GLOBAL LAYOUT & ROOMS
 - Identify every room.
-- CRITICAL: Create a BOUNDING BOX [ymin, xmin, ymax, xmax] (0-1000 scale) effectively COVERING THE ENTIRE ROOM AREA, not just the text label.
+- CRITICAL: Create a BOUNDING BOX [xmin, ymin, xmax, ymax] (0-1000 scale) effectively COVERING THE ENTIRE ROOM AREA.
+- Note for coordinates: xmin=Left, ymin=Top, xmax=Right, ymax=Bottom.
 - The box should ENCOMPASS all walls and internal space of that room.
 - Return the exact Room Name as it appears on the drawing.
 
@@ -163,7 +164,7 @@ Return ONLY purely valid JSON.
       {
           "name": "Kitchen",
           "floor": "Ground",
-          "bbox": [100, 200, 150, 400],
+          "bbox": [200, 100, 400, 150],
           "elements": []
       }
   ],

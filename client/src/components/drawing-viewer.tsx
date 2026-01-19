@@ -104,14 +104,17 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
     };
 
     // Calculate style for overlay based on bounding box
-    // Bbox is [ymin, xmin, ymax, xmax] in 0-1000 coordinates
+    // Bbox is [xmin, ymin, xmax, ymax] in 0-1000 coordinates (Standard Cartesian)
     const getOverlayStyle = (bbox: number[]) => {
-        const [ymin, xmin, ymax, xmax] = bbox;
+        // Fallback for empty/malformed bbox
+        if (!bbox || bbox.length < 4) return { display: 'none' };
+
+        const [xmin, ymin, xmax, ymax] = bbox;
         return {
-            top: `${ymin / 10}%`,
             left: `${xmin / 10}%`,
-            height: `${(ymax - ymin) / 10}%`,
+            top: `${ymin / 10}%`,
             width: `${(xmax - xmin) / 10}%`,
+            height: `${(ymax - ymin) / 10}%`,
         };
     };
 
@@ -190,12 +193,12 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
 
                         {/* PDF Canvas or Image */}
                         {fileType === 'application/pdf' ? (
-                            <canvas ref={canvasRef} className="shadow-lg" />
+                            <canvas ref={canvasRef} className="shadow-lg block" />
                         ) : (
                             <img
                                 src={fileUrl}
                                 alt="Drawing"
-                                className="max-w-none shadow-lg"
+                                className="max-w-none shadow-lg block"
                                 style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
                                 onLoad={() => setIsLoading(false)}
                             />
