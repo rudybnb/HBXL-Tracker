@@ -118,6 +118,17 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
         };
     };
 
+    // Helper to get color based on room name
+    const getRoomColor = (label: string) => {
+        const lower = label.toLowerCase();
+        if (lower.includes('bed')) return 'border-blue-500 hover:bg-blue-500/20';
+        if (lower.includes('lounge') || lower.includes('living') || lower.includes('sitting')) return 'border-orange-500 hover:bg-orange-500/20';
+        if (lower.includes('bath') || lower.includes('wc') || lower.includes('ensuite') || lower.includes('toilet')) return 'border-green-500 hover:bg-green-500/20';
+        if (lower.includes('kitchen') || lower.includes('utility')) return 'border-red-500 hover:bg-red-500/20';
+        if (lower.includes('hall') || lower.includes('landing') || lower.includes('corridor')) return 'border-yellow-500 hover:bg-yellow-500/20';
+        return 'border-purple-500 hover:bg-purple-500/20';
+    };
+
     return (
         <div className="flex h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700">
             {/* Main Viewer Column */}
@@ -213,8 +224,8 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                             {pageElements.map((el, idx) => (
                                 <div
                                     key={`${el.id}-${idx}`}
-                                    className={`absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto hover:bg-amber-500/20 group
-                                        ${el.type === 'room' ? 'border-amber-500/50 hover:border-amber-500' : 'border-blue-500/50 hover:border-blue-500'}
+                                    className={`absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto group
+                                        ${el.type === 'room' ? getRoomColor(el.label) : 'border-blue-500 hover:bg-blue-500/20'}
                                     `}
                                     style={getOverlayStyle(el.bbox)}
                                     onClick={() => onElementClick?.(el)}
