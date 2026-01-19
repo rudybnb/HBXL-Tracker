@@ -103,10 +103,17 @@ Your task:
 1. Parse a vector-based architectural drawing (converted to image).
 2. Identify all construction symbols using geometry and pattern recognition.
 3. Classify each symbol using construction domain knowledge.
+4. Return ABSOLUTE PIXEL COORDINATES for all bounding boxes.
+
+CRITICAL - COORDINATE SYSTEM:
+- Do NOT use a normalized 0-1000 scale.
+- You MUST return ABSOLUTE PIXEL COORDINATES based on the actual image resolution.
+- If the image is 2400x1800, a box in the middle is [1200, 900, ...], NOT [500, 500].
+- Bounding Format: [xmin, ymin, xmax, ymax] (Pixels).
 
 TASK 1: ROOM RECOGNITION (Spatial Logic)
 - Identify rooms by closed polyline boundaries and text labels.
-- Create a BOUNDING BOX [xmin, ymin, xmax, ymax] (0-1000 scale) effectively COVERING THE ENTIRE ROOM AREA.
+- Create a BOUNDING BOX [xmin, ymin, xmax, ymax] effectively COVERING THE ENTIRE ROOM AREA.
 - The box should ENCOMPASS all walls and internal space of that room.
 - Return the exact Room Name as it appears on the drawing.
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
@@ -131,13 +138,12 @@ C. PLUMBING SYMBOLS (Blue/Black outlines)
    - BASIN: D-shape or oval against wall. Type: "plumbing".
    - BATH/SHOWER: Rectangular or Square enclosure with 'X'. Type: "plumbing".
 
-CRITICAL - COUNTING & NEGATIVE CONSTRAINTS:
-- NEGATIVE CONSTRAINT: Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities. These are Circuit Numbers.
+CRITICAL - LIVING ROOM EXAMPLE:
+- If you see a "Living Room" with 6 circular symbols (lights), you MUST extract ALL 6.
+- Do NOT just find the room and ignore the contents.
+- Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities.
 - IGNORE ALL TEXT NUMBERS for counting.
 - ONLY count the actual physical pictorial symbols you see.
-- If a light says "4" next to it, that might mean "Type 4". COUNT THE SYMBOLS.
-- If you see 6 physical circle symbols, the count is 6.
-- NO GROUPING: You MUST return a separate JSON object for EACH physical symbol.
 
 TASK 3: SPATIAL ASSOCIATION
 - Associate every symbol to a Room.
