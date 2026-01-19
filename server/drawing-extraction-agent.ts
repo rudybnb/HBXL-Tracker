@@ -97,69 +97,56 @@ export interface ExtractionResult {
 }
 
 
-const EXTRACTION_PROMPT = `You are a VISUAL BLUEPRINT READER and CONSTRUCTION INTELLIGENCE AGENT.
-Your task is to analyze construction drawings with COMPUTER VISION precision.
+const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
 
-*** SUPREME DIRECTIVE: YOU MUST FIND VISUAL SYMBOLS ***
-The user has reported that previously you only found rooms. THIS IS UNACCEPTABLE.
-You MUST look for the small symbols (Sockets, Lights, Switches, Doors) and extract them.
-If you see a LEGEND or KEY on the drawing, READ IT FIRST to understand what the symbols mean.
+Your task:
+1. Parse a vector-based architectural drawing (converted to image).
+2. Identify all construction symbols using geometry and pattern recognition.
+3. Classify each symbol using construction domain knowledge.
 
-TASK 0: LEGEND & KEY ANALYSIS (CRITICAL)
-- Scan the drawing edges for a Legend/Key.
-- Learn the symbols for specific Electrical/Plumbing items.
-- Apply this knowledge to validatethe symbols you see in the plan.
-
-TASK 1: GLOBAL LAYOUT & ROOMS
-- Identify every room.
-- CRITICAL: Create a BOUNDING BOX [xmin, ymin, xmax, ymax] (0-1000 scale) effectively COVERING THE ENTIRE ROOM AREA.
-- Note for coordinates: xmin=Left, ymin=Top, xmax=Right, ymax=Bottom.
+TASK 1: ROOM RECOGNITION (Spatial Logic)
+- Identify rooms by closed polyline boundaries and text labels.
+- Create a BOUNDING BOX [xmin, ymin, xmax, ymax] (0-1000 scale) effectively COVERING THE ENTIRE ROOM AREA.
 - The box should ENCOMPASS all walls and internal space of that room.
 - Return the exact Room Name as it appears on the drawing.
-
-TASK 2: DETAILED VISUAL EXTRACTION (THE "BLUEPRINT READER" CORE)
-Search the drawing grid-by-grid. You are looking for specific symbols. 
-NOTE: The drawing may be blue/black line art on white background.
-
-1. ARCHITECTURAL ELEMENTS (CRITICAL - DO NOT MISS):
-   - DOORS: Quarter-circle arcs showing swing.
-   - WINDOWS: Double parallel lines in walls. Count distinct OPENINGS, not individual glass panes. One opening = 1 Window.
-
-2. ELECTRICAL SYMBOLS (Look closely for these specific shapes):
-   - SOCKETS: Semi-circle on a wall line (often with a cross or ticks). Code: "VISUAL-SKT".
-   - SWITCHES: Small circle or triangle near a door frame. Code: "VISUAL-SW".
-   - LIGHTS: Circle with a cross (X) inside, usually in the center of a room. Code: "VISUAL-LIGHT".
-   - DATA/TV: Small circle with a squiggly line or letter inside. Code: "VISUAL-DATA".
-   - CONSUMER UNIT: Box with text 'CU' or 'Fuse'.
-
-3. PLUMBING (Blue/Black outlines):
-   - WC: Oval shape with cistern box against wall.
-   - BASIN: D-shape or oval against wall.
-   - SHOWER: Square enclosure, often with an 'X' (tray) or corner markings.
-   - BATH: Rectangular shape.
-
-REQUIREMENT:
-- VISUAL SCANNING IS MANDATORY: You are a computer vision model. Do not "guess" or read the text to find the quantity.
-- NEGATIVE CONSTRAINT: Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities. These are often Circuit Numbers or Types.
-- YOU MUST IGNORE ALL TEXT NUMBERS for counting.
-- ONLY count the actual physical pictorial symbols you see.
-- If a light says "4" next to it, that might mean "Type 4", NOT quantity 4. COUNT THE SYMBOLS.
-- If you see 6 physical circle symbols, the count is 6.
-- DO NOT rely on cached data. Treat this image as brand new.
-- WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - WALLS ARE BOUNDARIES: A room's bounding box MUST STOP at the walls. It cannot overlap into another room.
 - If "Lounge" and "Bathroom" overlap, you have failed. Retract the boxes to fit the walls.
-- COUNTING: Count exactly what you see. 3 Lights = 3 Entries. 1 Socket = 1 Entry.
+
+TASK 2: SYMBOL DETECTION & CLASSIFICATION (Geometry & Pattern Recognition)
+You must identify 3 key categories of symbols based on their shape:
+
+A. ARCHITECTURAL ELEMENTS
+   - DOORS: Detect Quarter-circle arcs showing swing connected to wall lines. Type: "door".
+   - WINDOWS: Detect Double parallel lines embedded in walls. Type: "window".
+   - Count distinct OPENINGS, not individual glass panes. One opening = 1 Window.
+
+B. ELECTRICAL SYMBOLS (Look for these specific Geometric Shapes)
+   - LIGHTS: Detect CIRCLES with a CROSS (X) or Mark inside. Usually centered in rooms. Type: "lighting".
+   - SOCKETS: Detect SEMI-CIRCLES on a wall line. Type: "electrical".
+   - SWITCHES: Detect SMALL CIRCLES or TRIANGLES near door frames. Type: "electrical".
+   - DATA/TV: Small circle with squiggly line/letter. Type: "electrical".
+
+C. PLUMBING SYMBOLS (Blue/Black outlines)
+   - WC: Oval shape with cistern box. Type: "plumbing".
+   - BASIN: D-shape or oval against wall. Type: "plumbing".
+   - BATH/SHOWER: Rectangular or Square enclosure with 'X'. Type: "plumbing".
+
+CRITICAL - COUNTING & NEGATIVE CONSTRAINTS:
+- NEGATIVE CONSTRAINT: Do NOT read numbers text next to symbols (e.g. "4", "x4") as quantities. These are Circuit Numbers.
+- IGNORE ALL TEXT NUMBERS for counting.
+- ONLY count the actual physical pictorial symbols you see.
+- If a light says "4" next to it, that might mean "Type 4". COUNT THE SYMBOLS.
+- If you see 6 physical circle symbols, the count is 6.
 - NO GROUPING: You MUST return a separate JSON object for EACH physical symbol.
-- If there are 6 lights, I expect 6 items in the "detailedElements" array, each with its own unique bounding box.
-- DO NOT return a single item with "quantity: 6". This will be rejected.
-- COUNTING IS CRITICAL: If you see 2 sockets, return 2 separate entries with DIFFERENT coordinates.
-- DO NOT hallucinate elements that aren't there.
-- DO NOT rely on previous knowledge. ONLY report what is visibly drawn.
-- If you see a symbol but are unsure, GUESS based on context (e.g. circle in center of ceiling = Light).
+
+TASK 3: SPATIAL ASSOCIATION
+- Associate every symbol to a Room.
+- If a Light is visibly inside the boundary of "Living Room", assign it to "Living Room".
+- Use strict containment logic.
+
+OUTPUT REQUIREMENTS:
 - Generate a "code" for every item (e.g. "VISUAL-SKT-1", "VISUAL-LIGHT-2").
 - CRITICAL: The "room" field for each element must EXACTLY match one of the "rooms" identified in Task 1.
-- If an element is physically located inside the boundary of "Bedroom 4", assign it to "Bedroom 4", even if the text label is far away.
 
 FORMAT:
 Return ONLY purely valid JSON.
