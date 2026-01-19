@@ -87,6 +87,7 @@ export interface ExtractedElement {
 export interface ExtractionResult {
     success: boolean;
     rooms: ExtractedRoom[];                    // Stage 1: Rooms
+    detailedElements: ExtractedDetailedElement[]; // Stage 3: Windows/Doors/Sockets
     instructions: ExtractedInstruction[];       // Stage 2: Instructions/Notes
     detailedElements: ExtractedDetailedElement[]; // Stage 3: Elements with codes
     workFlow?: ExtractedWorkFlow;              // Stage 4: Work flow
