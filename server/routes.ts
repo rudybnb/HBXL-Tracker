@@ -617,6 +617,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 });
               }
               console.log(`✅ DXF Processing Complete. Saved ${result.rooms.length} rooms and ${result.detailedElements.length} elements.`);
+            } else {
+              console.error("❌ DXF Extraction returned failure:", result.error);
+              await db.update(jobFiles)
+                .set({
+                  extractionStatus: 'failed',
+                  extractionError: result.error || "Unknown DXF Processing Error"
+                })
+                .where(eq(jobFiles.id, jobFile.id));
             }
           } catch (err) {
             console.error("❌ DXF Extraction failed:", err);
