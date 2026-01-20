@@ -97,11 +97,57 @@ export async function extractElectrical(imagePath: string): Promise<ElectricalEx
             return { success: false, elements: [], error: `File not found: ${absolutePath}` };
         }
 
-        // Read image
-        const imageBuffer = fs.readFileSync(absolutePath);
-        const base64Image = imageBuffer.toString('base64');
         const ext = path.extname(absolutePath).toLowerCase();
-        const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+        let base64Image = '';
+        let mimeType = '';
+
+        // Handle PDF files (Convert to JPEG for AI)
+        if (ext === '.pdf') {
+            try {
+                const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+                const { createCanvas } = await import('canvas');
+
+                // @ts-ignore
+                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+                if (!global.DOMMatrix) {
+                    // @ts-ignore
+                    global.DOMMatrix = class DOMMatrix { constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; } }
+                }
+
+                const fileBuffer = fs.readFileSync(absolutePath);
+                const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer), verbosity: 0 });
+                const doc = await loadingTask.promise;
+
+                // Process Page 1 ONLY for Electrical Mapping (Simplification)
+                const page = await doc.getPage(1);
+                const viewport = page.getViewport({ scale: 2.0 });
+                const canvas = createCanvas(viewport.width, viewport.height);
+                const context = canvas.getContext('2d');
+
+                // Force White Background (Opaque)
+                context.fillStyle = '#FFFFFF';
+                context.fillRect(0, 0, viewport.width, viewport.height);
+
+                await page.render({ canvasContext: context as any, viewport }).promise;
+
+                const jpegBuffer = canvas.toBuffer('image/jpeg', { quality: 0.95 });
+                base64Image = jpegBuffer.toString('base64');
+                mimeType = 'image/jpeg';
+
+                console.log(`⚡ Electrical Agent converted PDF Page 1 to JPEG.`);
+
+            } catch (pdfErr: any) {
+                console.error("⚡ Electrical Agent PDF Conversion Failed:", pdfErr);
+                return { success: false, elements: [], error: "PDF Conversion Failed: " + pdfErr.message };
+            }
+
+        } else {
+            // Regular Image
+            const imageBuffer = fs.readFileSync(absolutePath);
+            base64Image = imageBuffer.toString('base64');
+            mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+        }
 
         console.log(`⚡ Electrical Agent scanning: ${path.basename(absolutePath)}`);
 
