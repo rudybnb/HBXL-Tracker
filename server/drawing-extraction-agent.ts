@@ -89,7 +89,7 @@ export interface ExtractionResult {
     rooms: ExtractedRoom[];                    // Stage 1: Rooms
     detailedElements: ExtractedDetailedElement[]; // Stage 3: Windows/Doors/Sockets
     instructions: ExtractedInstruction[];       // Stage 2: Instructions/Notes
-    detailedElements: ExtractedDetailedElement[]; // Stage 3: Elements with codes
+    // detailedElements: ExtractedDetailedElement[]; // DUPLICATE REMOVED
     workFlow?: ExtractedWorkFlow;              // Stage 4: Work flow
     elements: ExtractedElement[];              // Legacy: kept for compatibility
     rawResponse: string;
@@ -167,91 +167,225 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
         const ext = path.extname(imagePath).toLowerCase();
         let imagesToProcess: { base64: string; mimeType: string, pageNumber: number }[] = [];
 
-        // Handle PDF files by converting to image using pdf-poppler
+        // Handle PDF files (Revert to pdfjs-dist /w JPEG output + White BG to fix transparency)
         if (ext === '.pdf') {
-            console.log(`📄 PDF detected, converting to images via pdf-poppler...`);
+            console.log(`📄 PDF detected. Using pdfjs-dist (Node Environment) for conversion...`);
 
             try {
+                // Use Standard Import for Node Environment
+                const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+                const { createCanvas } = await import('canvas');
+
+                // Disable Worker logic for Node to prevent external script loading issues
                 // @ts-ignore
-                const pdf = (await import('pdf-poppler')).default;
+                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
-                const outputDir = path.dirname(absolutePath);
-                // removing extension for prefix to avoid double dots if possible, 
-                // but pdf-poppler just appends.
-                const baseName = path.basename(absolutePath, ext);
-
-                const opts = {
-                    format: 'png',
-                    out_dir: outputDir,
-                    out_prefix: baseName,
-                    page: null // null = Convert all pages
-                };
-
-                console.log(`   Starting conversion for: ${absolutePath}`);
-                await pdf.convert(absolutePath, opts);
-
-                // pdf-poppler output format: name-1.png, name-2.png
-                const dirFiles = fs.readdirSync(outputDir);
-                // filter strictly to avoid picking up other files
-                const generatedImages = dirFiles.filter(f => f.startsWith(baseName + '-') && f.endsWith('.png'));
-
-                generatedImages.sort((a, b) => {
-                    const numA = parseInt(a.match(/-(\d+)\.png$/)?.[1] || '0');
-                    const numB = parseInt(b.match(/-(\d+)\.png$/)?.[1] || '0');
-                    return numA - numB;
-                });
-
-                if (generatedImages.length === 0) {
-                    // Check if maybe it didn't append -1? (Single page sometimes different?)
-                    // Or maybe pure filename.png?
-                    if (fs.existsSync(path.join(outputDir, baseName + '.png'))) {
-                        generatedImages.push(baseName + '.png');
-                    } else {
-                        throw new Error(`pdf-poppler execution finished but no images found in ${outputDir}`);
+                // Polyfill DOMMatrix if needed
+                if (!global.DOMMatrix) {
+                    // @ts-ignore
+                    global.DOMMatrix = class DOMMatrix {
+                        constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
                     }
                 }
 
-                console.log(`   Found ${generatedImages.length} generated images.`);
+                const fileBuffer = fs.readFileSync(absolutePath);
+                const data = new Uint8Array(fileBuffer);
 
-                for (let i = 0; i < generatedImages.length; i++) {
-                    const imgFileName = generatedImages[i];
-                    const imgPath = path.join(outputDir, imgFileName);
-                    const pngBuffer = fs.readFileSync(imgPath);
+                const loadingTask = pdfjsLib.getDocument({
+                    data,
+                    disableFontFace: false, // Let fonts load
+                    verbosity: 0
+                });
 
-                    // Frontend Viewer expects: {originalFilename}.pdf.png (Page 1)
-                    if (i === 0) {
+                const doc = await loadingTask.promise;
+                console.log(`   PDF Loaded. Pages: ${doc.numPages}`);
+
+                for (let i = 1; i <= doc.numPages; i++) {
+                    if (i > 5) break;
+
+                    console.log(`   Processing Page ${i}...`);
+                    const page = await doc.getPage(i);
+                    const viewport = page.getViewport({ scale: 2.0 });
+
+                    const canvas = createCanvas(viewport.width, viewport.height);
+                    const context = canvas.getContext('2d');
+
+                    // FORCE WHITE BACKGROUND (Opaque JPEG)
+                    context.fillStyle = '#FFFFFF';
+                    context.fillRect(0, 0, viewport.width, viewport.height);
+
+                    // Render
+                    await page.render({
+                        canvasContext: context as any,
+                        viewport: viewport
+                    }).promise;
+
+                    // OUTPUT AS JPEG (Guarantee Opaque) and save with .png extension for frontend
+                    const jpegBuffer = canvas.toBuffer('image/jpeg', { quality: 0.95 });
+
+                    if (i === 1) {
                         const previewPath = absolutePath + '.png';
-                        try {
-                            fs.copyFileSync(imgPath, previewPath);
-                            console.log(`🖼️ Saved PDF Preview Image to: ${previewPath}`);
-                        } catch (err) {
-                            console.error("Failed to copy preview image:", err);
-                        }
+                        fs.writeFileSync(previewPath, jpegBuffer);
+                        console.log(`🖼️ Saved Preview (JPEG) to: ${previewPath}`);
                     }
 
-                    const base64Image = pngBuffer.toString('base64');
                     imagesToProcess.push({
-                        base64: base64Image,
-                        mimeType: 'image/png',
-                        pageNumber: i + 1
+                        base64: jpegBuffer.toString('base64'),
+                        mimeType: 'image/jpeg', // Tell AI it's a JPEG
+                        pageNumber: i
                     });
                 }
 
-                console.log(`✅ PDF converted. ${imagesToProcess.length} pages ready for AI.`);
+                console.log(`✅ Conversion Success.`);
 
             } catch (err: any) {
-                console.error("❌ PDF Conversion Error:", err);
-                return {
-                    success: false,
-                    rooms: [], instructions: [], detailedElements: [], elements: [], rawResponse: '',
-                    error: "PDF Conversion Failed. Please upload a high-quality Image (PNG/JPG) instead. Error: " + err.message,
-                    pageCount: 0
-                };
+                console.error("❌ PDFJS Conversion Error:", err);
+                return { success: false, error: "PDF Error: " + err.message, rooms: [], instructions: [], detailedElements: [], elements: [], rawResponse: '', pageCount: 0 };
+            }
+        } else {
+            // Regular image file (Single Page)
+            const imageBuffer = fs.readFileSync(absolutePath);
+            const base64Image = imageBuffer.toString('base64');
+
+            // Determine MIME type from extension
+            const mimeType = ext === '.png' ? 'image/png'
+                : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+                    : ext === '.gif' ? 'image/gif'
+                        : ext === '.webp' ? 'image/webp'
+                            : 'image/png'; // default
+
+            imagesToProcess.push({ base64: base64Image, mimeType, pageNumber: 1 });
+        }
+
+        // ============================================
+        // PROCESS EACH PAGE WITH GPT-4 VISION
+        // ============================================
+
+        const allRooms: ExtractedRoom[] = [];
+        const allInstructions: ExtractedInstruction[] = [];
+        const allDetailedElements: ExtractedDetailedElement[] = [];
+        let combinedRawResponse = '';
+        let lastWorkFlow: ExtractedWorkFlow | undefined;
+
+        console.log(`🔍 Starting AI Analysis on ${imagesToProcess.length} pages...`);
+
+        for (const pageData of imagesToProcess) {
+            console.log(`   🚀 Analyzing Page ${pageData.pageNumber}...`);
+
+            try {
+                const response = await getOpenAIClient().chat.completions.create({
+                    model: 'gpt-4o', // GPT-4 with vision
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: `${EXTRACTION_PROMPT}\n\nTHIS IS PAGE ${pageData.pageNumber}.` },
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: `data:${pageData.mimeType}; base64, ${pageData.base64}`,
+                                        detail: 'high' // High detail for construction drawings
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens: 4096,
+                    temperature: 0.1 // Low temperature for consistent extraction
+                });
+
+                const content = response.choices[0]?.message?.content || '';
+                console.log(`      Response received (${content.length} chars)`);
+                combinedRawResponse += `\n--- PAGE ${pageData.pageNumber} ---\n${content}`;
+
+                // Parse JSON response
+                try {
+                    // Extract JSON from response (in case there's extra text)
+                    const jsonMatch = content.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0].replace(/```json/g, '').replace(/```/g, '')); // Robust clean
+
+                        // Stage 1: Parse rooms
+                        if (parsed.rooms && Array.isArray(parsed.rooms)) {
+                            for (const r of parsed.rooms) {
+                                allRooms.push({
+                                    name: r.name || r.roomName || 'Unknown Room',
+                                    floor: r.floor || 'Ground',
+                                    dimensions: r.dimensions || null,
+                                    area: typeof r.area === 'number' ? r.area : (typeof r.roomArea === 'number' ? r.roomArea : null),
+                                    elements: Array.isArray(r.elements) ? r.elements : [],
+                                    page: pageData.pageNumber,
+                                    bbox: r.bbox // capture bounding box
+                                });
+                            }
+                        }
+
+                        // Stage 2: Parse instructions/notes
+                        if (parsed.instructions && Array.isArray(parsed.instructions)) {
+                            for (const inst of parsed.instructions) {
+                                allInstructions.push({
+                                    type: inst.type || 'note',
+                                    text: inst.text || '',
+                                    location: inst.location,
+                                    page: pageData.pageNumber,
+                                    bbox: inst.bbox
+                                });
+                            }
+                        }
+
+                        // Stage 3: Parse detailed elements
+                        const aiElements = parsed.detailedElements || parsed.elements;
+                        if (aiElements && Array.isArray(aiElements)) {
+                            for (const elem of aiElements) {
+                                allDetailedElements.push({
+                                    code: elem.code || 'Unknown',
+                                    type: elem.type || 'unknown',
+                                    description: elem.description || '',
+                                    room: elem.room || 'Unknown',
+                                    size: elem.size,
+                                    page: pageData.pageNumber,
+                                    bbox: elem.bbox
+                                });
+                            }
+                        }
+
+                        // Capture workflow (usually same across pages, so just take last one found)
+                        if (parsed.workFlow) {
+                            lastWorkFlow = {
+                                sequence: Array.isArray(parsed.workFlow.sequence) ? parsed.workFlow.sequence : [],
+                                trades: Array.isArray(parsed.workFlow.trades) ? parsed.workFlow.trades : [],
+                                notes: Array.isArray(parsed.workFlow.notes) ? parsed.workFlow.notes : []
+                            };
+                        }
+                    }
+                } catch (jsonErr) {
+                    console.error(`      ⚠️ Failed to parse JSON for Page ${pageData.pageNumber}`, jsonErr);
+                    // Continue to next page rather than failing entire batch
+                }
+
+            } catch (pageErr) {
+                console.error(`      ❌ Error analyzing Page ${pageData.pageNumber}`, pageErr);
             }
         }
 
-    } catch (pdfError: any) {
-        console.error(`❌ PDF conversion error (pdfjs-dist):`, pdfError);
+        console.log(`✅ All pages processed.`);
+        console.log(`   📍 Total Rooms: ${allRooms.length}`);
+        console.log(`   📝 Total Instructions: ${allInstructions.length}`);
+        console.log(`   🚪 Total Elements: ${allDetailedElements.length}`);
+
+        return {
+            success: true,
+            rooms: allRooms,
+            instructions: allInstructions,
+            detailedElements: allDetailedElements,
+            workFlow: lastWorkFlow,
+            elements: [], // Legacy: empty
+            rawResponse: combinedRawResponse,
+            pageCount: imagesToProcess.length
+        };
+
+    } catch (error) {
+        console.error('❌ Extraction error:', error);
         return {
             success: false,
             rooms: [],
@@ -259,165 +393,10 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             detailedElements: [],
             elements: [],
             rawResponse: '',
-            error: `PDF conversion failed: ${pdfError.message}. Please upload a JPG/PNG image.`,
+            error: error instanceof Error ? error.message : String(error),
             pageCount: 0
         };
     }
-} else {
-    // Regular image file (Single Page)
-    const imageBuffer = fs.readFileSync(absolutePath);
-    const base64Image = imageBuffer.toString('base64');
-
-    // Determine MIME type from extension
-    const mimeType = ext === '.png' ? 'image/png'
-        : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-            : ext === '.gif' ? 'image/gif'
-                : ext === '.webp' ? 'image/webp'
-                    : 'image/png'; // default
-
-    imagesToProcess.push({ base64: base64Image, mimeType, pageNumber: 1 });
-}
-
-// ============================================
-// PROCESS EACH PAGE WITH GPT-4 VISION
-// ============================================
-
-const allRooms: ExtractedRoom[] = [];
-const allInstructions: ExtractedInstruction[] = [];
-const allDetailedElements: ExtractedDetailedElement[] = [];
-let combinedRawResponse = '';
-let lastWorkFlow: ExtractedWorkFlow | undefined;
-
-console.log(`🔍 Starting AI Analysis on ${imagesToProcess.length} pages...`);
-
-for (const pageData of imagesToProcess) {
-    console.log(`   🚀 Analyzing Page ${pageData.pageNumber}...`);
-
-    try {
-        const response = await getOpenAIClient().chat.completions.create({
-            model: 'gpt-4o', // GPT-4 with vision
-            messages: [
-                {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: `${EXTRACTION_PROMPT}\n\nTHIS IS PAGE ${pageData.pageNumber}.` },
-                        {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:${pageData.mimeType}; base64, ${pageData.base64}`,
-                                detail: 'high' // High detail for construction drawings
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens: 4096,
-            temperature: 0.1 // Low temperature for consistent extraction
-        });
-
-        const content = response.choices[0]?.message?.content || '';
-        console.log(`      Response received (${content.length} chars)`);
-        combinedRawResponse += `\n--- PAGE ${pageData.pageNumber} ---\n${content}`;
-
-        // Parse JSON response
-        try {
-            // Extract JSON from response (in case there's extra text)
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const parsed = JSON.parse(cleanJson(jsonMatch[0]));
-
-                // Stage 1: Parse rooms
-                if (parsed.rooms && Array.isArray(parsed.rooms)) {
-                    for (const r of parsed.rooms) {
-                        allRooms.push({
-                            name: r.name || r.roomName || 'Unknown Room',
-                            floor: r.floor || 'Ground',
-                            dimensions: r.dimensions || null,
-                            area: typeof r.area === 'number' ? r.area : (typeof r.roomArea === 'number' ? r.roomArea : null),
-                            elements: Array.isArray(r.elements) ? r.elements : [],
-                            page: pageData.pageNumber,
-                            bbox: r.bbox // capture bounding box
-                        });
-                    }
-                }
-
-                // Stage 2: Parse instructions/notes
-                if (parsed.instructions && Array.isArray(parsed.instructions)) {
-                    for (const inst of parsed.instructions) {
-                        allInstructions.push({
-                            type: inst.type || 'note',
-                            text: inst.text || '',
-                            location: inst.location,
-                            page: pageData.pageNumber,
-                            bbox: inst.bbox
-                        });
-                    }
-                }
-
-                // Stage 3: Parse detailed elements
-                const aiElements = parsed.detailedElements || parsed.elements;
-                if (aiElements && Array.isArray(aiElements)) {
-                    for (const elem of aiElements) {
-                        allDetailedElements.push({
-                            code: elem.code || 'Unknown',
-                            type: elem.type || 'unknown',
-                            description: elem.description || '',
-                            room: elem.room || 'Unknown',
-                            size: elem.size,
-                            page: pageData.pageNumber,
-                            bbox: elem.bbox
-                        });
-                    }
-                }
-
-                // Capture workflow (usually same across pages, so just take last one found)
-                if (parsed.workFlow) {
-                    lastWorkFlow = {
-                        sequence: Array.isArray(parsed.workFlow.sequence) ? parsed.workFlow.sequence : [],
-                        trades: Array.isArray(parsed.workFlow.trades) ? parsed.workFlow.trades : [],
-                        notes: Array.isArray(parsed.workFlow.notes) ? parsed.workFlow.notes : []
-                    };
-                }
-            }
-        } catch (jsonErr) {
-            console.error(`      ⚠️ Failed to parse JSON for Page ${pageData.pageNumber}`, jsonErr);
-            // Continue to next page rather than failing entire batch
-        }
-
-    } catch (pageErr) {
-        console.error(`      ❌ Error analyzing Page ${pageData.pageNumber}`, pageErr);
-    }
-}
-
-console.log(`✅ All pages processed.`);
-console.log(`   📍 Total Rooms: ${allRooms.length}`);
-console.log(`   📝 Total Instructions: ${allInstructions.length}`);
-console.log(`   🚪 Total Elements: ${allDetailedElements.length}`);
-
-return {
-    success: true,
-    rooms: allRooms,
-    instructions: allInstructions,
-    detailedElements: allDetailedElements,
-    workFlow: lastWorkFlow,
-    elements: [], // Legacy: empty
-    rawResponse: combinedRawResponse,
-    pageCount: imagesToProcess.length
-};
-
-    } catch (error) {
-    console.error('❌ Extraction error:', error);
-    return {
-        success: false,
-        rooms: [],
-        instructions: [],
-        detailedElements: [],
-        elements: [],
-        rawResponse: '',
-        error: error instanceof Error ? error.message : String(error),
-        pageCount: 0
-    };
-}
 }
 
 /**
