@@ -218,8 +218,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     const canvas = createCanvas(viewport.width, viewport.height);
                     const context = canvas.getContext('2d');
 
-                    // FILL GRAY BACKGROUND to handle both White and Black lines
-                    context.fillStyle = '#F0F0F0';
+                    // FILL BLACK BACKGROUND to debug "White Lines" hypothesis
+                    context.fillStyle = '#000000';
                     context.fillRect(0, 0, viewport.width, viewport.height);
 
                     await page.render({
