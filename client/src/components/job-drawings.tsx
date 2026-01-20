@@ -221,6 +221,17 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                                                     SMART
                                                 </div>
                                             )}
+
+                                            {/* Failed Indicator */}
+                                            {file.extractionStatus === 'failed' && (
+                                                <div
+                                                    className="absolute bottom-2 right-2 bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded shadow-sm font-medium flex items-center cursor-help"
+                                                    title={file.extractionError || "Extraction Failed"}
+                                                >
+                                                    <X className="h-3 w-3 mr-1" />
+                                                    FAILED
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="p-3">
