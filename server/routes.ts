@@ -648,15 +648,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             console.log("🚀 Starting Agent Swarm Extraction (Room + Structure + Electrical)...");
 
-            // Run All Agents in Parallel
-            const [roomResult, structureResult, electricalResult] = await Promise.all([
+            // Use allSettled so one failure doesn't crash the whole swarm
+            const results = await Promise.allSettled([
               roomAgent.extractRooms(filePath),
               structureAgent.extractFromImage(filePath),
               electricalAgent.extractElectrical(filePath)
             ]);
 
+            const roomResult = results[0].status === 'fulfilled' ? results[0].value : { success: false, rooms: [] };
+            const structureResult = results[1].status === 'fulfilled' ? results[1].value : { success: false, detailedElements: [] };
+            const electricalResult = results[2].status === 'fulfilled' ? results[2].value : { success: false, elements: [] };
+
+            if (results[0].status === 'rejected') console.error("❌ Room Agent Crashed:", results[0].reason);
+            if (results[1].status === 'rejected') console.error("❌ Structure Agent Crashed:", results[1].reason);
+            if (results[2].status === 'rejected') console.error("❌ Electrical Agent Crashed:", results[2].reason);
+
             console.log("✅ Agents finished.");
-            console.log(`   - Rooms: ${roomResult.success ? 'Success (' + roomResult.rooms.length + ' rooms)' : 'Failed'}`);
+            console.log(`   - Rooms: ${roomResult.success ? 'Success (' + (roomResult.rooms?.length || 0) + ')' : 'Failed'}`);
             console.log(`   - Structure: ${structureResult.success ? 'Success' : 'Failed'}`);
             console.log(`   - Electrical: ${electricalResult.success ? 'Success' : 'Failed'}`);
 
