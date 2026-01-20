@@ -130,7 +130,8 @@ export async function extractElectrical(imagePath: string): Promise<ElectricalEx
         const raw = response.choices[0].message.content;
         if (!raw) throw new Error("Empty response from AI");
 
-        const parsed = JSON.parse(raw);
+        const cleanJson = (text: string) => text.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleanJson(raw));
 
         // Post-processing to ensure bbox format
         const cleanElements = (parsed.elements || []).map((el: any) => ({

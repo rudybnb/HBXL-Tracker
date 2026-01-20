@@ -306,7 +306,7 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     // Extract JSON from response (in case there's extra text)
                     const jsonMatch = content.match(/\{[\s\S]*\}/);
                     if (jsonMatch) {
-                        const parsed = JSON.parse(jsonMatch[0]);
+                        const parsed = JSON.parse(cleanJson(jsonMatch[0]));
 
                         // Stage 1: Parse rooms
                         if (parsed.rooms && Array.isArray(parsed.rooms)) {
