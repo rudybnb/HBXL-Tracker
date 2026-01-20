@@ -55,10 +55,6 @@ export class DxfAgent {
         const rooms: any[] = [];
         const elements: any[] = [];
 
-        // Helper to normalize coordinates (DXF can be huge coordinates)
-        // For now, we return raw CAD coordinates. The UI might need to handle the scale.
-        // Actually, for "No Guessing", we want REAL units.
-
         if (dxf.entities) {
             for (const entity of dxf.entities) {
 
@@ -113,7 +109,7 @@ export class DxfAgent {
 
     /**
      * Minimal DXF to SVG converter
-     * Renders Lines, Polylines, Circles, Arcs to SVG format
+     * Renders Lines, Polylines, Circles, 3DFACEs to SVG format
      */
     private generateSVG(dxf: any, outputPath: string) {
         let svgContent = '';
@@ -150,20 +146,53 @@ export class DxfAgent {
             });
         }
 
-        // ... (Padding calculation) ...
+        // Handle empty bounds (empty file or non-supported entities)
+        if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
+            console.warn("⚠️ DXF Agent: No geometric bounds found. Defaulting to 1000x1000.");
+            minX = 0; minY = 0; maxX = 1000; maxY = 1000;
+        }
+
+        // Add padding
+        const padding = (maxX - minX) * 0.05;
+        minX -= padding; maxX += padding;
+        minY -= padding; maxY += padding;
+        const width = maxX - minX;
+        const height = maxY - minY;
 
         // Pass 2: Generate SVG Paths
         if (dxf.entities) {
             dxf.entities.forEach((entity: any) => {
-                // ... (Y Flip) ...
-                const svgY = (y: number) => maxY - (y - minY) + minY; // Flip Y axis
+                // Invert Y for SVG (SVG y goes down, CAD y goes up)
+                const svgY = (y: number) => maxY - (y - minY) + minY;
 
                 if (entity.type === 'LINE') {
-                    // ... (Existing LINE) ...
+                    const x1 = entity.vertices[0].x;
+                    const y1 = maxY - (entity.vertices[0].y - minY);
+                    const x2 = entity.vertices[1].x;
+                    const y2 = maxY - (entity.vertices[1].y - minY);
+                    svgContent += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="white" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
                 }
-                // ... (Existing POLYLINE) ...
-
-                // NEW: 3DFACE / SOLID
+                else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
+                    if (entity.vertices && entity.vertices.length > 0) {
+                        const points = entity.vertices.map((v: any) => `${v.x},${maxY - (v.y - minY)}`).join(' ');
+                        const closed = entity.shape || (entity.vertices[0].x === entity.vertices[entity.vertices.length - 1].x);
+                        if (closed)
+                            svgContent += `<polygon points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                        else
+                            svgContent += `<polyline points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                    }
+                }
+                else if (entity.type === 'CIRCLE') {
+                    const cx = entity.center.x;
+                    const cy = maxY - (entity.center.y - minY);
+                    svgContent += `<circle cx="${cx}" cy="${cy}" r="${entity.radius}" fill="none" stroke="yellow" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                }
+                else if (entity.type === 'TEXT' || entity.type === 'MTEXT') {
+                    const x = entity.position.x;
+                    const y = maxY - (entity.position.y - minY);
+                    const txt = (entity.text || entity.string || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                    svgContent += `<text x="${x}" y="${y}" fill="lime" font-size="${entity.height || 100}" font-family="monospace">${txt}</text>\n`;
+                }
                 else if (entity.type === '3DFACE' || entity.type === 'SOLID') {
                     if (entity.vertices && entity.vertices.length > 0) {
                         const points = entity.vertices.map((v: any) => `${v.x},${maxY - (v.y - minY)}`).join(' ');
@@ -171,66 +200,16 @@ export class DxfAgent {
                         svgContent += `<polygon points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
                     }
                 }
-                // ... (Existing Rest) ...
+            });
+        }
 
-                if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
-                    console.warn("⚠️ DXF Agent: No geometric bounds found. Defaulting to 1000x1000.");
-                    minX = 0; minY = 0; maxX = 1000; maxY = 1000;
-                }
-
-                // Add padding
-                const padding = (maxX - minX) * 0.05;
-                minX -= padding; maxX += padding;
-                minY -= padding; maxY += padding;
-                const width = maxX - minX;
-                const height = maxY - minY;
-
-                // Pass 2: Generate SVG Paths
-                if (dxf.entities) {
-                    dxf.entities.forEach((entity: any) => {
-                        // Invert Y for SVG (SVG y goes down, CAD y goes up) - handled by viewBox/transform usually,
-                        // but simpler to just mirror Y coords relative to MaxY
-                        const svgY = (y: number) => maxY - (y - minY) + minY; // Flip Y axis
-
-                        if (entity.type === 'LINE') {
-                            const x1 = entity.vertices[0].x;
-                            const y1 = maxY - (entity.vertices[0].y - minY); // Flip
-                            const x2 = entity.vertices[1].x;
-                            const y2 = maxY - (entity.vertices[1].y - minY);
-                            svgContent += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="white" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
-                        }
-                        else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-                            if (entity.vertices && entity.vertices.length > 0) {
-                                const points = entity.vertices.map((v: any) => `${v.x},${maxY - (v.y - minY)}`).join(' ');
-                                const closed = entity.shape || (entity.vertices[0].x === entity.vertices[entity.vertices.length - 1].x); // Check closed flag in real parser
-                                if (closed)
-                                    svgContent += `<polygon points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
-                                else
-                                    svgContent += `<polyline points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
-                            }
-                        }
-                        else if (entity.type === 'CIRCLE') {
-                            const cx = entity.center.x;
-                            const cy = maxY - (entity.center.y - minY);
-                            svgContent += `<circle cx="${cx}" cy="${cy}" r="${entity.radius}" fill="none" stroke="yellow" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
-                        }
-                        else if (entity.type === 'TEXT' || entity.type === 'MTEXT') {
-                            const x = entity.position.x;
-                            const y = maxY - (entity.position.y - minY);
-                            // Escaped text
-                            const txt = (entity.text || entity.string || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-                            svgContent += `<text x="${x}" y="${y}" fill="lime" font-size="${entity.height || 100}" font-family="monospace">${txt}</text>\n`;
-                        }
-                    });
-                }
-
-                const svgFile = `
+        const svgFile = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" style="background-color: #0b0f19;">
   <g transform="scale(1, 1)">
     ${svgContent}
   </g>
 </svg>`;
 
-                fs.writeFileSync(outputPath, svgFile);
-            }
+        fs.writeFileSync(outputPath, svgFile);
+    }
 }
