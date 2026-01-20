@@ -185,24 +185,33 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-6">
                                 {files.map((file) => (
                                     <div key={file.id} className="group relative bg-slate-800 rounded-lg border border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                                        <div className="aspect-square bg-slate-900 flex items-center justify-center cursor-pointer" onClick={() => setSelectedImage(file.fileUrl)}>
-                                            {file.fileType.startsWith('image/') ? (
+                                        <div className="aspect-square bg-slate-900 flex items-center justify-center cursor-pointer relative" onClick={() => setSelectedImage(file.fileUrl)}>
+                                            {file.fileType.startsWith('image/') || file.fileUrl?.endsWith('.svg') ? (
                                                 <img
                                                     src={file.fileUrl}
                                                     alt={file.originalName}
                                                     className="w-full h-full object-cover"
                                                     onError={(e) => {
-                                                        (e.target as HTMLImageElement).src = 'placeholder.png';
                                                         (e.target as HTMLImageElement).style.display = 'none';
-                                                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                                        (e.target as HTMLImageElement).parentElement?.querySelector('.fallback-icon')?.classList.remove('hidden');
                                                     }}
                                                 />
                                             ) : (
                                                 <FileText className="h-12 w-12 text-slate-500" />
                                             )}
-                                            <div className={`hidden absolute inset-0 flex items-center justify-center ${file.fileType.startsWith('image/') ? '' : 'flex'}`}>
+
+                                            {/* Fallback Icon (Hidden by default, shown on error) */}
+                                            <div className="fallback-icon hidden absolute inset-0 flex items-center justify-center">
                                                 <FileText className="h-12 w-12 text-slate-500" />
                                             </div>
+
+                                            {/* Status Overlay: Processing */}
+                                            {(file.extractionStatus === 'pending' || file.extractionStatus === 'processing') && (
+                                                <div className="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center">
+                                                    <Loader2 className="h-8 w-8 text-amber-500 animate-spin mb-2" />
+                                                    <span className="text-xs text-amber-500 font-medium">Processing...</span>
+                                                </div>
+                                            )}
 
                                             {/* Smart Label Indicator */}
                                             {file.extractionStatus === 'completed' && (
