@@ -33,9 +33,10 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
     const { data: files, isLoading } = useQuery<JobFile[]>({
         queryKey: [`/api/jobs/${jobId}/files`],
         // Poll every 3 seconds if any file is being processed (to detect extraction completion)
-        refetchInterval: (data) => {
-            const hasProcessing = data?.state?.data?.some(f => f.extractionStatus === 'processing');
-            return hasProcessing ? 3000 : false;
+        refetchInterval: (query) => {
+            const data = query.state.data as JobFile[] | undefined;
+            const hasProcessing = data?.some(f => f.extractionStatus === 'pending' || f.extractionStatus === 'processing');
+            return hasProcessing ? 2000 : false;
         },
     });
 
