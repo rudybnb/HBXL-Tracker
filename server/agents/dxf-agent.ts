@@ -145,6 +145,11 @@ export class DxfAgent {
             });
         }
 
+        if (minX === Infinity || minY === Infinity || maxX === -Infinity || maxY === -Infinity) {
+            console.warn("⚠️ DXF Agent: No geometric bounds found. Defaulting to 1000x1000.");
+            minX = 0; minY = 0; maxX = 1000; maxY = 1000;
+        }
+
         // Add padding
         const padding = (maxX - minX) * 0.05;
         minX -= padding; maxX += padding;
