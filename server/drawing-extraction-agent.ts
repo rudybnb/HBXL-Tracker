@@ -208,8 +208,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     }
 
                     const page = await doc.getPage(i);
-                    // Scale 2.0 = 200% size, good for text extraction
-                    const scale = 2.0;
+                    // Scale 3.0 = 300% size, better for small symbols (sockets/switches)
+                    const scale = 3.0;
                     const viewport = page.getViewport({ scale });
 
                     console.log(`   Rendering Page ${i} (Size: ${viewport.width}x${viewport.height})...`);
