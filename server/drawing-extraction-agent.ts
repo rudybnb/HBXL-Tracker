@@ -223,7 +223,20 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     }).promise;
 
                     // Convert to PNG buffer
-                    const base64Image = canvas.toBuffer('image/png').toString('base64');
+                    const pngBuffer = canvas.toBuffer('image/png');
+
+                    // Save Page 1 as the primary preview file (accessible via fileUrl + .png)
+                    if (i === 1) {
+                        try {
+                            const previewPath = absolutePath + '.png';
+                            fs.writeFileSync(previewPath, pngBuffer);
+                            console.log(`🖼️ Saved PDF Preview Image to: ${previewPath}`);
+                        } catch (writeErr) {
+                            console.error("Failed to write PDF preview image:", writeErr);
+                        }
+                    }
+
+                    const base64Image = pngBuffer.toString('base64');
                     imagesToProcess.push({
                         base64: base64Image,
                         mimeType: 'image/png',
