@@ -36,8 +36,15 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
 
     useEffect(() => {
         if (fileType === 'application/pdf') {
-            setIsPdfMode(true);
-            loadPdf();
+            // Revert to Server-Side PNG (Stable & White Background Verified)
+            // Client-Side PDFJS in Step 2041 showed blank white (rendering issue).
+            // Server-Side PNG has explicit white background fill.
+            setIsPdfMode(false);
+            setIsLoading(false);
+
+            // Note: If you want to debug client-side again, uncomment loadPdf()
+            // setIsPdfMode(true);
+            // loadPdf();
         } else {
             setIsPdfMode(false);
             setIsLoading(false);
