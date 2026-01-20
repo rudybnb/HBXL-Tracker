@@ -555,8 +555,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: "user"
       });
 
-      // Trigger async AI extraction (ROOMS ONLY MODE)
-      if (req.file.mimetype.startsWith('image/')) {
+      // DXF HANDLING (Deterministic)
+      if (req.file.originalname.toLowerCase().endsWith('.dxf')) {
+        console.log(`📐 DXF File detected: ${uniqueFilename}`);
+
+        import('./agents/dxf-agent').then(async ({ DxfAgent }) => {
+          try {
+            const agent = new DxfAgent();
+            const outputDir = path.dirname(filePath);
+            const result = await agent.process(filePath, outputDir);
+
+            if (result.success && result.svgPath) {
+              // Update DB to point to the SVG for visualization
+              await db.update(jobFiles)
+                .set({
+                  fileUrl: `/uploads/${result.svgPath}`,
+                  extractionStatus: 'completed'
+                })
+                .where(eq(jobFiles.id, jobFile.id));
+
+              // Save Extracted Rooms (Exact)
+              for (const room of result.rooms) {
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: 'room',
+                  description: room.name,
+                  dimensions: JSON.stringify(room.bbox), // Raw CAD coords
+                  quantity: "1", unit: "nr", rate: "0", total: "0",
+                  roomName: room.name
+                });
+              }
+
+              // Save Extracted Elements (Exact)
+              for (const el of result.detailedElements) {
+                // Find which room it's in (Simple Point in Rect)
+                let assignedRoom = "Unassigned";
+                const cx = (el.bbox[0] + el.bbox[2]) / 2;
+                const cy = (el.bbox[1] + el.bbox[3]) / 2;
+
+                for (const room of result.rooms) {
+                  const [rx, ry, rx2, ry2] = room.bbox;
+                  // Check considering min/max (coordinates might be flipped in CAD)
+                  const minX = Math.min(rx, rx2); const maxX = Math.max(rx, rx2);
+                  const minY = Math.min(ry, ry2); const maxY = Math.max(ry, ry2);
+
+                  if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+                    assignedRoom = room.name;
+                    break;
+                  }
+                }
+
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: el.type,
+                  description: el.name,
+                  dimensions: JSON.stringify(el.bbox),
+                  quantity: "1", unit: "nr", rate: "0", total: "0",
+                  roomName: assignedRoom
+                });
+              }
+              console.log(`✅ DXF Processing Complete. Saved ${result.rooms.length} rooms and ${result.detailedElements.length} elements.`);
+            }
+          } catch (err) {
+            console.error("❌ DXF Extraction failed:", err);
+            await db.update(jobFiles)
+              .set({ extractionStatus: 'failed', extractionError: String(err) })
+              .where(eq(jobFiles.id, jobFile.id));
+          }
+        });
+      }
+      // AI HANDLING (Probabilistic)
+      else if (req.file.mimetype.startsWith('image/') || req.file.mimetype === 'application/pdf') {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
         console.log(`📁 File path: ${filePath}`);
 
