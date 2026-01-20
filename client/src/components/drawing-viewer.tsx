@@ -1,16 +1,18 @@
-
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import AiAssistantChat from './ai-assistant-chat';
-// import * as pdfjsLib from 'pdfjs-dist'; 
-// NOTE: PDFJS removed to fix build issues. We now use Server-Side Rendered PNGs.
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure Worker - Explicit Version to match package.json
+// @ts-ignore
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface DrawingViewerProps {
     fileUrl: string;
     fileType: string;
-    smartElements?: any[]; // Simplified type to avoid interface duplication issues
+    smartElements?: any[];
     onElementClick?: (element: any) => void;
     fileId?: string;
 }
@@ -21,18 +23,64 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [showChat, setShowChat] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const [isPdfMode, setIsPdfMode] = useState(false);
 
-    // Determine Display URL (Force PNG for PDFs)
-    const displayUrl = fileType === 'application/pdf' ? fileUrl + '.png' : fileUrl;
+    const containerRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    // Determine Display URL (Fallback for PNG)
+    const displayUrl = fileUrl + '.png';
 
     // Filter elements for current page
     const pageElements = smartElements.filter(el => el.page === currentPage || (!el.page && currentPage === 1));
 
     useEffect(() => {
-        // Reset loading when url changes
+        if (fileType === 'application/pdf') {
+            setIsPdfMode(true);
+            loadPdf();
+        } else {
+            setIsPdfMode(false);
+            setIsLoading(false);
+        }
+    }, [fileUrl, fileType, scale]);
+
+    const loadPdf = async () => {
         setIsLoading(true);
-    }, [displayUrl]);
+        setError(null);
+        try {
+            console.log("📄 Loading PDF Client-Side:", fileUrl);
+            const loadingTask = pdfjsLib.getDocument(fileUrl);
+            const pdf = await loadingTask.promise;
+            const page = await pdf.getPage(1); // Always Page 1 for preview
+
+            const viewport = page.getViewport({ scale: scale * 1.5 });
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+
+            const context = canvas.getContext('2d');
+            if (!context) return;
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            // White Background for Transparent PDFs
+            context.fillStyle = 'white';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
+
+            setIsLoading(false);
+        } catch (err: any) {
+            console.error("PDF Render Error:", err);
+            // Fallback to Image Mode (Server PNG)
+            setIsPdfMode(false);
+        }
+    };
+
+    // ... rest of component logic ...
 
     // Calculate style for overlay based on bounding box
     const getOverlayStyle = (bbox: number[]) => {
@@ -122,27 +170,40 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                             </div>
                         )}
 
-                        {/* Image Render (Used for both Images and PDF-as-Image) */}
-                        <img
-                            src={displayUrl}
-                            alt="Drawing"
-                            className="max-w-none shadow-lg block h-auto"
-                            style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
-                            onLoad={() => setIsLoading(false)}
-                            onError={() => {
-                                setIsLoading(false);
-                                if (fileType === 'application/pdf') {
-                                    setError('PDF Preview (PNG) not found. Please re-upload the file.');
-                                } else {
-                                    setError('Failed to load image.');
-                                }
-                            }}
-                        />
+                        {/* Render Mode: Client-Side PDF (Canvas) OR Server-Side (Image) */}
+                        {isPdfMode ? (
+                            <canvas
+                                ref={canvasRef}
+                                className="shadow-lg block"
+                            />
+                        ) : (
+                            <img
+                                src={displayUrl}
+                                alt="Drawing"
+                                className="max-w-none shadow-lg block h-auto"
+                                style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
+                                onLoad={() => setIsLoading(false)}
+                                onError={() => {
+                                    setIsLoading(false);
+                                    if (fileType === 'application/pdf') {
+                                        // If PNG fails, try force switching to PDF mode (Client Side)
+                                        console.warn("PNG missing, switching to Client-Side PDF render");
+                                        setIsPdfMode(true);
+                                        // Trigger re-render effect?
+                                    } else {
+                                        setError('Failed to load image.');
+                                    }
+                                }}
+                            />
+                        )}
 
-                        {/* Overlay Layer */}
+                        {/* Overlay Layer - adapting to mode */}
                         <div
                             className="absolute inset-0 pointer-events-none"
-                            style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: '100%', height: '100%' }}
+                            style={isPdfMode
+                                ? { width: '100%', height: '100%' } // Canvas grows physically, overlay follows
+                                : { transform: `scale(${scale})`, transformOrigin: 'top left', width: '100%', height: '100%' } // Image uses CSS zoom
+                            }
                         >
                             {pageElements.map((el, idx) => {
                                 let className = "absolute border-2 transition-all duration-200 cursor-pointer pointer-events-auto group ";
