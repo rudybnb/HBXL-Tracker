@@ -71,15 +71,38 @@ export class DxfAgent {
                     }
                 }
 
-                // INSERT -> Blocks (Sockets, Lights)
+                // INTELLIGENT ELEMENT EXTRACTION
+                // Priority 1: Named Blocks (INSERT)
+                // Priority 2: Layer-based classification for geometry (Circles = Lights, etc)
+
+                let type = null;
+
                 if (entity.type === 'INSERT') {
-                    const blockName = entity.name;
-                    const type = this.classifyBlock(blockName);
-                    if (type) {
+                    type = this.classifyString(entity.name);
+                }
+
+                if (!type && entity.layer) {
+                    type = this.classifyString(entity.layer);
+                }
+
+                if (type) {
+                    // Locate it
+                    let x = 0, y = 0;
+                    if (entity.position) { x = entity.position.x; y = entity.position.y; }
+                    else if (entity.center) { x = entity.center.x; y = entity.center.y; } // Circle/Arc
+                    else if (entity.vertices && entity.vertices.length > 0) { x = entity.vertices[0].x; y = entity.vertices[0].y; }
+
+                    // Filter: Don't count every line. Only Blocks and "Significant" Geometry (Circles)
+                    // If it's a Block (INSERT), always count.
+                    // If it's Layer-based, only count CIRCLES (Lights) or TEXT (Labels). 
+                    // Ignoring lines prevents "1 Square Socket = 4 Lines = 4 Sockets".
+                    const isSignificant = entity.type === 'INSERT' || entity.type === 'CIRCLE';
+
+                    if (isSignificant && (x || y)) {
                         elements.push({
                             type: type,
-                            name: blockName,
-                            bbox: [entity.position.x - 50, entity.position.y - 50, entity.position.x + 50, entity.position.y + 50],
+                            name: entity.name || entity.layer,
+                            bbox: [x - 50, y - 50, x + 50, y + 50],
                             layer: entity.layer
                         });
                     }
@@ -97,14 +120,21 @@ export class DxfAgent {
             (lower.includes('room') || lower.includes('bed') || lower.includes('kitchen') || lower.includes('lounge') || lower.includes('bath'));
     }
 
-    private classifyBlock(name: string): string | null {
-        const lower = name.toLowerCase();
-        if (lower.includes('socket')) return 'socket';
-        if (lower.includes('light') || lower.includes('lamp') || lower.includes('spot')) return 'light';
-        if (lower.includes('switch')) return 'switch';
-        if (lower.includes('door')) return 'door';
-        if (lower.includes('window')) return 'window';
-        return null; // Unknown block
+    private classifyString(str: string): string | null {
+        if (!str) return null;
+        const lower = str.toLowerCase();
+        // Electrical
+        if (lower.includes('socket') || lower.includes('power') || lower.includes('pwr') || lower.includes('dss') || lower.includes('sso')) return 'socket';
+        if (lower.includes('light') || lower.includes('lamp') || lower.includes('spot') || lower.includes('ceiling') || lower.includes('lighting')) return 'light';
+        if (lower.includes('switch') || lower.includes('sw')) return 'switch';
+        if (lower.includes('data') || lower.includes('rj45') || lower.includes('comms')) return 'data';
+        if (lower.includes('smoke') || lower.includes('det') || lower.includes('fire') || lower.includes('sd')) return 'fire_alarm';
+
+        // Structural
+        if (lower.includes('door') && !lower.includes('outdoor')) return 'door';
+        if (lower.includes('window') || lower.includes('glazing')) return 'window';
+
+        return null;
     }
 
     /**
