@@ -138,6 +138,10 @@ export class DxfAgent {
                 else if (entity.type === 'INSERT') { // Block
                     updateBounds(entity.position.x, entity.position.y);
                 }
+                else if (entity.type === 'ARC') {
+                    updateBounds(entity.center.x - entity.radius, entity.center.y - entity.radius);
+                    updateBounds(entity.center.x + entity.radius, entity.center.y + entity.radius);
+                }
                 else if (entity.type === '3DFACE' || entity.type === 'SOLID') {
                     if (entity.vertices) {
                         entity.vertices.forEach((v: any) => updateBounds(v.x, v.y));
@@ -186,6 +190,37 @@ export class DxfAgent {
                     const cx = entity.center.x;
                     const cy = maxY - (entity.center.y - minY);
                     svgContent += `<circle cx="${cx}" cy="${cy}" r="${entity.radius}" fill="none" stroke="yellow" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                }
+                else if (entity.type === 'ARC') {
+                    const r = entity.radius;
+                    const startAngle = entity.startAngle * (Math.PI / 180);
+                    const endAngle = entity.endAngle * (Math.PI / 180);
+
+                    // Calculate start and end points in standard Cartesian
+                    const startX = entity.center.x + r * Math.cos(startAngle);
+                    const startY = entity.center.y + r * Math.sin(startAngle);
+                    const endX = entity.center.x + r * Math.cos(endAngle);
+                    const endY = entity.center.y + r * Math.sin(endAngle);
+
+                    // Transform to SVG coords (Flip Y)
+                    const x1 = startX;
+                    const y1 = maxY - (startY - minY);
+                    const x2 = endX;
+                    const y2 = maxY - (endY - minY);
+
+                    // Large Arc Flag
+                    let diff = entity.endAngle - entity.startAngle;
+                    if (diff < 0) diff += 360;
+                    const largeArc = diff > 180 ? 1 : 0;
+
+                    // Sweep Flag: 
+                    // Cartesian CCW is standard for DXF.
+                    // In SVG (Y-down), CCW appears CW. But we flipped Y manually with `maxY - ...`
+                    // So we are working in a "flipped Y" visual space.
+                    // Usually 0 works for standard mathematical arc projection here.
+                    const sweep = 0;
+
+                    svgContent += `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} ${sweep} ${x2} ${y2}" fill="none" stroke="orange" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
                 }
                 else if (entity.type === 'TEXT' || entity.type === 'MTEXT') {
                     const x = entity.position.x;
