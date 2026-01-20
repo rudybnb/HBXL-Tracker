@@ -1,6 +1,7 @@
 import { createCanvas } from 'canvas';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 console.log("1. Starting Debug...");
 
@@ -18,8 +19,14 @@ try {
         try {
             console.log("3. Importing PDFJS...");
             const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-            // @ts-ignore
-            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+            const workerPath = path.join(process.cwd(), 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs');
+            console.log(`   - Setting Worker Src: ${workerPath}`);
+
+            // Handle Windows paths by converting to file:// URL
+            pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+            console.log(`   - Worker URL: ${pdfjsLib.GlobalWorkerOptions.workerSrc}`);
+
             console.log("   - Import successful.");
 
             console.log("4. Loading Document...");
@@ -38,8 +45,13 @@ startxref
 
             const data = new TextEncoder().encode(minimalPdf);
 
-            const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
-            console.log(`   - Font Path: ${standardFontDataUrl}`);
+            // PDFJS requires forward slashes for URLs, even on Windows
+            let standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+            standardFontDataUrl = standardFontDataUrl.split(path.sep).join('/');
+            if (!standardFontDataUrl.endsWith('/')) {
+                standardFontDataUrl += '/';
+            }
+            console.log(`   - Font Path (Normalised): ${standardFontDataUrl}`);
 
             const task = pdfjsLib.getDocument({
                 data,

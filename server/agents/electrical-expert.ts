@@ -7,6 +7,7 @@
 import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 
 // Lazy initialization to handle missing API key gracefully
 let openai: OpenAI | null = null;
@@ -113,15 +114,18 @@ export async function extractElectrical(imagePath: string): Promise<ElectricalEx
                 const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
                 const { createCanvas } = await import('canvas');
 
+                // Enable Worker with File URL
+                const workerPath = path.join(process.cwd(), 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs');
                 // @ts-ignore
-                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
 
                 const fileBuffer = fs.readFileSync(absolutePath);
 
-                // standardFontDataUrl MUST have a trailing slash
+                // standardFontDataUrl with forward slashes
                 let standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
-                if (!standardFontDataUrl.endsWith(path.sep)) {
-                    standardFontDataUrl += path.sep;
+                standardFontDataUrl = standardFontDataUrl.split(path.sep).join('/');
+                if (!standardFontDataUrl.endsWith('/')) {
+                    standardFontDataUrl += '/';
                 }
 
                 const loadingTask = pdfjsLib.getDocument({

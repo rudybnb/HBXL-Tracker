@@ -8,6 +8,7 @@
 import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 
 // Lazy initialization to handle missing API key gracefully
 let openai: OpenAI | null = null;
@@ -184,18 +185,19 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
                 const { createCanvas } = await import('canvas');
 
-                // Disable Worker logic for Node to prevent external script loading issues
+                // Enable Worker with File URL
+                const workerPath = path.join(process.cwd(), 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs');
                 // @ts-ignore
-                pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+                pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
 
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const data = new Uint8Array(fileBuffer);
 
                 // Fix "Standard Font" loading error in Node
-                // standardFontDataUrl MUST have a trailing slash, which path.join might remove
                 let standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
-                if (!standardFontDataUrl.endsWith(path.sep)) {
-                    standardFontDataUrl += path.sep;
+                standardFontDataUrl = standardFontDataUrl.split(path.sep).join('/');
+                if (!standardFontDataUrl.endsWith('/')) {
+                    standardFontDataUrl += '/';
                 }
 
                 const loadingTask = pdfjsLib.getDocument({
