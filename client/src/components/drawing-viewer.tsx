@@ -8,7 +8,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 // Set worker source - assuming standard Vite setup
 // @ts-ignore
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@5.4.530/build/pdf.worker.min.js`;
 
 interface BoundingBox {
     ymin: number;
