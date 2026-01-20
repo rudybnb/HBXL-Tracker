@@ -45,10 +45,10 @@ const ROOM_PROMPT = `You are a ROOM RECOGNITION EXPERT AGENT.
 Your SOLE Purpose:
 Identify every Room/Space in the drawing and define its EXACT PERIMETER BOUNDARY.
 
-STRATEGY:
-1. READ TEXT: Find all room labels (e.g. "Living Room", "Kitchen", "Bedroom", "Hall", "Store").
-2. TRACE WALLS: For each label, extend a bounding box outwards until it hits the enclosing WALLS.
-3. IGNORE CLUTTER: Do not stop at furniture or internal lines. Only STOP at Structural Walls.
+TASK:
+- Identify all rooms based on their text labels (e.g. "Living Room", "Kitchen", "Bed 1").
+- Create a bounding box that covers the ENTIRE room area, up to the surrounding walls.
+- Include the walls in the bounding box if possible.
 
 COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES (0-1000).
