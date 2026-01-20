@@ -94,7 +94,14 @@ export async function extractRooms(imagePath: string): Promise<RoomExtractionRes
                 pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
                 const fileBuffer = fs.readFileSync(absolutePath);
-                const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer), verbosity: 0 });
+
+                const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+
+                const loadingTask = pdfjsLib.getDocument({
+                    data: new Uint8Array(fileBuffer),
+                    verbosity: 0,
+                    standardFontDataUrl
+                });
                 const doc = await loadingTask.promise;
 
                 // Process Page 1 ONLY for Room Map (Multi-page room mapping is complex, starting with p1)

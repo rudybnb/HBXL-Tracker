@@ -191,10 +191,14 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const data = new Uint8Array(fileBuffer);
 
+                // Fix "Standard Font" loading error in Node
+                const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+
                 const loadingTask = pdfjsLib.getDocument({
                     data,
                     disableFontFace: false, // Let fonts load
-                    verbosity: 0
+                    verbosity: 0,
+                    standardFontDataUrl
                 });
 
                 const doc = await loadingTask.promise;
@@ -240,7 +244,11 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
             } catch (err: any) {
                 console.error("❌ PDFJS Conversion Error:", err);
-                return { success: false, error: "PDF Error: " + err.message, rooms: [], instructions: [], detailedElements: [], elements: [], rawResponse: '', pageCount: 0 };
+                return {
+                    success: false,
+                    error: `PDF Error: ${err.message}`,
+                    rooms: [], instructions: [], detailedElements: [], elements: [], rawResponse: '', pageCount: 0
+                };
             }
         } else {
             // Regular image file (Single Page)

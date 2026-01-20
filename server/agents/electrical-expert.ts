@@ -117,7 +117,14 @@ export async function extractElectrical(imagePath: string): Promise<ElectricalEx
                 pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 
                 const fileBuffer = fs.readFileSync(absolutePath);
-                const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer), verbosity: 0 });
+
+                const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+
+                const loadingTask = pdfjsLib.getDocument({
+                    data: new Uint8Array(fileBuffer),
+                    verbosity: 0,
+                    standardFontDataUrl
+                });
                 const doc = await loadingTask.promise;
 
                 // Process Page 1 ONLY for Electrical Mapping (Simplification)
