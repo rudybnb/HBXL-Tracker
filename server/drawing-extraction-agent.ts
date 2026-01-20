@@ -217,6 +217,10 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     const canvas = createCanvas(viewport.width, viewport.height);
                     const context = canvas.getContext('2d');
 
+                    // FILL WHITE BACKGROUND (Crucial for Transparent PDFs)
+                    context.fillStyle = 'white';
+                    context.fillRect(0, 0, viewport.width, viewport.height);
+
                     await page.render({
                         canvasContext: context as any,
                         viewport: viewport
