@@ -172,6 +172,14 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             console.log(`📄 PDF detected. Using pdfjs-dist (Node Environment) for conversion...`);
 
             try {
+                // Polyfill DOMMatrix BEFORE import (Critical for Node.js PDFJS)
+                if (!global.DOMMatrix) {
+                    // @ts-ignore
+                    global.DOMMatrix = class DOMMatrix {
+                        constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
+                    }
+                }
+
                 // Use Standard Import for Node Environment
                 const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
                 const { createCanvas } = await import('canvas');
@@ -179,14 +187,6 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 // Disable Worker logic for Node to prevent external script loading issues
                 // @ts-ignore
                 pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-                // Polyfill DOMMatrix if needed
-                if (!global.DOMMatrix) {
-                    // @ts-ignore
-                    global.DOMMatrix = class DOMMatrix {
-                        constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
-                    }
-                }
 
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const data = new Uint8Array(fileBuffer);

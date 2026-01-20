@@ -104,16 +104,17 @@ export async function extractElectrical(imagePath: string): Promise<ElectricalEx
         // Handle PDF files (Convert to JPEG for AI)
         if (ext === '.pdf') {
             try {
+                // Polyfill DOMMatrix BEFORE import
+                if (!global.DOMMatrix) {
+                    // @ts-ignore
+                    global.DOMMatrix = class DOMMatrix { constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; } }
+                }
+
                 const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
                 const { createCanvas } = await import('canvas');
 
                 // @ts-ignore
                 pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-                if (!global.DOMMatrix) {
-                    // @ts-ignore
-                    global.DOMMatrix = class DOMMatrix { constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; } }
-                }
 
                 const fileBuffer = fs.readFileSync(absolutePath);
                 const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer), verbosity: 0 });
