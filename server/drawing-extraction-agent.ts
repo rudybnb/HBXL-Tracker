@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
+import { DOMMatrix } from './dom-matrix-polyfill';
 
 // Lazy initialization to handle missing API key gracefully
 let openai: OpenAI | null = null;
@@ -173,12 +174,10 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
             console.log(`📄 PDF detected. Using pdfjs-dist (Node Environment) for conversion...`);
 
             try {
-                // Polyfill DOMMatrix BEFORE import (Critical for Node.js PDFJS)
+                // Polyfill DOMMatrix with Robust Implementation
                 if (!global.DOMMatrix) {
                     // @ts-ignore
-                    global.DOMMatrix = class DOMMatrix {
-                        constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
-                    }
+                    global.DOMMatrix = DOMMatrix;
                 }
 
                 // Use Standard Import for Node Environment

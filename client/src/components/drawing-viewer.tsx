@@ -7,6 +7,8 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure Worker - Explicit Version to match package.json
 // @ts-ignore
+// Configure Worker - Explicit Version to match package.json
+// @ts-ignore
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface DrawingViewerProps {

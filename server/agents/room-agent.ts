@@ -8,6 +8,7 @@ import OpenAI from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
+import { DOMMatrix } from '../dom-matrix-polyfill';
 
 // Lazy initialization to handle missing API key gracefully
 let openai: OpenAI | null = null;
@@ -82,10 +83,10 @@ export async function extractRooms(imagePath: string): Promise<RoomExtractionRes
         // Handle PDF files (Convert to JPEG for AI)
         if (ext === '.pdf') {
             try {
-                // Polyfill DOMMatrix BEFORE import
+                // Polyfill DOMMatrix
                 if (!global.DOMMatrix) {
                     // @ts-ignore
-                    global.DOMMatrix = class DOMMatrix { constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; } }
+                    global.DOMMatrix = DOMMatrix;
                 }
 
                 const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
