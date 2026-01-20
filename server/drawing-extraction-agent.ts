@@ -192,7 +192,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
 
                 const loadingTask = pdfjsLib.getDocument({
                     data,
-                    disableFontFace: true,
+                    // Enable fonts to ensure text/symbols render
+                    // disableFontFace: true, 
                     verbosity: 0
                 });
 
@@ -217,8 +218,8 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                     const canvas = createCanvas(viewport.width, viewport.height);
                     const context = canvas.getContext('2d');
 
-                    // FILL WHITE BACKGROUND (Crucial for Transparent PDFs)
-                    context.fillStyle = 'white';
+                    // FILL GRAY BACKGROUND to handle both White and Black lines
+                    context.fillStyle = '#F0F0F0';
                     context.fillRect(0, 0, viewport.width, viewport.height);
 
                     await page.render({
