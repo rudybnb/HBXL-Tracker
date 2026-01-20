@@ -560,43 +560,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
         console.log(`📁 File path: ${filePath}`);
 
-        // Run Mixture of Experts (Structure + Electrical)
+        // Run AGENT SWARM (Room + Structure + Electrical)
         Promise.all([
-          import('./drawing-extraction-agent'),
+          import('./agents/room-agent'),
+          import('./drawing-extraction-agent'), // Structure Agent
           import('./agents/electrical-expert')
-        ]).then(async ([structureAgent, electricalAgent]) => {
+        ]).then(async ([roomAgent, structureAgent, electricalAgent]) => {
           try {
-            console.log("🚀 Starting Mixture of Experts Extraction...");
+            console.log("🚀 Starting Agent Swarm Extraction (Room + Structure + Electrical)...");
 
-            // Run Agents in Parallel
-            const [structureResult, electricalResult] = await Promise.all([
+            // Run All Agents in Parallel
+            const [roomResult, structureResult, electricalResult] = await Promise.all([
+              roomAgent.extractRooms(filePath),
               structureAgent.extractFromImage(filePath),
               electricalAgent.extractElectrical(filePath)
             ]);
 
             console.log("✅ Agents finished.");
+            console.log(`   - Rooms: ${roomResult.success ? 'Success (' + roomResult.rooms.length + ' rooms)' : 'Failed'}`);
             console.log(`   - Structure: ${structureResult.success ? 'Success' : 'Failed'}`);
             console.log(`   - Electrical: ${electricalResult.success ? 'Success' : 'Failed'}`);
 
-            const success = structureResult.success || electricalResult.success;
+            const success = roomResult.success || structureResult.success || electricalResult.success;
 
             if (success) {
-              // 1. Update file status
               await db.update(jobFiles)
                 .set({ extractionStatus: 'completed' })
                 .where(eq(jobFiles.id, jobFile.id));
 
-              // Helper to find which room an element belongs to
+              // Master Map: Room Bounding Boxes
+              const masterRooms = roomResult.rooms || [];
+
+              // Helper: Point in Rect
               const findRoomForElement = (bbox: number[]) => {
-                if (!structureResult.rooms) return "Unassigned";
+                if (masterRooms.length === 0) return "Unassigned";
                 const [ex, ey, ex2, ey2] = bbox;
                 const cx = (ex + ex2) / 2;
                 const cy = (ey + ey2) / 2;
 
-                for (const room of structureResult.rooms) {
+                for (const room of masterRooms) {
                   if (!room.bbox) continue;
                   const [rx, ry, rx2, ry2] = room.bbox;
-                  // Simple point-in-rect check
                   if (cx >= rx && cx <= rx2 && cy >= ry && cy <= ry2) {
                     return room.name;
                   }
@@ -604,24 +608,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 return "Unassigned";
               };
 
-              // 2. Save Rooms (from Structure Agent)
-              if (structureResult.rooms) {
-                console.log(`🏠 Identified ${structureResult.rooms.length} rooms`);
-                for (const room of structureResult.rooms) {
-                  await db.insert(extractedElements).values({
-                    jobId: req.params.id,
-                    fileId: jobFile.id,
-                    elementType: 'room',
-                    description: room.name,
-                    dimensions: JSON.stringify(room.bbox),
-                    quantity: "1",
-                    unit: "nr", rate: "0", total: "0",
-                    roomName: room.name
-                  });
-                }
+              // 1. Save Rooms (from Room Agent)
+              for (const room of masterRooms) {
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: 'room',
+                  description: room.name,
+                  dimensions: JSON.stringify(room.bbox),
+                  quantity: "1", unit: "nr", rate: "0", total: "0",
+                  roomName: room.name
+                });
               }
 
-              // 3. Save Structural Elements (Windows/Doors from Structure Agent)
+              // 2. Save Structural Elements (from Structure Agent) - Assign to Room Agent's Rooms
               if (structureResult.detailedElements) {
                 for (const el of structureResult.detailedElements) {
                   await db.insert(extractedElements).values({
@@ -631,16 +631,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     description: el.name || el.type || 'Unknown Structure',
                     dimensions: JSON.stringify(el.bbox),
                     quantity: "1", unit: "nr", rate: "0", total: "0",
-                    roomName: el.room || findRoomForElement(el.bbox)
+                    roomName: findRoomForElement(el.bbox) // Assign spatial location
                   });
                 }
               }
 
-              // 4. Save Electrical Elements (from Electrical Expert)
+              // 3. Save Electrical Elements (from Electrical Agent) - Assign to Room Agent's Rooms
               if (electricalResult.success && electricalResult.elements) {
-                console.log(`⚡ Saving ${electricalResult.elements.length} electrical symbols...`);
                 for (const el of electricalResult.elements) {
-                  const assignedRoom = findRoomForElement(el.bbox);
                   await db.insert(extractedElements).values({
                     jobId: req.params.id,
                     fileId: jobFile.id,
@@ -648,22 +646,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     description: el.name || el.type || 'Unknown Electrical',
                     dimensions: JSON.stringify(el.bbox),
                     quantity: "1", unit: "nr", rate: "0", total: "0",
-                    roomName: assignedRoom
+                    roomName: findRoomForElement(el.bbox) // Assign spatial location
                   });
                 }
               }
-              console.log("💾 All extraction data saved.");
+              console.log("💾 Swarm extraction data saved.");
             } else {
-              throw new Error("Both agents failed to extract data.");
+              throw new Error("All agents failed.");
             }
 
           } catch (err) {
             console.error("❌ background extraction failed:", err);
             await db.update(jobFiles)
-              .set({
-                extractionStatus: 'failed',
-                extractionError: String(err)
-              })
+              .set({ extractionStatus: 'failed', extractionError: String(err) })
               .where(eq(jobFiles.id, jobFile.id));
           }
         });

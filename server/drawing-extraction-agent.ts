@@ -98,12 +98,11 @@ export interface ExtractionResult {
 }
 
 
-const EXTRACTION_PROMPT = `You are a CONSTRUCTION DRAWING INTELLIGENCE SYSTEM.
+const EXTRACTION_PROMPT = `You are a STRUCTURAL ELEMENT EXPERT AGENT.
 
-Your task:
-1. Parse a vector-based architectural drawing.
-2. Identify ROOMS (boundaries + labels).
-3. Identify STRUCTURAL ELEMENTS (Doors, Windows, Sanitary).
+Your SOLE Purpose:
+Identify FIXED STRUCTURAL ELEMENTS (Doors, Windows, Sanitary) with high precision.
+You do NOT care about room names, labels, or electrical symbols.
 
 CRITICAL - COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES based on a 0-1000 scale.
@@ -112,12 +111,7 @@ CRITICAL - COORDINATE SYSTEM:
 - IMPORANT: 0-1000 scale applies to the FULL IMAGE CANVAS, including any white margins or borders.
 - Do NOT crop the image mentally. (0,0) is the top-left pixel of the file.
 
-TASK 1: ROOM RECOGNITION
-- Identify rooms by boundaries and labels.
-- Box must cover the entire room area.
-- [xmin, ymin, xmax, ymax] (0-1000 scale)
-
-TASK 2: STRUCTURAL ELEMENT EXTRACTION
+TASK: STRUCTURAL ELEMENT EXTRACTION
 Identify boundaries and fixed building elements.
 
 SYMBOLS TO FIND:
@@ -131,19 +125,17 @@ SYMBOLS TO FIND:
 
 3. SANITARYWARE ("sanitary"):
    - Toilets (WC), Sinks (Basins), Showers, Baths.
-   - Identify these to help define room types (e.g. Bathroom).
+   - Fixed joinery.
 
 DO NOT EXTRACT:
-- Do NOT extract Lights, Sockets, or Switches. (Another agent handles these).
-- Do NOT extract Furniture (Sofas, Tables).
+- Do NOT extract Room Names. (Another agent handles this).
+- Do NOT extract Lights, Sockets, or Switches. (Electrical agent handles these).
 
 OUTPUT FORMAT (JSON ONLY):
 {
-  "success": true,
-  "rooms": [ { "name": "Living Room", "bbox": [...] } ],
   "detailedElements": [
-      { "type": "window", "name": "Standard Window", "bbox": [...], "room": "Living Room" },
-      { "type": "sanitary", "name": "WC", "bbox": [...], "room": "Bathroom" }
+      { "type": "window", "name": "Standard Window", "bbox": [10, 10, 50, 20] },
+      { "type": "sanitary", "name": "WC", "bbox": [500, 500, 550, 550] }
   ]
 }
 `;
