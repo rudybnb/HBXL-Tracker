@@ -95,7 +95,11 @@ export async function extractRooms(imagePath: string): Promise<RoomExtractionRes
 
                 const fileBuffer = fs.readFileSync(absolutePath);
 
-                const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+                // standardFontDataUrl MUST have a trailing slash
+                let standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+                if (!standardFontDataUrl.endsWith(path.sep)) {
+                    standardFontDataUrl += path.sep;
+                }
 
                 const loadingTask = pdfjsLib.getDocument({
                     data: new Uint8Array(fileBuffer),

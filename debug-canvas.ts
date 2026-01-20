@@ -1,26 +1,28 @@
-
 import { createCanvas } from 'canvas';
 import fs from 'fs';
+import path from 'path';
 
-console.log("1. Importing Canvas...");
+console.log("1. Starting Debug...");
+
 try {
-    const canvas = createCanvas(200, 200);
-    console.log("2. Canvas created.");
-
-    console.log("3. Importing PDFJS (Standard)...");
-
-    // Timeout race
-    const timeout = new Promise((_, reject) => setTimeout(() => reject("Timeout"), 5000));
+    // 1. Polyfill DOMMatrix (Exact copy from Agent)
+    if (!global.DOMMatrix) {
+        // @ts-ignore
+        global.DOMMatrix = class DOMMatrix {
+            constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
+        }
+    }
+    console.log("2. DOMMatrix Polyfilled.");
 
     const testImport = async () => {
         try {
-            console.log("   - Attempting import...");
-            const pdfjsLib = await import('pdfjs-dist/build/pdf.mjs');
-            console.log("   - Import sucessful.");
+            console.log("3. Importing PDFJS...");
+            const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+            // @ts-ignore
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+            console.log("   - Import successful.");
 
             console.log("4. Loading Document...");
-            // Create a dummy PDF (minimal valid PDF)
-            // This is a minimal valid PDF 1.0
             const minimalPdf = `%PDF-1.0
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 3 3]/Parent 2 0 R/Resources<<>>>>endobj
 xref
@@ -35,17 +37,36 @@ startxref
 %%EOF`;
 
             const data = new TextEncoder().encode(minimalPdf);
-            const task = pdfjsLib.getDocument({ data });
+
+            const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+            console.log(`   - Font Path: ${standardFontDataUrl}`);
+
+            const task = pdfjsLib.getDocument({
+                data,
+                verbosity: 0,
+                standardFontDataUrl
+            });
+
             const doc = await task.promise;
             console.log(`   - Document Loaded! Pages: ${doc.numPages}`);
-            console.log("✅ PDFJS Working!");
+
+            const page = await doc.getPage(1);
+            const viewport = page.getViewport({ scale: 1.0 });
+            const canvas = createCanvas(viewport.width, viewport.height);
+            const context = canvas.getContext('2d');
+
+            await page.render({ canvasContext: context as any, viewport }).promise;
+            console.log("   - Rendered to Canvas!");
+
+            console.log("✅ SUCCESS: PDF Processing is Working locally.");
+
         } catch (err) {
             console.error("❌ PDFJS Error:", err);
         }
     };
 
-    Promise.race([testImport(), timeout]).catch(e => console.error("❌ TIMEOUT:", e));
+    testImport();
 
 } catch (e) {
-    console.error("❌ Canvas Failed:", e);
+    console.error("❌ Fatal Error:", e);
 }

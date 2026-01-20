@@ -192,7 +192,11 @@ export async function extractFromImage(imagePath: string): Promise<ExtractionRes
                 const data = new Uint8Array(fileBuffer);
 
                 // Fix "Standard Font" loading error in Node
-                const standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+                // standardFontDataUrl MUST have a trailing slash, which path.join might remove
+                let standardFontDataUrl = path.join(process.cwd(), 'node_modules/pdfjs-dist/standard_fonts/');
+                if (!standardFontDataUrl.endsWith(path.sep)) {
+                    standardFontDataUrl += path.sep;
+                }
 
                 const loadingTask = pdfjsLib.getDocument({
                     data,
