@@ -24,15 +24,25 @@ export class DxfAgent {
     }
 
     public async process(dxfPath: string, outputDir: string): Promise<DxfExtractionResult> {
+        const svgFilename = path.basename(dxfPath) + '.svg';
+        const svgPath = path.join(outputDir, svgFilename);
+
         try {
+            // Attempt to read as UTF-8 (Standard ASCII DXF)
             const dxfContent = fs.readFileSync(dxfPath, 'utf-8');
+
+            // Check for Binary DXF header (AC10...) without newline? 
+            // ASCII DXF usually starts with 0\nSECTION... or 999\n...
+            // If it looks binary, throw immediately to avoid freeze
+            if (dxfContent.indexOf('SECTION') === -1) {
+                throw new Error("File does not appear to be a valid ASCII DXF (Binary DXF not supported)");
+            }
+
             const dxfData = this.parser.parseSync(dxfContent);
 
-            if (!dxfData) throw new Error("Failed to parse DXF content");
+            if (!dxfData) throw new Error("Parser returned empty data");
 
             // 1. Generate SVG for Visualization
-            const svgFilename = path.basename(dxfPath) + '.svg';
-            const svgPath = path.join(outputDir, svgFilename);
             this.generateSVG(dxfData, svgPath);
 
             // 2. Extract Data (Rooms & Elements)
@@ -40,15 +50,40 @@ export class DxfAgent {
 
             return {
                 success: true,
-                svgPath: svgFilename, // Return relative filename
+                svgPath: svgFilename,
                 rooms: extracted.rooms,
                 detailedElements: extracted.elements
             };
 
         } catch (err: any) {
             console.error("DXF Processing Error:", err);
-            return { success: false, rooms: [], detailedElements: [], error: err.message };
+
+            // Generate ERROR SVG so the user sees what went wrong
+            this.generateErrorSVG(err.message || "Unknown Error", svgPath);
+
+            // Return success=true (so DB updates to the SVG) but with empty data
+            return {
+                success: true, // true so the UI loads the SVG
+                svgPath: svgFilename,
+                rooms: [],
+                detailedElements: [],
+                error: err.message
+            };
         }
+    }
+
+    private generateErrorSVG(errorMessage: string, outputPath: string) {
+        const cleanError = errorMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" style="background-color: #1a0000;">
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#ff4444" font-family="sans-serif" font-size="24">
+    DXF CONVERSION FAILED
+  </text>
+  <text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" fill="#aaaaaa" font-family="sans-serif" font-size="16">
+    ${cleanError}
+  </text>
+</svg>`;
+        fs.writeFileSync(outputPath, svgContent);
     }
 
     private extractEntities(dxf: any) {
