@@ -55,6 +55,12 @@ export class DxfAgent {
         const rooms: any[] = [];
         const elements: any[] = [];
 
+        // Debug: Log all text found to help diagnose missing rooms
+        const allText = dxf.entities
+            ?.filter((e: any) => e.type === 'TEXT' || e.type === 'MTEXT')
+            .map((e: any) => e.text || e.string) || [];
+        console.log("🔎 DXF RAW TEXT FOUND:", allText);
+
         if (dxf.entities) {
             for (const entity of dxf.entities) {
 
@@ -115,24 +121,37 @@ export class DxfAgent {
 
     private isRoomLabel(text: string): boolean {
         if (!text) return false;
-        const lower = text.toLowerCase();
-        return !lower.match(/rev|date|scale|drg|chk/) && // Exclude title block info
-            (lower.includes('room') || lower.includes('bed') || lower.includes('kitchen') || lower.includes('lounge') || lower.includes('bath'));
+        const lower = text.toLowerCase().trim();
+        // 1. Exclude common metadata
+        if (lower.match(/rev|date|scale|drg|chk|drawn|client|project|dwg|title|a1|a0|a3/)) return false;
+        // 2. Exclude short codes/numbers unless consistent (e.g. "D01") - hard to define.
+        if (lower.length < 3) return false;
+
+        // 3. Broader Inclusion List
+        const roomKeywords = [
+            'room', 'bed', 'kitchen', 'lounge', 'bath', 'ens', 'w.c', 'wc',
+            'hall', 'landing', 'garage', 'study', 'office', 'dining', 'living',
+            'utility', 'plant', 'store', 'cupboard', 'void', 'area', 'lobby',
+            'entrance', 'porch', 'balcony', 'terrace', 'gym', 'cinema'
+        ];
+
+        return roomKeywords.some(k => lower.includes(k));
     }
 
     private classifyString(str: string): string | null {
         if (!str) return null;
         const lower = str.toLowerCase();
-        // Electrical
-        if (lower.includes('socket') || lower.includes('power') || lower.includes('pwr') || lower.includes('dss') || lower.includes('sso')) return 'socket';
-        if (lower.includes('light') || lower.includes('lamp') || lower.includes('spot') || lower.includes('ceiling') || lower.includes('lighting')) return 'light';
-        if (lower.includes('switch') || lower.includes('sw')) return 'switch';
-        if (lower.includes('data') || lower.includes('rj45') || lower.includes('comms')) return 'data';
-        if (lower.includes('smoke') || lower.includes('det') || lower.includes('fire') || lower.includes('sd')) return 'fire_alarm';
 
-        // Structural
+        // Electrical Broadening
+        if (lower.match(/socket|power|pwr|dss|sso|sk|pow/)) return 'socket';
+        if (lower.match(/light|lamp|spot|ceiling|lig|lit|lum/)) return 'light';
+        if (lower.match(/switch|sw\b|sw_/)) return 'switch';
+        if (lower.match(/data|rj45|comms|tel|tv|av|hdmi/)) return 'data';
+        if (lower.match(/fire|smoke|det|sd|sounder/)) return 'fire_alarm';
+
+        // Structural Broadening
         if (lower.includes('door') && !lower.includes('outdoor')) return 'door';
-        if (lower.includes('window') || lower.includes('glazing')) return 'window';
+        if (lower.includes('window') || lower.includes('glaz')) return 'window';
 
         return null;
     }
