@@ -265,6 +265,16 @@ export class DxfAgent {
                         svgContent += `<polygon points="${points}" fill="none" stroke="cyan" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
                     }
                 }
+                else if (entity.type === 'INSERT') {
+                    // Render Blocks as a small generic symbol (Cross) to indicate presence
+                    const ix = entity.position.x;
+                    const iy = maxY - (entity.position.y - minY);
+                    const sz = 200; // Arbitrary size (mm usually) - roughly 20cm
+
+                    // Draw a Cross (X)
+                    svgContent += `<line x1="${ix - sz}" y1="${iy - sz}" x2="${ix + sz}" y2="${iy + sz}" stroke="magenta" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                    svgContent += `<line x1="${ix + sz}" y1="${iy - sz}" x2="${ix - sz}" y2="${iy + sz}" stroke="magenta" stroke-width="2" vector-effect="non-scaling-stroke" />\n`;
+                }
             });
         }
 
