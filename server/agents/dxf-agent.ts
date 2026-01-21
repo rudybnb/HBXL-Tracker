@@ -419,13 +419,14 @@ export class DxfAgent {
         const cvsWidth = Math.ceil(width * scale);
         const cvsHeight = Math.ceil(height * scale);
 
-        const canvas = createCanvas(cvsWidth, cvsHeight);
-        const ctx = canvas.getContext('2d');
+        const img = PImage.make(cvsWidth, cvsHeight);
+        const ctx = img.getContext('2d');
 
         // Background Black
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, cvsWidth, cvsHeight);
 
+        // PureImage might behave slightly differently with strokes
         ctx.strokeStyle = '#FFFFFF';
         ctx.lineWidth = 2;
 
@@ -454,7 +455,7 @@ export class DxfAgent {
             });
         }
 
-        const buffer = canvas.toBuffer('image/png');
-        fs.writeFileSync(outputPath, buffer);
+        const stream = fs.createWriteStream(outputPath);
+        await PImage.encodePNGToStream(img, stream);
     }
 }
