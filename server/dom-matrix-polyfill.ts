@@ -75,6 +75,31 @@ export class DOMMatrix {
         return m;
     }
 
+    multiply(other: DOMMatrix): DOMMatrix {
+        const m = new DOMMatrix();
+        m.a = this.a * other.a + this.c * other.b;
+        m.b = this.b * other.a + this.d * other.b;
+        m.c = this.a * other.c + this.c * other.d;
+        m.d = this.b * other.c + this.d * other.d;
+        m.e = this.a * other.e + this.c * other.f + this.e;
+        m.f = this.b * other.e + this.d * other.f + this.f;
+        return m;
+    }
+
+    transformPoint(point?: { x?: number, y?: number, z?: number, w?: number }): { x: number, y: number, z: number, w: number } {
+        const x = point?.x || 0;
+        const y = point?.y || 0;
+        // Transform (x, y)
+        // x' = ax + cy + e
+        // y' = bx + dy + f
+        return {
+            x: this.a * x + this.c * y + this.e,
+            y: this.b * x + this.d * y + this.f,
+            z: point?.z || 0,
+            w: point?.w || 1
+        };
+    }
+
     toString(): string {
         return `matrix(${this.a}, ${this.b}, ${this.c}, ${this.d}, ${this.e}, ${this.f})`;
     }
