@@ -539,8 +539,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      // Generate unique filename to avoid collisions
-      const uniqueFilename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(req.file.originalname)}`;
+      // Sanitize and Unique Filename
+      const sanitizedOriginalName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const uniqueFilename = `${Date.now()}-${sanitizedOriginalName}`;
+
       const filePath = path.join(uploadsDir, uniqueFilename);
 
       // Write file to disk
