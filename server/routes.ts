@@ -34,9 +34,13 @@ import { parseEnhancedCSV } from "./enhanced-csv-parser";
 import { roomMapper } from "./room-mapper";
 
 // Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), "uploads");
+// Ensure uploads directory exists - Use absolute path relative to this file
+const uploadsDir = path.resolve(__dirname, "../uploads");
+console.log(`📂 Server Uploads Directory: ${uploadsDir}`);
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
+  console.log(`📂 Created uploads directory at: ${uploadsDir}`);
 }
 
 const mt = multer({ storage: multer.memoryStorage() });
@@ -544,9 +548,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uniqueFilename = `${Date.now()}-${sanitizedOriginalName}`;
 
       const filePath = path.join(uploadsDir, uniqueFilename);
+      console.log(`💾 Writing file to: ${filePath}`);
 
       // Write file to disk
-      fs.writeFileSync(filePath, req.file.buffer);
+      try {
+        fs.writeFileSync(filePath, req.file.buffer);
+        console.log(`✅ File written successfully (${req.file.size} bytes)`);
+      } catch (writeErr) {
+        console.error(`❌ Failed to write file to storage:`, writeErr);
+        throw writeErr;
+      }
 
       const jobFile = await storage.createJobFile({
         jobId: req.params.id,

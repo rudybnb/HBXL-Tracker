@@ -278,7 +278,7 @@ export class DxfAgent {
             });
         }
 
-        const svgFile = `
+        const svgFile = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" style="background-color: #0b0f19;">
   <g transform="scale(1, 1)">
     ${svgContent}
