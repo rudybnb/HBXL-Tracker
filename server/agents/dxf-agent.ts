@@ -262,6 +262,11 @@ export class DxfAgent {
 
         // Pass 1: Calculate Bounds
         const updateBounds = (x: number, y: number) => {
+            // Filter out exact (0,0,0) IF we have other points. 
+            // Often blocks have an insertion point at 0,0 but geometry elsewhere.
+            // We'll collect all points first or just be naive. 
+            // Naive check: Ignore 0,0? No, that's risky.
+            // Better: update normally.
             if (x < minX) minX = x;
             if (y < minY) minY = y;
             if (x > maxX) maxX = x;
@@ -402,16 +407,19 @@ export class DxfAgent {
     ${svgContent}
   </g>
 </svg>`;
-
         fs.writeFileSync(outputPath, svgFile);
     }
 
     private async generatePNG(dxf: any, outputPath: string) {
+        // Calculate bounds AGAIN here to be safe and independent of generateSVG logic if needed
         const { minX, minY, maxX, maxY } = this.calculateBounds(dxf);
         const width = maxX - minX;
         const height = maxY - minY;
 
-        if (width <= 0 || height <= 0) return;
+        if (width <= 0 || height <= 0) {
+            console.error("❌ Visual Fallback Skipped: Invalid Bounds", width, height);
+            return;
+        }
 
         const maxDim = 2000;
         const scale = Math.min(maxDim / width, maxDim / height);
@@ -419,17 +427,20 @@ export class DxfAgent {
         const cvsWidth = Math.ceil(width * scale);
         const cvsHeight = Math.ceil(height * scale);
 
+        console.log(`🎨 Generating Visual Fallback PNG: ${cvsWidth}x${cvsHeight}`);
+
         const img = PImage.make(cvsWidth, cvsHeight);
         const ctx = img.getContext('2d');
 
-        // Background Black
-        ctx.fillStyle = '#000000';
+        // Background WHITE (Paper Style) - Better for Gemini Vision
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, cvsWidth, cvsHeight);
 
-        // PureImage might behave slightly differently with strokes
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 2;
+        // Lines BLACK and THICK
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
 
+        let drawn = 0;
         if (dxf.entities) {
             dxf.entities.forEach((entity: any) => {
                 const toCx = (x: number) => (x - minX) * scale;
@@ -440,6 +451,7 @@ export class DxfAgent {
                     ctx.moveTo(toCx(entity.vertices[0].x), toCy(entity.vertices[0].y));
                     ctx.lineTo(toCx(entity.vertices[1].x), toCy(entity.vertices[1].y));
                     ctx.stroke();
+                    drawn++;
                 } else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
                     if (entity.vertices && entity.vertices.length > 0) {
                         ctx.moveTo(toCx(entity.vertices[0].x), toCy(entity.vertices[0].y));
@@ -450,12 +462,15 @@ export class DxfAgent {
                             ctx.closePath();
                         }
                         ctx.stroke();
+                        drawn++;
                     }
                 }
             });
         }
+        console.log(`🎨 Drawn ${drawn} entities to PNG.`);
 
         const stream = fs.createWriteStream(outputPath);
         await PImage.encodePNGToStream(img, stream);
+        console.log(`✅ PNG Saved: ${outputPath}`);
     }
 }
