@@ -42,6 +42,16 @@ export class DxfAgent {
 
             if (!dxfData) throw new Error("Parser returned empty data");
 
+            // DEBUG LOGGING
+            console.log(`🔍 DXF Parsed: ${dxfData.entities ? dxfData.entities.length : 0} entities found.`);
+            if (dxfData.entities && dxfData.entities.length > 0) {
+                console.log(`🔍 First Entity:`, JSON.stringify(dxfData.entities[0], null, 2));
+                const distinctTypes = [...new Set(dxfData.entities.map((e: any) => e.type))];
+                console.log(`🔍 Entity Types Present:`, distinctTypes);
+            } else {
+                console.warn(`⚠️ DXF parsed successfully but contains 0 entities!`);
+            }
+
             // 1. Generate SVG for Visualization
             this.generateSVG(dxfData, svgPath);
 
