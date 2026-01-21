@@ -7,6 +7,8 @@
 import DxfParser from 'dxf-parser';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createCanvas } from 'canvas';
+import { extractRooms } from './room-agent';
 
 export interface DxfExtractionResult {
     success: boolean;
@@ -53,10 +55,59 @@ export class DxfAgent {
             }
 
             // 1. Generate SVG for Visualization
+            // 1. Generate SVG for Visualization
             this.generateSVG(dxfData, svgPath);
 
             // 2. Extract Data (Rooms & Elements)
             const extracted = this.extractEntities(dxfData);
+
+            // 3. Fallback: If no rooms found via text, use Visual AI
+            if (extracted.rooms.length === 0) {
+                console.log("⚠️ No rooms found via text extraction. Attempting Visual AI (Gemini)...");
+
+                try {
+                    // Generate PNG for AI
+                    const pngPath = path.join(outputDir, path.basename(dxfPath) + '.png');
+                    await this.generatePNG(dxfData, pngPath);
+
+                    // Call Room Agent
+                    const aiResult = await extractRooms(pngPath);
+
+                    if (aiResult.success && aiResult.rooms.length > 0) {
+                        console.log(`🤖 AI identified ${aiResult.rooms.length} rooms/zones.`);
+
+                        // Map 0-1000 coordinates back to DXF World Coordinates
+                        const { minX, minY, maxX, maxY } = this.calculateBounds(dxfData);
+                        const width = maxX - minX;
+                        const height = maxY - minY;
+
+                        const aiRooms = aiResult.rooms.map(r => {
+                            // Normalize [0-1000] -> [minX, maxX]
+                            // Y is usually flipped in images vs DXF
+                            // DXF World: Y Up. Image: Y Down.
+                            const x1 = minX + (r.bbox[0] / 1000) * width;
+                            const y1 = maxY - (r.bbox[1] / 1000) * height;
+                            const x2 = minX + (r.bbox[2] / 1000) * width;
+                            const y2 = maxY - (r.bbox[3] / 1000) * height;
+
+                            return {
+                                name: r.name,
+                                bbox: [
+                                    Math.min(x1, x2),
+                                    Math.min(y1, y2),
+                                    Math.max(x1, x2),
+                                    Math.max(y1, y2)
+                                ],
+                                layer: 'AI_DETECTED'
+                            };
+                        });
+
+                        extracted.rooms = aiRooms;
+                    }
+                } catch (aiErr) {
+                    console.error("❌ Visual Fallback Failed:", aiErr);
+                }
+            }
 
             return {
                 success: true,
@@ -353,5 +404,57 @@ export class DxfAgent {
 </svg>`;
 
         fs.writeFileSync(outputPath, svgFile);
+    }
+
+    private async generatePNG(dxf: any, outputPath: string) {
+        const { minX, minY, maxX, maxY } = this.calculateBounds(dxf);
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        if (width <= 0 || height <= 0) return;
+
+        const maxDim = 2000;
+        const scale = Math.min(maxDim / width, maxDim / height);
+
+        const cvsWidth = Math.ceil(width * scale);
+        const cvsHeight = Math.ceil(height * scale);
+
+        const canvas = createCanvas(cvsWidth, cvsHeight);
+        const ctx = canvas.getContext('2d');
+
+        // Background Black
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, cvsWidth, cvsHeight);
+
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+
+        if (dxf.entities) {
+            dxf.entities.forEach((entity: any) => {
+                const toCx = (x: number) => (x - minX) * scale;
+                const toCy = (y: number) => (maxY - y) * scale;
+
+                ctx.beginPath();
+                if (entity.type === 'LINE') {
+                    ctx.moveTo(toCx(entity.vertices[0].x), toCy(entity.vertices[0].y));
+                    ctx.lineTo(toCx(entity.vertices[1].x), toCy(entity.vertices[1].y));
+                    ctx.stroke();
+                } else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
+                    if (entity.vertices && entity.vertices.length > 0) {
+                        ctx.moveTo(toCx(entity.vertices[0].x), toCy(entity.vertices[0].y));
+                        for (let i = 1; i < entity.vertices.length; i++) {
+                            ctx.lineTo(toCx(entity.vertices[i].x), toCy(entity.vertices[i].y));
+                        }
+                        if (entity.shape || (entity.vertices[0].x === entity.vertices[entity.vertices.length - 1].x)) {
+                            ctx.closePath();
+                        }
+                        ctx.stroke();
+                    }
+                }
+            });
+        }
+
+        const buffer = canvas.toBuffer('image/png');
+        fs.writeFileSync(outputPath, buffer);
     }
 }
