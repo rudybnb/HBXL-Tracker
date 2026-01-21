@@ -45,23 +45,25 @@ export interface RoomExtractionResult {
 const ROOM_PROMPT = `You are a ROOM RECOGNITION EXPERT AGENT.
 
 Your SOLE Purpose:
-Identify every Room/Space in the drawing and define its EXACT PERIMETER BOUNDARY.
+Identify every Room, Space, or Zone in the drawing and define its APPROXIMATE BOUNDARY.
 
 TASK:
-- Identify all rooms based on their text labels (e.g. "Living Room", "Kitchen", "Bed 1").
-- Create a bounding box that covers the ENTIRE room area, up to the surrounding walls.
-- Include the walls in the bounding box if possible.
+- Identify all rooms based on text labels (e.g. "Living Room", "Bed 1", "Office", "Void") OR obvious functional zones (e.g. four large rectangles in a grid).
+- If text labels are missing, use generic names like "Room 1", "Room 2" based on position.
+- Create a bounding box that broadly covers the room area.
+- Be generous with the box - it's better to capture too much than too little.
 
-COORDINATE SYSTEM:
+CRITICAL COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES (0-1000).
-- 0,0 = Top Left of IMAGE CANVAS. 1000,1000 = Bottom Right of IMAGE CANVAS.
-- Include WHITE MARGINS in your scale. Do NOT crop.
+- [0,0] = Top Left of the IMAGE.
+- [1000,1000] = Bottom Right of the IMAGE.
+- Do NOT use typical CAD coordinates. Scale everything to 0-1000 relative to the image size.
 
 OUTPUT FORMAT (JSON ONLY):
 {
   "rooms": [
     { "name": "Living Room", "bbox": [100, 100, 500, 500] },
-    { "name": "Kitchen", "bbox": [600, 100, 900, 400] }
+    { "name": "Room 1", "bbox": [600, 100, 900, 400] }
   ]
 }
 `;
