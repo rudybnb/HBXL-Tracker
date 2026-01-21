@@ -248,6 +248,9 @@ export class DxfAgent {
         const height = maxY - minY;
 
         // Pass 2: Generate SVG Paths
+        // Force background rectangle to ensure white lines are visible
+        svgContent += `<rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="#0b0f19" />\n`;
+
         if (dxf.entities) {
             dxf.entities.forEach((entity: any) => {
                 // Invert Y for SVG (SVG y goes down, CAD y goes up)
@@ -333,7 +336,7 @@ export class DxfAgent {
         }
 
         const svgFile = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" style="background-color: #0b0f19;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}">
   <g transform="scale(1, 1)">
     ${svgContent}
   </g>
