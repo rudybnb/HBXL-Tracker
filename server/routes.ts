@@ -34,8 +34,9 @@ import { parseEnhancedCSV } from "./enhanced-csv-parser";
 import { roomMapper } from "./room-mapper";
 
 // Ensure uploads directory exists
-// Ensure uploads directory exists - Use absolute path relative to this file
-const uploadsDir = path.resolve(__dirname, "../uploads");
+// Ensure uploads directory exists
+// Revert to process.cwd() because __dirname is not available in ESM ("type": "module")
+const uploadsDir = path.resolve(process.cwd(), "uploads");
 console.log(`📂 Server Uploads Directory: ${uploadsDir}`);
 
 if (!fs.existsSync(uploadsDir)) {

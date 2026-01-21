@@ -9,8 +9,7 @@ export default defineConfig({
   schema: "./shared/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL.endsWith('sslmode=require')
-      ? process.env.DATABASE_URL
-      : `${process.env.DATABASE_URL}?sslmode=require`,
+    url: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
   },
 });
