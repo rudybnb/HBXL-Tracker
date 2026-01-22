@@ -30,6 +30,27 @@ export class IfcAgent {
 
             console.log(`🏢 IFC Model Loaded: ID ${modelID}`);
 
+            // 0. Pre-load Property Sets (Optimization)
+            const propertyMap = new Map<number, any[]>();
+            try {
+                const rels = this.ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYPROPERTIES);
+                for (let i = 0; i < rels.size(); i++) {
+                    const relID = rels.get(i);
+                    const rel = this.ifcApi.GetLine(modelID, relID);
+                    if (rel.RelatedObjects && Array.isArray(rel.RelatedObjects) && rel.RelatingPropertyDefinition) {
+                        const psetID = rel.RelatingPropertyDefinition.value;
+                        const pset = this.ifcApi.GetLine(modelID, psetID);
+                        for (const objRef of rel.RelatedObjects) {
+                            const objID = objRef.value;
+                            if (!propertyMap.has(objID)) propertyMap.set(objID, []);
+                            propertyMap.get(objID)?.push(pset);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn("Could not load properties:", e);
+            }
+
             // 1. Extract Rooms (IfcSpace)
             const rooms: any[] = [];
             const spaces = this.ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCSPACE);
@@ -80,7 +101,30 @@ export class IfcAgent {
                 for (let i = 0; i < ids.size(); i++) {
                     const id = ids.get(i);
                     const el = this.ifcApi.GetLine(modelID, id);
-                    const name = el.Name ? el.Name.value : (el.ObjectType ? el.ObjectType.value : t.label);
+                    let name = el.Name ? el.Name.value : (el.ObjectType ? el.ObjectType.value : t.label);
+
+                    // Extract Properties to Description
+                    const props = propertyMap.get(id) || [];
+                    let details: string[] = [];
+                    for (const pset of props) {
+                        if (pset.HasProperties && Array.isArray(pset.HasProperties)) {
+                            for (const pRef of pset.HasProperties) {
+                                try {
+                                    const prop = this.ifcApi.GetLine(modelID, pRef.value);
+                                    if (prop.Name && prop.NominalValue) {
+                                        const pName = prop.Name.value;
+                                        const pVal = prop.NominalValue.value;
+                                        // Filter for useful dimensions
+                                        if (["Width", "Height", "Length", "Area", "Volume", "Thickness"].includes(pName)) {
+                                            let val = typeof pVal === 'number' ? Number(pVal).toFixed(2) : pVal;
+                                            details.push(`${pName}: ${val}`);
+                                        }
+                                    }
+                                } catch (err) { }
+                            }
+                        }
+                    }
+                    if (details.length > 0) name += ` (${details.join(", ")})`;
 
                     elements.push({
                         type: t.label,
