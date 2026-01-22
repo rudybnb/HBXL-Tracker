@@ -17,7 +17,7 @@ export class IfcAgent {
         this.ifcApi = new WebIFC.IfcAPI();
         // Point to the WASM file location if needed, but often not needed for node.js in memory
         // Copied to local dir for reliability
-        this.ifcApi.SetWasmPath(path.join(process.cwd(), "server/agents/"));
+        // this.ifcApi.SetWasmPath(path.join(process.cwd(), "server/agents/"));
     }
 
     public async process(ifcPath: string): Promise<IfcExtractionResult> {
