@@ -17,9 +17,10 @@ interface DrawingViewerProps {
     smartElements?: any[];
     onElementClick?: (element: any) => void;
     fileId?: string;
+    onNavigateToElements?: () => void;
 }
 
-export default function DrawingViewer({ fileUrl, fileType, smartElements = [], onElementClick, fileId }: DrawingViewerProps) {
+export default function DrawingViewer({ fileUrl, fileType, smartElements = [], onElementClick, fileId, onNavigateToElements }: DrawingViewerProps) {
     const [scale, setScale] = useState(1.0);
     const [currentPage, setCurrentPage] = useState(1);
     const [isLoading, setIsLoading] = useState(true);
@@ -206,10 +207,14 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                             <div className="flex flex-col items-center justify-center w-full h-[500px] p-10 text-slate-400 border border-slate-700 rounded-lg bg-slate-800/50">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-4 text-emerald-500"><path d="M3 21h18" /><path d="M5 21V7l8-4 8 4v14" /><path d="M13 11V3" /></svg>
                                 <h3 className="text-xl font-semibold text-slate-200">BIM Model Processed</h3>
-                                <p className="mt-2 text-center max-w-sm">
-                                    IFC/BIM data has been extracted. <br />
-                                    Use the <strong>"AI Extracted Elements"</strong> tab to view extracted rooms and items.
+                                <p className="mt-2 text-center max-w-sm mb-6">
+                                    IFC/BIM data has been extracted successfully.
                                 </p>
+                                {onNavigateToElements && (
+                                    <Button onClick={onNavigateToElements} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                                        View Extracted Elements
+                                    </Button>
+                                )}
                             </div>
                         ) : (
                             <img

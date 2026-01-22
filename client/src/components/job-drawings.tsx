@@ -29,6 +29,7 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState("drawings");
 
     const { data: files, isLoading } = useQuery<JobFile[]>({
         queryKey: [`/api/jobs/${jobId}/files`],
@@ -131,7 +132,7 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 
     return (
         <div className="space-y-6">
-            <Tabs defaultValue="drawings" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="bg-slate-800 border border-slate-700 mb-4">
                     <TabsTrigger value="drawings" className="data-[state=active]:bg-slate-700">
                         <ImageIcon className="h-4 w-4 mr-2" />
@@ -298,6 +299,10 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                         <SmartDrawingLoader
                             file={files.find(f => f.fileUrl === selectedImage)!}
                             jobId={jobId}
+                            onNavigateToElements={() => {
+                                setSelectedImage(null);
+                                setActiveTab("elements");
+                            }}
                         />
                     </div>
                 </div>
@@ -309,7 +314,7 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 // Wrapper to fetch smart data for the viewer
 import DrawingViewer from "./drawing-viewer";
 
-function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
+function SmartDrawingLoader({ file, jobId, onNavigateToElements }: { file: JobFile, jobId: string, onNavigateToElements?: () => void }) {
     // Fetch rooms (Orange Boxes)
     const { data: roomsData } = useQuery({
         queryKey: [`/api/jobs/${jobId}/rooms`],
@@ -367,6 +372,7 @@ function SmartDrawingLoader({ file, jobId }: { file: JobFile, jobId: string }) {
             smartElements={smartElements}
             onElementClick={(el) => console.log('Clicked:', el)}
             fileId={file.id}
+            onNavigateToElements={onNavigateToElements}
         />
     );
 }
