@@ -45,6 +45,9 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
         if (fileUrl.toLowerCase().endsWith('.dxf')) {
             displayUrl = fileUrl + '.svg';
         }
+    } else if (fileUrl.toLowerCase().includes('.ifc') || fileType.toLowerCase().includes('ifc')) {
+        // IFC File - No 2D visual generated yet.
+        // We will handle this in the render block.
     }
 
     // Filter elements for current page
@@ -199,6 +202,15 @@ export default function DrawingViewer({ fileUrl, fileType, smartElements = [], o
                                 ref={canvasRef}
                                 className="shadow-lg block"
                             />
+                        ) : (fileUrl.toLowerCase().includes('.ifc') || fileType.toLowerCase().includes('ifc')) ? (
+                            <div className="flex flex-col items-center justify-center w-full h-[500px] p-10 text-slate-400 border border-slate-700 rounded-lg bg-slate-800/50">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-4 text-emerald-500"><path d="M3 21h18" /><path d="M5 21V7l8-4 8 4v14" /><path d="M13 11V3" /></svg>
+                                <h3 className="text-xl font-semibold text-slate-200">BIM Model Processed</h3>
+                                <p className="mt-2 text-center max-w-sm">
+                                    IFC/BIM data has been extracted. <br />
+                                    Use the <strong>"AI Extracted Elements"</strong> tab to view extracted rooms and items.
+                                </p>
+                            </div>
                         ) : (
                             <img
                                 src={displayUrl}

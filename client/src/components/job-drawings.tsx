@@ -117,10 +117,11 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
 
     const handleFile = (file: File) => {
         const isDxf = file.name.toLowerCase().endsWith('.dxf');
-        if (!file.type.startsWith('image/') && file.type !== 'application/pdf' && !isDxf) {
+        const isIfc = file.name.toLowerCase().endsWith('.ifc');
+        if (!file.type.startsWith('image/') && file.type !== 'application/pdf' && !isDxf && !isIfc) {
             toast({
                 title: "Invalid File",
-                description: "Please upload an image, PDF, or DXF",
+                description: "Please upload an image, PDF, DXF, or IFC",
                 variant: "destructive",
             });
             return;
@@ -154,7 +155,7 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                         >
                             <input
                                 type="file"
-                                accept="image/*,.pdf,.dxf"
+                                accept="image/*,.pdf,.dxf,.ifc"
                                 onChange={handleChange}
                                 className="hidden"
                                 id="drawing-upload"
@@ -171,7 +172,7 @@ export default function JobDrawings({ jobId, readOnly = false }: JobDrawingsProp
                                 <p className="text-lg font-medium text-slate-200">
                                     Drop drawings here or <span className="text-amber-500">click to upload</span>
                                 </p>
-                                <p className="text-sm text-slate-400 mt-1">Supports Images & PDF</p>
+                                <p className="text-sm text-slate-400 mt-1">Supports Images, PDF, DXF & IFC</p>
                             </label>
                         </div>
                     )}
