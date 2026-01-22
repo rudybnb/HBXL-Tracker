@@ -648,7 +648,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
       }
-      // AI HANDLING (Probabilistic)
+      // IFC HANDLING (BIM)
+      else if (req.file.originalname.toLowerCase().endsWith('.ifc')) {
+        console.log(`🏗️ IFC File detected: ${uniqueFilename}`);
+
+        import('./agents/ifc-agent').then(async ({ IfcAgent }) => {
+          try {
+            const agent = new IfcAgent();
+            const result = await agent.process(filePath);
+
+            if (result.success) {
+              await db.update(jobFiles)
+                .set({ extractionStatus: 'completed' })
+                .where(eq(jobFiles.id, jobFile.id));
+
+              // Helper to insert
+              const insertEl = async (type: string, desc: string, qty: string) => {
+                await db.insert(extractedElements).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  elementType: type,
+                  description: desc,
+                  dimensions: "0,0,0,0", // No 2D BBox yet
+                  quantity: qty, unit: "nr", rate: "0", total: "0",
+                  roomName: "Global"
+                });
+              };
+
+              // Save Rooms
+              for (const room of result.rooms) {
+                // Add to extractedElements
+                await insertEl("room", room.name, "1");
+
+                // Add to 'rooms' table
+                await db.insert(rooms).values({
+                  jobId: req.params.id,
+                  fileId: jobFile.id,
+                  name: room.name,
+                  floor: "Ground", // Default to Ground for now
+                  bbox: "0,0,0,0",
+                  totalValue: "0"
+                });
+              }
+              // Save Elements
+              for (const el of result.elements) {
+                await insertEl(el.type, el.name || el.type, "1");
+              }
+
+              console.log(`✅ IFC Processing Complete. ${result.rooms.length} rooms, ${result.elements.length} elements.`);
+            } else {
+              console.error("❌ IFC Extraction Failed:", result.error);
+              await db.update(jobFiles)
+                .set({ extractionStatus: 'failed', extractionError: result.error })
+                .where(eq(jobFiles.id, jobFile.id));
+            }
+
+          } catch (err: any) {
+            console.error("IFC Agent Error:", err);
+            await db.update(jobFiles)
+              .set({ extractionStatus: 'failed', extractionError: err.message })
+              .where(eq(jobFiles.id, jobFile.id));
+          }
+        });
+      }
       else if (req.file.mimetype.startsWith('image/') || req.file.mimetype === 'application/pdf') {
         console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
         console.log(`📁 File path: ${filePath}`);
