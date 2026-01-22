@@ -66,7 +66,13 @@ export class IfcAgent {
                 { type: WebIFC.IFCOVERING, label: 'finish' },
                 { type: WebIFC.IFCFURNISHINGELEMENT, label: 'furniture' },
                 { type: WebIFC.IFCFLOWTERMINAL, label: 'plumbing' }, // Sinks, toilets
-                { type: WebIFC.IFCELECTRICALELEMENT, label: 'electrical' } // Generic
+                { type: WebIFC.IFCELECTRICALELEMENT, label: 'electrical' }, // Generic
+                { type: WebIFC.IFCBEAM, label: 'structure' },
+                { type: WebIFC.IFCCOLUMN, label: 'structure' },
+                { type: WebIFC.IFCMEMBER, label: 'structure' },
+                { type: WebIFC.IFCSTAIR, label: 'stair' },
+                { type: WebIFC.IFCRAILING, label: 'railing' },
+                { type: WebIFC.IFCBUILDINGELEMENTPROXY, label: 'generic' }
             ];
 
             for (const t of types) {
