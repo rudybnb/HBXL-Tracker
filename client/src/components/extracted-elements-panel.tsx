@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock, Home } from "lucide-react";
+import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock, Home, Box } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -10,6 +10,16 @@ interface ExtractedRoom {
     floor: string;
     status: string;
     createdAt: string;
+}
+
+interface ExtractedElement {
+    id: string;
+    elementType: string;
+    description: string;
+    quantity: string;
+    unit: string;
+    roomName: string;
+    fileId: string;
 }
 
 interface JobFile {
@@ -50,6 +60,14 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
 
     const rooms = roomsData?.rooms || [];
 
+    // Fetch ELEMENTS from drawing extraction
+    const { data: elementsData } = useQuery<ExtractedElement[]>({
+        queryKey: [`/api/jobs/${jobId}/elements`],
+        enabled: !!jobId,
+    });
+
+    const elements = elementsData || [];
+
     const extractMutation = useMutation({
         mutationFn: async (fileId: string) => {
             const response = await fetch(`/api/files/${fileId}/extract`, {
@@ -81,8 +99,12 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         },
     });
 
-    // Get ALL image files - never hide any
-    const imageFiles = (files || []).filter(f => f.fileType.startsWith('image/'));
+    // Get ALL processable files (Images, PDFs, IFCs)
+    const sourceFiles = (files || []).filter(f =>
+        f.fileType.startsWith('image/') ||
+        f.fileType === 'application/pdf' ||
+        f.filename.toLowerCase().endsWith('.ifc')
+    );
 
     // Check if mutation is currently running
     const activelyProcessing = extractMutation.isPending;
@@ -103,10 +125,10 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
 
     return (
         <div className="space-y-6">
-            {/* Debug: Show all image files */}
-            {imageFiles.length > 0 && (
+            {/* Debug: Show all source files */}
+            {sourceFiles.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {imageFiles.map(file => {
+                    {sourceFiles.map(file => {
                         const statusInfo = getStatusInfo(file.extractionStatus);
                         return (
                             <div key={file.id} className={`border rounded-lg p-4 flex items-center justify-between ${statusInfo.bg}`}>
@@ -152,44 +174,87 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
                 <div className="flex justify-center py-12">
                     <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
                 </div>
-            ) : rooms && rooms.length > 0 ? (
-                <div className="space-y-4">
-                    <h3 className="text-lg font-semibold text-slate-200 flex items-center">
-                        <Home className="h-5 w-5 mr-2 text-amber-500" />
-                        Rooms Identified ({rooms.length})
-                    </h3>
-                    <p className="text-sm text-slate-400">
-                        These rooms were detected from the uploaded drawing. HBXL costs will be allocated to these rooms.
-                    </p>
+            ) : (rooms && rooms.length > 0) || (elements && elements.length > 0) ? (
+                <div className="space-y-8">
+                    {/* Rooms Section */}
+                    {rooms.length > 0 && (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-slate-200 flex items-center">
+                                <Home className="h-5 w-5 mr-2 text-amber-500" />
+                                Rooms Identified ({rooms.length})
+                            </h3>
+                            <p className="text-sm text-slate-400">
+                                These rooms were detected from the uploaded drawing. HBXL costs will be allocated to these rooms.
+                            </p>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {rooms.map(room => (
-                            <div
-                                key={room.id}
-                                className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
-                            >
-                                <div className="flex items-start justify-between">
-                                    <div>
-                                        <h4 className="text-lg font-medium text-amber-400">{room.name}</h4>
-                                        <p className="text-sm text-slate-400">{room.floor} Floor</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {rooms.map(room => (
+                                    <div
+                                        key={room.id}
+                                        className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div>
+                                                <h4 className="text-lg font-medium text-amber-400">{room.name}</h4>
+                                                <p className="text-sm text-slate-400">{room.floor} Floor</p>
+                                            </div>
+                                            <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
+                                                room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
+                                                    'bg-slate-500/20 text-slate-400'
+                                                }`}>
+                                                {room.status === 'not_started' ? 'Not Started' : room.status}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
-                                        room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
-                                            'bg-slate-500/20 text-slate-400'
-                                        }`}>
-                                        {room.status === 'not_started' ? 'Not Started' : room.status}
-                                    </span>
-                                </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    )}
+
+                    {/* Detailed Elements Section */}
+                    {elements.length > 0 && (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-slate-200 flex items-center">
+                                <Box className="h-5 w-5 mr-2 text-blue-500" />
+                                Detailed Elements ({elements.length})
+                            </h3>
+                            <p className="text-sm text-slate-400">
+                                Individual building elements extracted from the model / drawing.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {elements.map((el, idx) => (
+                                    <div
+                                        key={el.id || idx}
+                                        className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-blue-500/30 transition-colors"
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div>
+                                                <h4 className="text-sm font-medium text-slate-200">{el.description || el.elementType}</h4>
+                                                <p className="text-xs text-slate-400 mt-1 capitalize">{el.elementType}</p>
+                                            </div>
+                                            <span className="text-xs bg-slate-700/50 text-slate-300 px-2 py-1 rounded">
+                                                Qty: {el.quantity}
+                                            </span>
+                                        </div>
+                                        {el.roomName && (
+                                            <div className="mt-2 text-xs text-slate-500 flex items-center">
+                                                <Home className="h-3 w-3 mr-1" />
+                                                {el.roomName}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700/50">
                     <Home className="h-12 w-12 text-slate-600 mx-auto mb-3" />
-                    <p className="text-slate-400 mb-2">No rooms identified yet</p>
+                    <p className="text-slate-400 mb-2">No rooms or elements identified yet</p>
                     <p className="text-sm text-slate-500">
-                        Upload a construction drawing to identify rooms for cost allocation
+                        Upload a construction drawing or BIM model to identify data.
                     </p>
                 </div>
             )}
