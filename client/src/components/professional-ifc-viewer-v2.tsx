@@ -42,6 +42,9 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
     // Interactive Objects Ref (Shared between IFC elements & DB Rooms)
     const interactables = useRef<THREE.Mesh[]>([]);
 
+    // Flag to prevent re-extraction of the same model
+    const processedModelRef = useRef<string | null>(null);
+
     // ... (Keep existing Init/Effect)
 
     // NEW: Render Database Rooms Overlay
@@ -453,14 +456,16 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                 }
 
                 // ============================================
-                // 4b. GENERATE 2D PLAN LINES (WALLS)
-                // ============================================
-                // ============================================
-                // 4b. GENERATE 2D PLAN LINES (WALLS - INSTANCE AWARE)
-                // ============================================
-                // ============================================
                 // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
                 // ============================================
+                // PREVENT RE-RUN: If we already extracted for this model, skip.
+                if (processedModelRef.current === model.uuid) {
+                    console.log("♻️ Skipping 2D Extraction: Already processed this model.");
+                    setLoading(false);
+                    return;
+                }
+                processedModelRef.current = model.uuid;
+
                 const generatedLines: any[] = [];
                 const tempMatrix = new THREE.Matrix4();
 
