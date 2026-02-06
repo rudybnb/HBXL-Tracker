@@ -1503,30 +1503,27 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                             )
                         }
 
-                        // FALLBACK: Old Rectangle Logic (For generic shapes if slice failed)
-                        // Style Mapping for Architectural Look
-                        // Walls: Dark Slate (Solid)
-                        // Windows: Light Blue (Glass)
-                        // Doors: Transparent/Light (Swing)
-                        let fill = '#e2e8f0'; // Default
-                        let opacity = 1;
+                        // FALLBACK: Old Rectangle Logic
+                        // Use filled rectangles for fallback to represent 'Mass'
+                        let fill = '#94a3b8'; // Slate 400
+                        let opacity = 0.5;
+                        let strokeColor = '#475569'; // Slate 600
 
-                        if (l.type === 'wall') fill = '#334155'; // Dark Slate Wall
-                        else if (l.type === 'window') { fill = '#bae6fd'; opacity = 0.8; } // Sky Blue
-                        else if (l.type === 'door') { fill = 'none'; } // Doors usually open
-                        else if (l.type === 'foundation') { fill = '#cbd5e1'; opacity = 0.3; }
+                        if (l.type === 'wall') { fill = '#334155'; opacity = 0.8; strokeColor = '#0f172a'; } // Dark Slate
+                        else if (l.type === 'window') { fill = '#bae6fd'; opacity = 0.6; strokeColor = '#0ea5e9'; }
+                        else if (l.type === 'door') { fill = '#fbbf24'; opacity = 0.4; strokeColor = '#d97706'; }
 
                         return (
                             <rect
-                                key={`wall-${i}`}
+                                key={`rect-${i}`}
                                 x={mapX(l.x)}
                                 y={mapY(l.y + l.h)}
                                 width={mapDim(l.w)}
                                 height={mapDim(l.h)}
                                 fill={fill}
                                 fillOpacity={opacity}
-                                stroke={l.type === 'door' ? '#d97706' : '#1e293b'}
-                                strokeWidth={strokeWidth}
+                                stroke={strokeColor}
+                                strokeWidth={mapDim(0.05)} // Fixed 5cm border
                             />
                         )
                     })}
