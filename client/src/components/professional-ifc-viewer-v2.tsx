@@ -1578,19 +1578,20 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                         else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
                         else if (l.type === 'door') { strokeColor = '#d97706'; }
 
-                        <rect
-                            key={`rect-${i}`}
-                            x={mapX_Scaled(l.x)}
-                            y={mapY_Scaled(l.y + l.h)}
-                            width={mapDim_Scaled(l.w)}
-                            height={mapDim_Scaled(l.h)}
-                            fill="none"
-                            fillOpacity="0"
-                            style={{ fill: 'none' }}
-                            stroke="red" // FORCE RED DEBUG
-                            strokeWidth={mapDim(0.05 * scale)}
-                            strokeDasharray={`${0.2 * scale},${0.2 * scale}`}
-                        />
+                        return (
+                            <rect
+                                key={`rect-${i}`}
+                                x={mapX_Scaled(l.x)}
+                                y={mapY_Scaled(l.y + l.h)}
+                                width={mapDim_Scaled(l.w)}
+                                height={mapDim_Scaled(l.h)}
+                                fill="none"
+                                fillOpacity="0"
+                                style={{ fill: 'none' }}
+                                stroke="red" // FORCE RED DEBUG
+                                strokeWidth={mapDim(0.05 * scale)}
+                                strokeDasharray={`${0.2 * scale},${0.2 * scale}`}
+                            />
                         )
                     })}
 
