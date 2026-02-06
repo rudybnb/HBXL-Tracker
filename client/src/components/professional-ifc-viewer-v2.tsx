@@ -1264,14 +1264,13 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         // If not available, fallback? No, EdgesClipper is standard.
         // If EdgesClipper is not exported (unlikely), we might fall back to SimpleClipper, 
         // but let's assume EdgesClipper exists as per warning about 'Clipper'.
+        // Revert to Standard Clipper for Reliability
         let clipper: any;
         try {
-            clipper = components.tools.get(OBC.EdgesClipper);
+            // Try Standard Clipper First (SimpleClipper)
+            clipper = components.tools.get(OBC.Clipper);
         } catch (e) {
-            try {
-                // Fallback to SimpleClipper if EdgesClipper fails instantiation
-                // clipper = components.tools.get(OBC.SimpleClipper);
-            } catch (e2) { }
+            console.warn("Clipper not found", e);
         }
 
         if (!clipper) return;
@@ -1324,8 +1323,14 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
             // 3. Enable Floor Plan Clipper
             clipper.enabled = true;
-            if (clipper.planes.length === 0) {
+            // Safer check for planes existence
+            if (clipper.planes && clipper.planes.length === 0) {
                 clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.2, 0));
+            } else if (!clipper.planes) {
+                // Fallback if planes prop missing (some versions)
+                try {
+                    clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.2, 0));
+                } catch (e) { }
             }
         } else {
             // 3D Mode
