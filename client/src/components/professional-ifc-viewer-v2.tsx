@@ -1382,7 +1382,25 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
 
     let roomScale = 1;
 
-    // 3. CENTROID ALIGNMENT (Fix Offset Issues)
+    // 3A. SCALE NORMALIZATION (Fix Unit Mismatch)
+    if (linesMax > 0 && roomsMax > 0) {
+        if (linesMax > 1000 && roomsMax < 100) {
+            // Lines MM, Rooms M -> Scale Rooms UP
+            parsedRooms.forEach(r => {
+                r.pts.forEach((p: any) => { p.x *= 1000; p.y *= 1000; });
+                r.cx *= 1000; r.cy *= 1000;
+            });
+        }
+        else if (linesMax < 100 && roomsMax > 1000) {
+            // Lines M, Rooms MM -> Scale Rooms DOWN
+            parsedRooms.forEach(r => {
+                r.pts.forEach((p: any) => { p.x *= 0.001; p.y *= 0.001; });
+                r.cx *= 0.001; r.cy *= 0.001;
+            });
+        }
+    }
+
+    // 3B. CENTROID ALIGNMENT (Fix Offset Issues)
     // Calculate Line Bounds
     let lMinX = Infinity, lMinY = Infinity, lMaxX = -Infinity, lMaxY = -Infinity;
     if (lines.length > 0) {
