@@ -462,6 +462,7 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
 
                 const generatedLines: any[] = [];
                 const tempMatrix = new THREE.Matrix4();
+                let unitScale = 1; // DEFINE HERE (Top Scope)
 
                 // DECISION: Use Query Cache OR Extract Fresh
                 const shouldExtract = !cachedLines || cachedLines.length === 0;
@@ -561,7 +562,8 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                     // DETECT UNITS (Heuristic)
                     // If the bounding box is HUGE (e.g. > 100 on Y or overall), it's likely Millimeters.
                     // Standard House is ~3-10m high. In MM that's 3000-10000.
-                    let unitScale = 1;
+                    // (unitScale is already defined in top scope)
+
                     // Check if likely MM
                     // We can't rely just on lowestY position (could be far from origin).
                     // Let's check the size of the first frag?
