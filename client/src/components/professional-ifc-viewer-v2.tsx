@@ -46,6 +46,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
     // Flag to prevent re-extraction of the same model
     const processedModelRef = useRef<string | null>(null);
+    const modelBoundsRef = useRef<THREE.Box3 | null>(null); // NEW: Cache Bounds
 
     // ... (Keep existing Init/Effect)
 
@@ -272,6 +273,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     if (!bbox.isEmpty()) {
                         comps.camera.controls.fitToBox(bbox, true);
                         console.log("📸 Fits camera to model");
+                        modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
                     }
                 }
 
@@ -617,6 +619,26 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                             else if (doors && doors[fid]) type = 'door';
                             else if (windows && windows[fid]) type = 'window';
                             else if (proxies && proxies[fid]) type = 'structure';
+
+                            // CACHE BOUNDS (Robust & Performant)
+                            if (mesh && mesh.geometry && mesh.geometry.boundingBox) {
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    for (let i = 0; i < mesh.count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        // Apply Instance + World
+                                        // Usually fragment meshes are at Identity world, but apply anyway
+                                        tempMatrix.premultiply(mesh.matrixWorld);
+                                        const b = mesh.geometry.boundingBox.clone().applyMatrix4(tempMatrix);
+                                        if (!modelBoundsRef.current) modelBoundsRef.current = new THREE.Box3();
+                                        modelBoundsRef.current.union(b);
+                                    }
+                                } else {
+                                    // Standard Mesh (rare for Fragments)
+                                    const b = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+                                    if (!modelBoundsRef.current) modelBoundsRef.current = new THREE.Box3();
+                                    modelBoundsRef.current.union(b);
+                                }
+                            }
 
                             // SLICE
                             if (type) {
@@ -1267,51 +1289,52 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         if (cam && cam.controls) {
             if (viewMode === '2d') {
                 // Switch to Ortho
-                try { cam.setProjection('Orthographic'); } catch (e) { console.warn("Proj Switch Error", e); }
+                console.log("🟦 SWITCHING TO 2D MODE (DEBUG)");
+                // Switch to Ortho
+                try {
+                    cam.setProjection('Orthographic');
+                    const scene = components.scene.get();
+                    scene.background = new THREE.Color(0x1a1a1a); // Dark BG for 2D
+                } catch (e) { console.warn("Proj Switch Error", e); }
 
-                // ASYNC BOUNDS CALCULATION (Prevent Freeze)
-                setTimeout(() => {
-                    const bbox = new THREE.Box3();
-                    // Method 1: Use Fragment Manager (Much Faster)
-                    try {
-                        const fragments = components.tools.get(OBC.FragmentManager);
-                        // Iterate Meshes (InstancedMesh) directly
-                        for (const mesh of fragments.meshes) {
-                            if (mesh.geometry && mesh.geometry.boundingBox) {
-                                // Apply World Matrix (InstancedMesh usually at 0,0,0 but just in case)
-                                const b = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
-                                bbox.union(b);
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("Fragment bounds failed", e);
-                    }
+                // INSTANT VIEW SWITCH (Use Cached Bounds)
+                const bbox = modelBoundsRef.current; // Use Pre-Calculated Box
+                console.log("📦 2D Bounds:", bbox ? `Found` : "MISSING");
 
-                    if (!bbox.isEmpty()) {
-                        const cx = (bbox.min.x + bbox.max.x) / 2;
-                        const cy = (bbox.min.y + bbox.max.y) / 2;
-                        const cz = (bbox.min.z + bbox.max.z) / 2;
+                if (bbox && !bbox.isEmpty()) {
+                    const cx = (bbox.min.x + bbox.max.x) / 2;
+                    const cy = (bbox.min.y + bbox.max.y) / 2;
+                    const cz = (bbox.min.z + bbox.max.z) / 2;
 
-                        // Look Top Down
-                        cam.controls.setLookAt(cx, bbox.max.y + 20, cz, cx, cy, cz, true);
-                        cam.controls.fitToBox(bbox, true);
-                    } else {
-                        // Fallback if no bounds found
-                        cam.controls.setPosition(0, 50, 0, true);
-                        cam.controls.setTarget(0, 0, 0, true);
-                    }
+                    // Look Top Down (Add Padding)
+                    const size = Math.max(bbox.max.x - bbox.min.x, bbox.max.z - bbox.min.z);
 
-                    // Try to hide grid (Optional)
-                    try {
-                        const grid = components.tools.get(OBC.SimpleGrid);
-                        if (grid) grid.visible = false;
-                    } catch (e) { }
+                    // Top Down View
+                    cam.controls.setLookAt(cx, bbox.max.y + size, cz, cx, 0, cz, true); // Look at ground plane center
+                    cam.controls.fitToBox(bbox, true);
+                } else {
+                    // Fallback
+                    cam.controls.setPosition(0, 50, 0, true);
+                    cam.controls.setTarget(0, 0, 0, true);
+                }
 
-                }, 50);
+                // Try to hide grid (Optional)
+                try {
+                    const grid = components.tools.get(OBC.SimpleGrid);
+                    if (grid) grid.visible = false;
+                } catch (e) { }
+
+
 
             } else {
                 // 3D Mode
-                try { cam.setProjection('Perspective'); } catch (e) { }
+                console.log("🧊 SWITCHING TO 3D MODE (DEBUG)");
+                // 3D Mode
+                try {
+                    cam.setProjection('Perspective');
+                    const scene = components.scene.get();
+                    scene.background = new THREE.Color(0xf0f2f5); // Restore
+                } catch (e) { }
 
                 // Restore Grid
                 try {
@@ -1340,7 +1363,9 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // Also check private properties if necessary or just try creation
                 if (!hasPlanes) {
                     try {
-                        clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.5, 0));
+                        // DISABLED FOR PERFORMANCE: Clipper creation freezes UI on large models
+                        // clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.5, 0));
+                        console.log("✂️ Clipper creation skipped for performance");
                     } catch (e) { console.warn("Clip Create Error", e); }
                 }
             } else {
