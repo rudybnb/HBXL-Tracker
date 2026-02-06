@@ -1310,13 +1310,15 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     const size = Math.max(bbox.max.x - bbox.min.x, bbox.max.z - bbox.min.z);
 
                     // Top Down View Logic (Explicit)
-                    // Pushed High Up on Y, Looking at Center
-                    const height = size * 2; // Ensure we are far enough away
+                    // 1. Fix Orientation: When looking straight down (Y), UP must be Z
+                    cam.controls.camera.up.set(0, 0, -1);
 
+                    // 2. Position High Up
+                    const height = size * 2;
                     cam.controls.setPosition(cx, bbox.max.y + height, cz, true);
                     cam.controls.setTarget(cx, cy, cz, true);
 
-                    // Fit to ensure visibility
+                    // 3. Fit (with slight delay)
                     setTimeout(() => {
                         cam.controls.fitToBox(bbox, true);
                     }, 50);
@@ -1340,6 +1342,9 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // 3D Mode
                 try {
                     cam.setProjection('Perspective');
+                    // Reset Orientation
+                    cam.controls.camera.up.set(0, 1, 0);
+
                     const scene = components.scene.get();
                     scene.background = new THREE.Color(0xf0f2f5); // Restore
                 } catch (e) { }
