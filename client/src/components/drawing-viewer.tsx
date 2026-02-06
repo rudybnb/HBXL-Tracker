@@ -106,6 +106,7 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onEleme
                             console.log("📐 Geometry Lines Received:", l.length);
                             setLines(l);
                         }}
+                        cachedLines={lines} // PERSIST DATA
                     />
                 </div>
 

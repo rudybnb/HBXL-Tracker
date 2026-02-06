@@ -12,9 +12,10 @@ interface Props {
     onElementClick?: (element: any) => void;
     onRoomRename?: (id: string, newName: string) => void;
     onGeometryParsed?: (lines: any[]) => void; // NEW PROP
+    cachedLines?: any[]; // PERSISTENCE PROP
 }
 
-const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementClick, onRoomRename, onGeometryParsed }: Props) => {
+const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementClick, onRoomRename, onGeometryParsed, cachedLines }: Props) => {
 
     const [show2D, setShow2D] = useState(true);
     const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -458,6 +459,14 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                 // ============================================
                 // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
                 // ============================================
+
+                // CHECK CACHE FIRST (Prevent Remount Flash)
+                if (cachedLines && cachedLines.length > 0) {
+                    console.log("🧠 Using Cached 2D Geometry from Parent");
+                    setLoading(false);
+                    return;
+                }
+
                 // PREVENT RE-RUN: If we already extracted for this model, skip.
                 if (processedModelRef.current === model.uuid) {
                     console.log("♻️ Skipping 2D Extraction: Already processed this model.");
