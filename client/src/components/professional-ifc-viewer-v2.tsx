@@ -458,71 +458,194 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                 // ============================================
                 // 4b. GENERATE 2D PLAN LINES (WALLS - INSTANCE AWARE)
                 // ============================================
+                // ============================================
+                // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
+                // ============================================
                 const generatedLines: any[] = [];
                 const tempMatrix = new THREE.Matrix4();
+
+                // Helper: Geometry Slicer
+                const sliceMesh = (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
+                    const geometry = mesh.geometry;
+                    if (!geometry) return;
+
+                    const index = geometry.index;
+                    const pos = geometry.attributes.position;
+                    // Pre-allocate check vars
+                    const v1 = new THREE.Vector3();
+                    const v2 = new THREE.Vector3();
+                    const v3 = new THREE.Vector3();
+
+                    // World Matrix for this instance
+                    const matrix = mesh.matrixWorld;
+
+                    const checkTri = (a: number, b: number, c: number) => {
+                        v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
+                        v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
+                        v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
+
+                        // Check Plane Intersection (Y plane)
+                        const d1 = v1.y - planeY;
+                        const d2 = v2.y - planeY;
+                        const d3 = v3.y - planeY;
+
+                        // Identify edge crossings: Signs differ
+                        // Naive approach: count positives
+                        const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
+                        if (posCount === 0 || posCount === 3) return; // No intersection
+
+                        // Find the two intersection points
+                        const points: THREE.Vector3[] = [];
+
+                        // Edge 1-2
+                        if ((d1 > 0) !== (d2 > 0)) {
+                            const t = d1 / (d1 - d2); // Linear interp
+                            points.push(new THREE.Vector3().lerpVectors(v1, v2, t));
+                        }
+                        // Edge 2-3
+                        if ((d2 > 0) !== (d3 > 0)) {
+                            const t = d2 / (d2 - d3);
+                            points.push(new THREE.Vector3().lerpVectors(v2, v3, t));
+                        }
+                        // Edge 3-1
+                        if ((d3 > 0) !== (d1 > 0)) {
+                            const t = d3 / (d3 - d1);
+                            points.push(new THREE.Vector3().lerpVectors(v3, v1, t));
+                        }
+
+                        if (points.length >= 2) {
+                            generatedLines.push({
+                                id: fid,
+                                type: type, // 'wall', 'window', 'door'
+                                subtype: 'segment',
+                                p1: { x: points[0].x, y: points[0].z }, // Top-down (XZ)
+                                p2: { x: points[1].x, y: points[1].z }
+                            });
+                        }
+                    };
+
+                    if (index) {
+                        for (let i = 0; i < index.count; i += 3) {
+                            checkTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+                        }
+                    } else {
+                        for (let i = 0; i < pos.count; i += 3) {
+                            checkTri(i, i + 1, i + 2);
+                        }
+                    }
+                };
+
+                // Determine Cut Height (Base + 1.2m)
+                // Use Wall BBox to find "floor" roughly
+                let lowestY = Infinity;
+                if (model.items) {
+                    for (const frag of model.items) {
+                        if (frag.mesh && frag.mesh.geometry.boundingBox) {
+                            const box = frag.mesh.geometry.boundingBox.clone();
+                            box.applyMatrix4(frag.mesh.matrixWorld);
+                            if (box.min.y < lowestY) lowestY = box.min.y;
+                        }
+                    }
+                }
+                if (lowestY === Infinity) lowestY = 0;
+                // Cut Plane
+                const cutY = lowestY + 1.2; // 1.2m Above local zero
+                console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)} for Floor Plan...`);
 
                 if (model.items) {
                     for (const frag of model.items) {
                         const mesh = frag.mesh;
                         const fid = frag.id;
 
-                        // Check classification
-                        let isWall = (walls && walls[fid] !== undefined);
-                        let isDoor = (doors && doors[fid] !== undefined);
-                        let isWindow = (windows && windows[fid] !== undefined);
-                        let isSlab = (slabs && slabs[fid] !== undefined);
-                        // Proxies often contain foundations/footings in some exports, but better to check specifically if separated?
-                        // We added IFCFOOTING to proxies previously.
-                        let isFoundation = (proxies && proxies[fid] !== undefined);
+                        // ONLY SLICE WALLS, WINDOWS, DOORS, COLUMNS
+                        let type = null;
+                        if (walls && walls[fid]) type = 'wall';
+                        else if (doors && doors[fid]) type = 'door';
+                        else if (windows && windows[fid]) type = 'window';
+                        else if (proxies && proxies[fid]) type = 'structure'; // Columns/Foundations
 
-                        if (isWall || isDoor || isWindow || isSlab || isFoundation) {
-                            if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-                            const baseBox = mesh.geometry.boundingBox!;
-
-                            let type = 'wall';
-                            if (isDoor) type = 'door';
-                            else if (isWindow) type = 'window';
-                            else if (isSlab) type = 'slab';
-                            else if (isFoundation) type = 'foundation';
-
-                            // Iterate Instances if InstancedMesh
+                        // Ignore Furniture/Slabs/Roof for Section Cut (Cleaner Plan)
+                        if (type) {
+                            // Instance Handling
                             if (mesh instanceof THREE.InstancedMesh) {
                                 const count = mesh.count;
                                 for (let i = 0; i < count; i++) {
-                                    mesh.getMatrixAt(i, tempMatrix);
-                                    const box = baseBox.clone();
-                                    box.applyMatrix4(tempMatrix);
-                                    box.applyMatrix4(mesh.matrixWorld);
+                                    // Create a temp Mesh for the instance to leverage existing logic? 
+                                    // No, too expensive. Update logic to handle instance Matrix.
+                                    // Just updating sliceMesh is complex for temp matrix injection.
+                                    // For now: Skip Instanced Logic or implement full transform.
+                                    // Most architectural walls are not instanced in basic exports.
+                                    // Only Columns might be.
+                                    // Let's rely on standard logic - if instanced, applying matrixWorld handles the *container*,
+                                    // but we need the *instance* matrix.
+                                    // IMPORTANT: fragments usually merge geometry into one mesh but keep them as 'Instances'?
+                                    // Actually openbim-components 'Fragment' IS InstancedMesh mostly.
 
-                                    generatedLines.push({
-                                        id: `${fid}-${i}`,
-                                        type: type,
-                                        x: box.min.x,
-                                        y: box.min.z,
-                                        w: box.max.x - box.min.x,
-                                        h: box.max.z - box.min.z
-                                    });
+                                    // Quick Fix: We need to apply instance matrix.
+                                    // Due to complexity, let's just use the bounding box center for now? 
+                                    // NO, User wants TRACE.
+                                    // Let's Apply Instance Matrix inside loop?
+                                    // sliceMesh uses `mesh.matrixWorld`. 
+                                    // We can temporarily Override `mesh.matrixWorld`? Risky.
+
+                                    mesh.getMatrixAt(i, tempMatrix);
+                                    // Combine with world
+                                    tempMatrix.premultiply(mesh.matrixWorld);
+
+                                    // Pass Custom Matrix to Slicer
+                                    // Refactored sliceMesh inner logic...
+                                    // For speed, let's just clone the slice logic inline here or assume minimal instancing.
+                                    // Actually, Fragment IS usually Instanced.
+
+                                    // RE-IMPLEMENT SLICER WITH PASSED MATRIX
+                                    const geometry = mesh.geometry;
+                                    const index = geometry.index;
+                                    const pos = geometry.attributes.position;
+                                    const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+
+                                    const checkTriInst = (a: number, b: number, c: number) => {
+                                        v1.fromBufferAttribute(pos, a).applyMatrix4(tempMatrix);
+                                        v2.fromBufferAttribute(pos, b).applyMatrix4(tempMatrix);
+                                        v3.fromBufferAttribute(pos, c).applyMatrix4(tempMatrix);
+
+                                        const d1 = v1.y - cutY;
+                                        const d2 = v2.y - cutY;
+                                        const d3 = v3.y - cutY;
+
+                                        const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
+                                        if (posCount === 0 || posCount === 3) return;
+
+                                        const points = [];
+                                        if ((d1 > 0) !== (d2 > 0)) points.push(new THREE.Vector3().lerpVectors(v1, v2, d1 / (d1 - d2)));
+                                        if ((d2 > 0) !== (d3 > 0)) points.push(new THREE.Vector3().lerpVectors(v2, v3, d2 / (d2 - d3)));
+                                        if ((d3 > 0) !== (d1 > 0)) points.push(new THREE.Vector3().lerpVectors(v3, v1, d3 / (d3 - d1)));
+
+                                        if (points.length >= 2) {
+                                            generatedLines.push({
+                                                id: `${fid}-${i}`, type: type!, subtype: 'segment',
+                                                p1: { x: points[0].x, y: points[0].z },
+                                                p2: { x: points[1].x, y: points[1].z }
+                                            });
+                                        }
+                                    };
+
+                                    if (index) {
+                                        for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
+                                    } else {
+                                        for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
+                                    }
                                 }
                             } else {
-                                // Standard Mesh (Single)
-                                const box = baseBox.clone();
-                                box.applyMatrix4(mesh.matrixWorld);
-                                generatedLines.push({
-                                    id: fid,
-                                    type: type,
-                                    x: box.min.x,
-                                    y: box.min.z,
-                                    w: box.max.x - box.min.x,
-                                    h: box.max.z - box.min.z
-                                });
+                                // Standard
+                                sliceMesh(mesh, cutY, type, fid);
                             }
                         }
                     }
                 }
+
                 if (isActive) {
-                    console.log(`✅ Setting Extracted Lines: ${generatedLines.length} `);
+                    console.log(`✅ Extracted ${generatedLines.length} Section Segments`);
                     setExtractedLines(generatedLines);
-                    // 🚀 EXPORT GEOMETRY UPWARDS
                     if (onGeometryParsed) onGeometryParsed(generatedLines);
                 }
 
@@ -1140,8 +1263,14 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
     };
 
     lines.forEach(l => {
-        updateBounds(l.x, l.y);
-        updateBounds(l.x + l.w, l.y + l.h);
+        if (l.subtype === 'segment') {
+            updateBounds(l.p1.x, l.p1.y);
+            updateBounds(l.p2.x, l.p2.y);
+        } else {
+            // Fallback Rect
+            updateBounds(l.x, l.y);
+            updateBounds(l.x + l.w, l.y + l.h);
+        }
     });
 
     const safeRooms = rooms?.filter(r => r && r.geometry) || [];
@@ -1296,7 +1425,32 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                     })}
 
                     {/* 2. STRUCTURE / LINES (Foreground) */}
+                    {/* 2. STRUCTURE / LINES (Foreground) */}
                     {lines.map((l, i) => {
+                        // NEW: Handle Segments (Vectors)
+                        if (l.subtype === 'segment') {
+                            let stroke = '#1e293b'; // Slate 800
+                            let lw = strokeWidth * 2; // Thicker walls
+
+                            if (l.type === 'wall') { stroke = '#0f172a'; lw = strokeWidth * 3; } // Slate 900
+                            if (l.type === 'window') { stroke = '#38bdf8'; lw = strokeWidth * 2; } // Sky 400
+                            if (l.type === 'door') { stroke = '#d97706'; lw = strokeWidth * 2; } // Amber 600
+
+                            return (
+                                <line
+                                    key={`seg-${i}`}
+                                    x1={mapX(l.p1.x)}
+                                    y1={mapY(l.p1.y)}
+                                    x2={mapX(l.p2.x)}
+                                    y2={mapY(l.p2.y)}
+                                    stroke={stroke}
+                                    strokeWidth={lw}
+                                    strokeLinecap="round"
+                                />
+                            )
+                        }
+
+                        // FALLBACK: Old Rectangle Logic (For generic shapes if slice failed)
                         // Style Mapping for Architectural Look
                         // Walls: Dark Slate (Solid)
                         // Windows: Light Blue (Glass)
