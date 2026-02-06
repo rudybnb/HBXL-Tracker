@@ -1370,6 +1370,42 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
         } catch (e) { }
     });
 
+    // 3. DETECT MISMATCH & DETERMINE RELATIVE SCALE (Crucial Fix)
+    // Check Max Extents
+    let roomsMax = 0;
+    parsedRooms.forEach(r => {
+        r.pts.forEach((p: any) => {
+            const m = Math.max(Math.abs(p.x), Math.abs(p.y));
+            if (m > roomsMax) roomsMax = m;
+        });
+    });
+
+    let roomScale = 1;
+
+    // IF we have both data sets
+    if (linesMax > 0 && roomsMax > 0) {
+        // Case A: Lines are MM (e.g. 8000), Rooms are M (e.g. 8)
+        // Ratio ~ 1000
+        if (linesMax > 1000 && roomsMax < 100) {
+            roomScale = 1000;
+            // Apply Scale to Parsed Rooms immediately
+            parsedRooms.forEach(r => {
+                r.pts.forEach((p: any) => { p.x *= 1000; p.y *= 1000; });
+                r.cx *= 1000;
+                r.cy *= 1000;
+            });
+        }
+        // Case B: Lines are M (8), Rooms are MM (8000) - Rare but possible
+        else if (linesMax < 100 && roomsMax > 1000) {
+            roomScale = 0.001;
+            parsedRooms.forEach(r => {
+                r.pts.forEach((p: any) => { p.x *= 0.001; p.y *= 0.001; });
+                r.cx *= 0.001;
+                r.cy *= 0.001;
+            });
+        }
+    }
+
 
     // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
     // If Lines are Meters (<500), we must SCALE LINES UP to MM default?
@@ -1404,12 +1440,11 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
         }
     });
 
-    // SKIP ROOM BOUNDS
-    /*
+    // 4b. INCLUDE ROOMS IN BOUNDS
+    // NOW SAFE because we normalized scales.
     parsedRooms.forEach(r => {
         r.pts.forEach((p: any) => updateBounds(p.x, p.y));
     });
-    */
 
     if (minX === Infinity) return <div className="p-4">Empty Geometry</div>;
 
@@ -1513,12 +1548,16 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
 
                     {/* 1. ROOMS (Transparent Interactive Layer) */}
                     {parsedRooms.map(room => {
-                        // Build Path
-                        if (!room.pts || room.pts.length < 2) return null;
-                        const d = `M ${room.pts.map((p: any) => `${mapX_Scaled(p.x * renderScaleLines)} ${mapY_Scaled(p.y * renderScaleLines)}`).join(" L ")} Z`;
+                        // Build Path (room.pts are ALREADY SCALED by roomScale now)
+                        // But mapX_Scaled applies renderScaleLines?
+                        // Wait: Lines didn't get scaled in loop 3. renderScaleLines is 1.
+                        // So mapX_Scaled calls mapX(x * 1).
 
-                        const svgCx = mapX_Scaled(room.cx * renderScaleLines);
-                        const svgCy = mapY_Scaled(room.cy * renderScaleLines);
+                        if (!room.pts || room.pts.length < 2) return null;
+                        const d = `M ${room.pts.map((p: any) => `${mapX_Scaled(p.x)} ${mapY_Scaled(p.y)}`).join(" L ")} Z`;
+
+                        const svgCx = mapX_Scaled(room.cx);
+                        const svgCy = mapY_Scaled(room.cy);
 
                         return (
                             <g
