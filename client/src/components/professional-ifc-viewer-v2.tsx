@@ -1567,15 +1567,15 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                         }
 
                         // FALLBACK: Old Rectangle Logic
-                        // Use filled rectangles for fallback to represent 'Mass'
-                        let fill = '#94a3b8'; // Slate 400
-                        let opacity = 0.5;
-                        let strokeColor = '#475569'; // Slate 600
+                        // Use OUTLINE ONLY for fallback to prevent "Blue Box" hiding everything.
+                        let fill = 'none';
+                        let opacity = 0;
+                        let strokeColor = '#94a3b8'; // Lighter Slate
                         const scale = l.unitScale || 1;
 
-                        if (l.type === 'wall') { fill = '#334155'; opacity = 0.8; strokeColor = '#0f172a'; } // Dark Slate
-                        else if (l.type === 'window') { fill = '#bae6fd'; opacity = 0.6; strokeColor = '#0ea5e9'; }
-                        else if (l.type === 'door') { fill = '#fbbf24'; opacity = 0.4; strokeColor = '#d97706'; }
+                        if (l.type === 'wall') { strokeColor = '#0f172a'; }
+                        else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
+                        else if (l.type === 'door') { strokeColor = '#d97706'; }
 
                         return (
                             <rect
@@ -1584,10 +1584,10 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                                 y={mapY_Scaled(l.y + l.h)}
                                 width={mapDim_Scaled(l.w)}
                                 height={mapDim_Scaled(l.h)}
-                                fill={fill}
-                                fillOpacity={opacity}
+                                fill="none"
                                 stroke={strokeColor}
-                                strokeWidth={mapDim(0.05 * scale)} // Fixed 5cm border (Scaled)
+                                strokeWidth={mapDim(0.02 * scale)} // Thinner line
+                                strokeDasharray={`${0.1 * scale},${0.1 * scale}`} // Dashed
                             />
                         )
                     })}
