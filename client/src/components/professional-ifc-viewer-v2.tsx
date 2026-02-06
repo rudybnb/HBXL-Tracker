@@ -1309,9 +1309,17 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     // Look Top Down (Add Padding)
                     const size = Math.max(bbox.max.x - bbox.min.x, bbox.max.z - bbox.min.z);
 
-                    // Top Down View
-                    cam.controls.setLookAt(cx, bbox.max.y + size, cz, cx, 0, cz, true); // Look at ground plane center
-                    cam.controls.fitToBox(bbox, true);
+                    // Top Down View Logic (Explicit)
+                    // Pushed High Up on Y, Looking at Center
+                    const height = size * 2; // Ensure we are far enough away
+
+                    cam.controls.setPosition(cx, bbox.max.y + height, cz, true);
+                    cam.controls.setTarget(cx, cy, cz, true);
+
+                    // Fit to ensure visibility
+                    setTimeout(() => {
+                        cam.controls.fitToBox(bbox, true);
+                    }, 50);
                 } else {
                     // Fallback
                     cam.controls.setPosition(0, 50, 0, true);
