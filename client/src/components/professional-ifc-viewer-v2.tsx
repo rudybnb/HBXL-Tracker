@@ -1568,11 +1568,10 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
 
                         // FALLBACK: Old Rectangle Logic
                         // Use OUTLINE ONLY for fallback to prevent "Blue Box" hiding everything.
-                        let fill = 'none';
-                        let opacity = 0;
-                        let strokeColor = '#94a3b8'; // Lighter Slate
-                        // Use autoScale here too!
-                        const scale = l.unitScale || autoScale;
+                        let strokeColor = '#94a3b8'; // Lighter Slate (Default)
+
+                        // Use dynamic strokeWidth from scene bounds (Line 1458)
+                        // This ensures consistent 1px-ish lines regardless of units (MM/M).
 
                         if (l.type === 'wall') { strokeColor = '#0f172a'; }
                         else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
@@ -1586,11 +1585,9 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                                 width={mapDim_Scaled(l.w)}
                                 height={mapDim_Scaled(l.h)}
                                 fill="none"
-                                fillOpacity="0"
-                                style={{ fill: 'none' }}
-                                stroke="red" // FORCE RED DEBUG
-                                strokeWidth={mapDim(0.05 * scale)}
-                                strokeDasharray={`${0.2 * scale},${0.2 * scale}`}
+                                stroke={strokeColor}
+                                strokeWidth={strokeWidth} // DYNAMIC THIN LINE
+                                strokeDasharray={`${strokeWidth * 4},${strokeWidth * 4}`} // Dashed relative to line thickness
                             />
                         )
                     })}
