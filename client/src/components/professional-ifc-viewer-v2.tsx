@@ -13,9 +13,10 @@ interface Props {
     onRoomRename?: (id: string, newName: string) => void;
     onGeometryParsed?: (lines: any[]) => void; // NEW PROP
     cachedLines?: any[]; // PERSISTENCE PROP
+    viewMode?: '3d' | '2d'; // NEW: Explicit View Control
 }
 
-const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementClick, onRoomRename, onGeometryParsed, cachedLines }: Props) => {
+export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementClick, onRoomRename, onGeometryParsed, cachedLines, viewMode = '3d' }: Props) => {
 
     const [show2D, setShow2D] = useState(true);
     const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -1255,7 +1256,73 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
 
         console.log(roomMap);
         setTenderReport(reportHtml);
+        console.log(roomMap);
+        setTenderReport(reportHtml);
     };
+
+    // --- VIEW MODE SWITCHER IMPL ---
+    useEffect(() => {
+        if (!components) return;
+        const clipper = components.tools.get(OBC.Clipper);
+        const cam = components.camera as OBC.OrthoPerspectiveCamera;
+        if (!cam || !cam.controls) return;
+
+        if (viewMode === '2d') {
+            // 1. Switch to Ortho
+            cam.setProjection('Orthographic');
+
+            // 2. Position Top Down
+            // We need model center. 'camera.fit' caches bounds?
+            // Let's assume controls.fitToBox was called on load.
+            cam.controls.setPosition(0, 100, 0, true);
+            cam.controls.setTarget(0, 0, 0, true);
+            // We need a proper "Top View" orientation
+            // control.setLookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, enableTransition)
+
+            // We need to re-find bbox to center correctly
+            const bbox = new THREE.Box3();
+            // ... re-calc bbox logic or cache it? Cached 'interactables' won't help bounds.
+            // Let's assume (0,0,0) is roughly center or re-use fitToBox logic if we exposed it.
+            // For now, let's just trigger "Plan View" on the controls if available
+            // cam.controls.fitToBox(bbox, true); -> This preserves angle.
+
+            // Manual Box Search (Fast)
+            const scene = components.scene.get();
+            scene.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.geometry && child.geometry.boundingBox) {
+                    const b = child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld);
+                    bbox.union(b);
+                }
+            });
+
+            if (!bbox.isEmpty()) {
+                const cx = (bbox.min.x + bbox.max.x) / 2;
+                const cy = (bbox.min.y + bbox.max.y) / 2;
+                const cz = (bbox.min.z + bbox.max.z) / 2;
+                const size = Math.max(bbox.max.x - bbox.min.x, bbox.max.z - bbox.min.z);
+
+                // Look Top Down
+                cam.controls.setLookAt(cx, bbox.max.y + 50, cz, cx, 0, cz, true);
+                // Zoom to fit?
+                // Ortho zoom is handled by camera.zoom or frustum
+                // controls.dollyTo(distance, enableTransition)
+                // fitToBox handles it.
+                cam.controls.fitToBox(bbox, true);
+            }
+
+            // 3. Enable Floor Plan Clipper
+            clipper.enabled = true;
+            if (clipper.planes.length === 0) {
+                clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.2, 0));
+            }
+        } else {
+            // 3D Mode
+            cam.setProjection('Perspective');
+            clipper.deleteAll(); // Remove sections
+            clipper.enabled = false;
+        }
+
+    }, [viewMode, components]);
 
     const ROOM_NAMES = [
         "Lounge", "Kitchen", "Dining Room", "Bedroom 1", "Bedroom 2", "Bedroom 3",

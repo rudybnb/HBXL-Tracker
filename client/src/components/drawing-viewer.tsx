@@ -59,432 +59,393 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onEleme
             name: r.name || r.roomName || r.description || `Room ${i + 1}`,
             area: r.quantity || r.area || "0"
         }));
-    const [show2D, setShow2D] = useState(true);
-    const [lines, setLines] = useState<any[]>([]);
+}));
+const [show2D, setShow2D] = useState(true);
 
-    // Logic check: if we have lines, we can show 2D
-    const canShow2D = lines.length > 0;
+// Logic check: if we have lines, we can show 2D
+const canShow2D = lines.length > 0;
 
-    if (isIFC) return (
-        <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
-            <div className="p-2 border-b bg-gray-50 flex justify-between items-center px-4 shrink-0 h-12">
-                <div className="flex flex-col">
-                    <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
-                    <span className="text-[10px] text-slate-500">Powered by That Open Engine</span>
-                </div>
-
-                {/* TOGGLE CONTROLS */}
-                <div className="flex bg-slate-200 rounded p-1 border border-slate-300">
-                    <button
-                        onClick={() => setShow2D(false)}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-all ${!show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
-                    >
-                        3D VIEW
-                    </button>
-                    <button
-                        onClick={() => setShow2D(true)}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-all ${show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
-                    >
-                        2D PLAN
-                    </button>
-                </div>
+if (isIFC) return (
+    <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
+        <div className="p-2 border-b bg-gray-50 flex justify-between items-center px-4 shrink-0 h-12">
+            <div className="flex flex-col">
+                <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
+                <span className="text-[10px] text-slate-500">Powered by That Open Engine</span>
             </div>
 
-            {/* TWIN LAYER CONTAINER */}
-            <div className="flex-1 relative overflow-hidden">
-
-                {/* LAYER 1: 3D ENGINE (Background / Main) */}
-                {/* Always mounted to preserve state/cache. Hidden when 2D is active. */}
-                <div className={`absolute inset-0 transition-opacity duration-300 ${show2D ? 'opacity-0 pointer-events-none' : 'opacity-100 z-10'}`}>
-                    <ProfessionalIFCViewer
-                        fileUrl={safeFileUrl}
-                        id={fileId} // Pass stable ID
-                        rooms={rooms} // Still pass rooms for 3D overlay if needed
-                        onElementClick={onElementClick}
-                        onRoomRename={onRoomRename}
-                        onGeometryParsed={(l) => {
-                            console.log("📐 Geometry Lines Received:", l.length);
-                            setLines(l);
-                        }}
-                        cachedLines={lines} // PERSIST DATA
-                    />
-                </div>
-
-                {/* LAYER 2: 2D SVG OVERLAY (Foreground) */}
-                {/* Absolute on top. */}
-                <div className={`absolute inset-0 bg-white transition-opacity duration-300 ${show2D ? 'opacity-100 z-20' : 'opacity-0 pointer-events-none'}`}>
-                    {canShow2D ? (
-                        <>
-                            <RoomPlan2DFinal
-                                rooms={rooms}
-                                lines={lines}
-                                onRoomClick={(r) => {
-                                    // Handle Click (Rename/Select)
-                                    if (onElementClick) onElementClick(r);
-
-                                    // Optional: Trigger rename directly here if it's the primary action
-                                    // But onElementClick usually handles selection.
-                                    // Let's implement the rename prompt here if needed, or rely on parent.
-                                    // DrawingViewer handles onElementClick -> handleRoomClick checks isRoom -> Prompt.
-                                }}
-                            />
-                            {/* VISUAL DEBUGGER */}
-                            <div className="absolute bottom-2 left-2 bg-black/80 text-white text-[10px] font-mono p-2 rounded max-w-md pointer-events-none">
-                                <div>Lines: {lines.length} | Rooms: {rooms.length}</div>
-                                <div className="text-gray-400 truncate">First Line: {JSON.stringify(lines[0])}</div>
-                                <div className="text-gray-400 truncate">First Room: {JSON.stringify(rooms[0]?.geometry)?.slice(0, 50)}...</div>
-                                <div>Bounds: Check Console</div>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                            <Loader2 className="h-8 w-8 animate-spin mb-2" />
-                            <span className="text-xs">Extracting 2D Geometry...</span>
-                        </div>
-                    )}
-                </div>
-
+            {/* TOGGLE CONTROLS */}
+            <div className="flex bg-slate-200 rounded p-1 border border-slate-300">
+                <button
+                    onClick={() => setShow2D(false)}
+                    className={`px-3 py-1 text-xs font-bold rounded transition-all ${!show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
+                >
+                    3D VIEW
+                </button>
+                <button
+                    onClick={() => setShow2D(true)}
+                    className={`px-3 py-1 text-xs font-bold rounded transition-all ${show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
+                >
+                    2D PLAN
+                </button>
             </div>
         </div>
-    );
+
+        {/* TWIN LAYER CONTAINER */}
+        <div className="flex-1 relative overflow-hidden">
+
+            {/* MAIN VIEWER (Always Mounted, Mode Controlled via Prop) */}
+            <div className={`absolute inset-0 z-10`}>
+                <ProfessionalIFCViewer
+                    fileUrl={safeFileUrl}
+                    id={fileId}
+                    rooms={rooms}
+                    onElementClick={onElementClick}
+                    onRoomRename={onRoomRename}
+                    viewMode={show2D ? '2d' : '3d'} // PASS MODE
+                />
+            </div>
+
+        </div>
+    </div>
+);
 
 
-    // Filter elements by page (if applicable) - for IFC assume page 1
-    const currentPage = 1;
-    const pageElements = smartElements.filter(el => el.page === currentPage || (!el.page && currentPage === 1));
+// Filter elements by page (if applicable) - for IFC assume page 1
+const currentPage = 1;
+const pageElements = smartElements.filter(el => el.page === currentPage || (!el.page && currentPage === 1));
 
-    // DEBUG: Log elements received
-    console.log(`[DrawingViewer] Received ${smartElements.length} elements. Displaying ${pageElements.length} on page 1.`);
-    if (pageElements.length > 0) {
-        console.log('[DrawingViewer] Sample Element:', pageElements[0]);
+// DEBUG: Log elements received
+console.log(`[DrawingViewer] Received ${smartElements.length} elements. Displaying ${pageElements.length} on page 1.`);
+if (pageElements.length > 0) {
+    console.log('[DrawingViewer] Sample Element:', pageElements[0]);
+}
+
+// Prepare Elements with Safe Parsing
+const parsedElements = pageElements.map(el => {
+    let bbox = el.bbox;
+    if (typeof bbox === 'string') {
+        try { bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
     }
+    let geometry = el.geometry;
+    if (typeof geometry === 'string') {
+        try { geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
+    }
+    return { ...el, bbox, geometry };
+});
 
-    // Prepare Elements with Safe Parsing
-    const parsedElements = pageElements.map(el => {
-        let bbox = el.bbox;
-        if (typeof bbox === 'string') {
-            try { bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
-        }
-        let geometry = el.geometry;
-        if (typeof geometry === 'string') {
-            try { geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
-        }
-        return { ...el, bbox, geometry };
-    });
+// Calculate Global Bounds for Normalization
+let globalMinX = Infinity, globalMinY = Infinity, globalMaxX = -Infinity, globalMaxY = -Infinity;
+parsedElements.forEach(el => {
+    if (el.bbox && Array.isArray(el.bbox) && el.bbox.length === 4) {
+        const [minX, minY, maxX, maxY] = el.bbox;
+        if (minX < globalMinX) globalMinX = minX;
+        if (minY < globalMinY) globalMinY = minY;
+        if (maxX > globalMaxX) globalMaxX = maxX;
+        if (maxY > globalMaxY) globalMaxY = maxY;
+    }
+});
 
-    // Calculate Global Bounds for Normalization
-    let globalMinX = Infinity, globalMinY = Infinity, globalMaxX = -Infinity, globalMaxY = -Infinity;
-    parsedElements.forEach(el => {
-        if (el.bbox && Array.isArray(el.bbox) && el.bbox.length === 4) {
-            const [minX, minY, maxX, maxY] = el.bbox;
-            if (minX < globalMinX) globalMinX = minX;
-            if (minY < globalMinY) globalMinY = minY;
-            if (maxX > globalMaxX) globalMaxX = maxX;
-            if (maxY > globalMaxY) globalMaxY = maxY;
-        }
-    });
+// Add padding (5%)
+const width = globalMaxX - globalMinX;
+const height = globalMaxY - globalMinY;
+const paddingX = width * 0.05;
+const paddingY = height * 0.05;
 
-    // Add padding (5%)
-    const width = globalMaxX - globalMinX;
-    const height = globalMaxY - globalMinY;
-    const paddingX = width * 0.05;
-    const paddingY = height * 0.05;
+globalMinX -= paddingX;
+globalMinY -= paddingY;
+globalMaxX += paddingX;
+globalMaxY += paddingY;
 
-    globalMinX -= paddingX;
-    globalMinY -= paddingY;
-    globalMaxX += paddingX;
-    globalMaxY += paddingY;
+const totalW = globalMaxX - globalMinX;
+const totalH = globalMaxY - globalMinY;
 
-    const totalW = globalMaxX - globalMinX;
-    const totalH = globalMaxY - globalMinY;
-
-    const getOverlayStyle = (bbox: number[], geometry: any[]) => {
-        if (!bbox || !Array.isArray(bbox) || bbox.length !== 4) {
-            return {
-                left: '50%', top: '50%', width: '10px', height: '10px'
-            };
-        }
-        const [minX, minY, maxX, maxY] = bbox;
-
-        // Position Logic (Global)
-        let left = ((minX - globalMinX) / totalW) * 100;
-        // FLIP Y-AXIS Logic: Top of div corresponds to MaxY of element
-        let top = 100 - (((maxY - globalMinY) / totalH) * 100);
-        let w = ((maxX - minX) / totalW) * 100;
-        let h = ((maxY - minY) / totalH) * 100;
-
-        // Safety
-        if (!Number.isFinite(left)) left = 0;
-        if (!Number.isFinite(top)) top = 0;
-        if (!Number.isFinite(w) || w === 0) w = 1;
-        if (!Number.isFinite(h) || h === 0) h = 1;
-
-        // Clip-Path Logic (Local Shape)
-        let clipPath = undefined;
-        if (geometry && Array.isArray(geometry) && geometry.length > 2) {
-            const points = geometry.map((p: any) => {
-                // Local X %: (x - minX) / width
-                const px = ((p.x - minX) / (maxX - minX)) * 100;
-                // Local Y %: Top is 0% (maxY), Bottom is 100% (minY)
-                // So (maxY - y) / height
-                const py = ((maxY - p.y) / (maxY - minY)) * 100;
-                return `${px.toFixed(1)}% ${py.toFixed(1)}%`;
-            }).join(', ');
-            clipPath = `polygon(${points})`;
-        }
-
+const getOverlayStyle = (bbox: number[], geometry: any[]) => {
+    if (!bbox || !Array.isArray(bbox) || bbox.length !== 4) {
         return {
-            left: `${left}%`,
-            top: `${top}%`,
-            width: `${w}%`,
-            height: `${h}%`,
-            clipPath: clipPath,
-            zIndex: 10
+            left: '50%', top: '50%', width: '10px', height: '10px'
         };
+    }
+    const [minX, minY, maxX, maxY] = bbox;
+
+    // Position Logic (Global)
+    let left = ((minX - globalMinX) / totalW) * 100;
+    // FLIP Y-AXIS Logic: Top of div corresponds to MaxY of element
+    let top = 100 - (((maxY - globalMinY) / totalH) * 100);
+    let w = ((maxX - minX) / totalW) * 100;
+    let h = ((maxY - minY) / totalH) * 100;
+
+    // Safety
+    if (!Number.isFinite(left)) left = 0;
+    if (!Number.isFinite(top)) top = 0;
+    if (!Number.isFinite(w) || w === 0) w = 1;
+    if (!Number.isFinite(h) || h === 0) h = 1;
+
+    // Clip-Path Logic (Local Shape)
+    let clipPath = undefined;
+    if (geometry && Array.isArray(geometry) && geometry.length > 2) {
+        const points = geometry.map((p: any) => {
+            // Local X %: (x - minX) / width
+            const px = ((p.x - minX) / (maxX - minX)) * 100;
+            // Local Y %: Top is 0% (maxY), Bottom is 100% (minY)
+            // So (maxY - y) / height
+            const py = ((maxY - p.y) / (maxY - minY)) * 100;
+            return `${px.toFixed(1)}% ${py.toFixed(1)}%`;
+        }).join(', ');
+        clipPath = `polygon(${points})`;
+    }
+
+    return {
+        left: `${left}%`,
+        top: `${top}%`,
+        width: `${w}%`,
+        height: `${h}%`,
+        clipPath: clipPath,
+        zIndex: 10
     };
+};
 
-    // Helper to determine element style and tooltip content based on Prompt Rules
-    const getElementProps = (el: any) => {
-        let type = (el.type || el.elementType || '').toLowerCase();
-        let label = el.label || el.description || '';
-        let colorClass = "border-slate-500 bg-slate-500/10";
+// Helper to determine element style and tooltip content based on Prompt Rules
+const getElementProps = (el: any) => {
+    let type = (el.type || el.elementType || '').toLowerCase();
+    let label = el.label || el.description || '';
+    let colorClass = "border-slate-500 bg-slate-500/10";
 
-        // 2. External Walls (Hatched - Pattern applied in render loop)
-        if (type.includes('wall') && (label.toLowerCase().includes('external') || el.isGlobal)) {
-            // High contrast white fill with black border (pattern overlay added in render)
-            colorClass = "bg-white border-2 border-black opacity-100 z-20";
-            label = "External Cavity Wall";
-        }
-        // 3. Internal Partition Walls (Solid Black)
-        else if (type.includes('wall')) {
-            colorClass = "bg-black border border-black opacity-100 z-20";
-            label = "Internal Partition Wall";
-        }
-        // 4. Windows (Clean Blue Box)
-        else if (type.includes('window')) {
-            colorClass = "bg-blue-50 border-2 border-blue-600 z-30";
-            label = `Window (${el.width || 'Standard'})`;
-        }
-        // 5. Doors (Simple Outline)
-        else if (type.includes('door')) {
-            colorClass = "border border-black bg-transparent z-30";
-            label = `Door (${el.width || 'Standard'})`;
-        }
-        // 1. Rooms (Transparent + Text)
-        else if (type === 'room') {
-            // Make transparent so grid shows through, just outline
-            colorClass = "bg-transparent border border-gray-200 hover:border-gray-400 cursor-pointer z-10";
-        }
+    // 2. External Walls (Hatched - Pattern applied in render loop)
+    if (type.includes('wall') && (label.toLowerCase().includes('external') || el.isGlobal)) {
+        // High contrast white fill with black border (pattern overlay added in render)
+        colorClass = "bg-white border-2 border-black opacity-100 z-20";
+        label = "External Cavity Wall";
+    }
+    // 3. Internal Partition Walls (Solid Black)
+    else if (type.includes('wall')) {
+        colorClass = "bg-black border border-black opacity-100 z-20";
+        label = "Internal Partition Wall";
+    }
+    // 4. Windows (Clean Blue Box)
+    else if (type.includes('window')) {
+        colorClass = "bg-blue-50 border-2 border-blue-600 z-30";
+        label = `Window (${el.width || 'Standard'})`;
+    }
+    // 5. Doors (Simple Outline)
+    else if (type.includes('door')) {
+        colorClass = "border border-black bg-transparent z-30";
+        label = `Door (${el.width || 'Standard'})`;
+    }
+    // 1. Rooms (Transparent + Text)
+    else if (type === 'room') {
+        // Make transparent so grid shows through, just outline
+        colorClass = "bg-transparent border border-gray-200 hover:border-gray-400 cursor-pointer z-10";
+    }
 
-        return { colorClass, label };
-    };
+    return { colorClass, label };
+};
 
-    const renderTooltipContent = (el: any) => {
-        const type = (el.type || el.elementType || '').toLowerCase();
-        const label = el.label || el.description;
+const renderTooltipContent = (el: any) => {
+    const type = (el.type || el.elementType || '').toLowerCase();
+    const label = el.label || el.description;
 
-        // 2. External Walls Spec
-        if (type.includes('wall') && label.toLowerCase().includes('external')) {
-            return (
-                <div className="p-3 space-y-2 min-w-[200px]">
-                    <div className="flex items-center gap-2 border-b border-border pb-2">
-                        <div className="w-3 h-3 bg-green-600 rounded-full"></div>
-                        <span className="font-bold text-sm">External Cavity Wall</span>
-                    </div>
-                    <div className="text-xs space-y-1 text-muted-foreground">
-                        <div className="flex justify-between"><span>Ext. Leaf:</span> <span className="text-foreground">102mm Brick</span></div>
-                        <div className="flex justify-between"><span>Cavity:</span> <span className="text-foreground">140mm Insul.</span></div>
-                        <div className="flex justify-between"><span>Int. Leaf:</span> <span className="text-foreground">100mm Block</span></div>
-                        <div className="flex justify-between font-medium border-t pt-1 mt-1"><span>Total:</span> <span className="text-foreground">342mm</span></div>
-                    </div>
-                </div>
-            );
-        }
-        // 3. Internal Walls Spec
-        if (type.includes('wall')) {
-            return (
-                <div className="p-3 space-y-2 min-w-[180px]">
-                    <div className="flex items-center gap-2 border-b border-border pb-2">
-                        <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
-                        <span className="font-bold text-sm">Internal Partition</span>
-                    </div>
-                    <div className="text-xs space-y-1 text-muted-foreground">
-                        <div className="flex justify-between"><span>Constr:</span> <span className="text-foreground">75mm Stud</span></div>
-                        <div className="flex justify-between"><span>Board:</span> <span className="text-foreground">12.5mm Plaster</span></div>
-                        <div className="flex justify-between font-medium border-t pt-1 mt-1"><span>Total:</span> <span className="text-foreground">100mm</span></div>
-                    </div>
-                </div>
-            );
-        }
-        // 1. Room Spec
-        if (type === 'room') {
-            // Automatic MEP & Finish Calculations
-            let perimeter = 0;
-            let wallArea = 0;
-            let skirting = 0;
-
-            if (el.geometry && Array.isArray(el.geometry) && el.geometry.length > 2) {
-                const pts = el.geometry;
-                for (let i = 0; i < pts.length; i++) {
-                    const p1 = pts[i];
-                    const p2 = pts[(i + 1) % pts.length];
-                    perimeter += Math.hypot(p2.x - p1.x, p2.y - p1.y);
-                }
-                // Unit Detection: If perimeter is huge (>200), it's likely MM. Convert to M.
-                if (perimeter > 200) perimeter /= 1000;
-
-                skirting = perimeter;
-                wallArea = perimeter * 2.4; // 2.4m Ceiling Height
-            }
-
-            return (
-                <div className="p-3 space-y-2 min-w-[220px]">
-                    <div className="font-bold text-lg text-amber-500 uppercase tracking-widest text-center border-b border-amber-500/30 pb-2">{label}</div>
-
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs py-1">
-                        <div className="text-muted-foreground text-right">Floor Area:</div>
-                        <div className="font-bold text-foreground">{parseFloat(String(el.quantity || "0")).toFixed(1)} m²</div>
-
-                        <div className="text-muted-foreground text-right">Perimeter:</div>
-                        <div className="font-mono">{perimeter.toFixed(1)} m</div>
-
-                        <div className="text-muted-foreground text-right">Est. Skirting:</div>
-                        <div className="font-mono text-emerald-600 font-bold">{skirting.toFixed(1)} m</div>
-
-                        <div className="text-muted-foreground text-right">Est. Wall Paint:</div>
-                        <div className="font-mono text-blue-600 font-bold">{wallArea.toFixed(1)} m²</div>
-                    </div>
-
-                    <div className="text-[10px] text-center text-muted-foreground bg-secondary/50 rounded px-2 py-1 mt-1 border border-secondary uppercase tracking-wider font-semibold hover:bg-secondary cursor-pointer hover:text-foreground transition-colors">
-                        Click to Rename
-                    </div>
-                </div>
-            );
-        }
-
-        // Generic Fallback
+    // 2. External Walls Spec
+    if (type.includes('wall') && label.toLowerCase().includes('external')) {
         return (
-            <div className="p-2 space-y-1">
-                <p className="font-semibold text-sm">{label}</p>
-                <p className="text-xs text-muted-foreground capitalize">{type}</p>
-                {el.quantity && <p className="text-xs">Qty: {el.quantity}</p>}
+            <div className="p-3 space-y-2 min-w-[200px]">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                    <div className="w-3 h-3 bg-green-600 rounded-full"></div>
+                    <span className="font-bold text-sm">External Cavity Wall</span>
+                </div>
+                <div className="text-xs space-y-1 text-muted-foreground">
+                    <div className="flex justify-between"><span>Ext. Leaf:</span> <span className="text-foreground">102mm Brick</span></div>
+                    <div className="flex justify-between"><span>Cavity:</span> <span className="text-foreground">140mm Insul.</span></div>
+                    <div className="flex justify-between"><span>Int. Leaf:</span> <span className="text-foreground">100mm Block</span></div>
+                    <div className="flex justify-between font-medium border-t pt-1 mt-1"><span>Total:</span> <span className="text-foreground">342mm</span></div>
+                </div>
             </div>
         );
-    };
-
-    if (isIFC || isSVG) {
+    }
+    // 3. Internal Walls Spec
+    if (type.includes('wall')) {
         return (
-            <div className="relative w-full h-full bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
-                <div className="absolute top-4 left-4 z-10 bg-slate-900/90 p-3 rounded-lg backdrop-blur-md shadow-xl border border-slate-700 w-64">
-                    <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2 mb-2">
-                        <Layers className="w-4 h-4" />
-                        Architect Plan View
-                    </h3>
-                    <div className="text-[10px] text-amber-500 mb-2 font-mono border-b border-slate-700 pb-2">
-                        {smartElements.length} Elements | Net Area: {parsedElements.filter(e => e.type === 'room').reduce((acc, r) => acc + (parseFloat(r.quantity) || 0), 0).toFixed(1)} m²
-                    </div>
+            <div className="p-3 space-y-2 min-w-[180px]">
+                <div className="flex items-center gap-2 border-b border-border pb-2">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                    <span className="font-bold text-sm">Internal Partition</span>
+                </div>
+                <div className="text-xs space-y-1 text-muted-foreground">
+                    <div className="flex justify-between"><span>Constr:</span> <span className="text-foreground">75mm Stud</span></div>
+                    <div className="flex justify-between"><span>Board:</span> <span className="text-foreground">12.5mm Plaster</span></div>
+                    <div className="flex justify-between font-medium border-t pt-1 mt-1"><span>Total:</span> <span className="text-foreground">100mm</span></div>
+                </div>
+            </div>
+        );
+    }
+    // 1. Room Spec
+    if (type === 'room') {
+        // Automatic MEP & Finish Calculations
+        let perimeter = 0;
+        let wallArea = 0;
+        let skirting = 0;
 
-                    {/* Legend */}
-                    <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
-                        <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-stone-300 border border-stone-800"></div> Ext. Wall</div>
-                        <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-stone-500 border border-stone-700"></div> Int. Wall</div>
-                        <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-cyan-200/40 border border-cyan-400"></div> Window</div>
-                        <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-transparent border-2 border-dashed border-amber-500/50"></div> Room</div>
-                    </div>
+        if (el.geometry && Array.isArray(el.geometry) && el.geometry.length > 2) {
+            const pts = el.geometry;
+            for (let i = 0; i < pts.length; i++) {
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % pts.length];
+                perimeter += Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            }
+            // Unit Detection: If perimeter is huge (>200), it's likely MM. Convert to M.
+            if (perimeter > 200) perimeter /= 1000;
+
+            skirting = perimeter;
+            wallArea = perimeter * 2.4; // 2.4m Ceiling Height
+        }
+
+        return (
+            <div className="p-3 space-y-2 min-w-[220px]">
+                <div className="font-bold text-lg text-amber-500 uppercase tracking-widest text-center border-b border-amber-500/30 pb-2">{label}</div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs py-1">
+                    <div className="text-muted-foreground text-right">Floor Area:</div>
+                    <div className="font-bold text-foreground">{parseFloat(String(el.quantity || "0")).toFixed(1)} m²</div>
+
+                    <div className="text-muted-foreground text-right">Perimeter:</div>
+                    <div className="font-mono">{perimeter.toFixed(1)} m</div>
+
+                    <div className="text-muted-foreground text-right">Est. Skirting:</div>
+                    <div className="font-mono text-emerald-600 font-bold">{skirting.toFixed(1)} m</div>
+
+                    <div className="text-muted-foreground text-right">Est. Wall Paint:</div>
+                    <div className="font-mono text-blue-600 font-bold">{wallArea.toFixed(1)} m²</div>
                 </div>
 
-                <div className="flex-1 relative bg-white p-8 overflow-hidden flex items-center justify-center">
-                    {/* Placeholder for real IFC Viewer */}
-                    {isIFC && (
-                        <div
-                            className="relative shadow-xl border-2 border-slate-900 bg-white"
-                            style={{
-                                width: '90%',
-                                aspectRatio: `${totalW} / ${totalH}`,
-                                maxHeight: '90%'
-                            }}
-                        >
-                            {/* Paper Grid (Subtle) */}
-                            <div className="absolute inset-0 opacity-20" style={{
-                                backgroundImage: `linear-gradient(#ccc 1px, transparent 1px), linear-gradient(90deg, #ccc 1px, transparent 1px)`,
-                                backgroundSize: '20px 20px'
-                            }}></div>
-
-                            {/* Render Elements */}
-                            {parsedElements.map((el: any, idx: number) => {
-                                const style = getOverlayStyle(el.bbox, el.geometry);
-                                const { colorClass, label } = getElementProps(el);
-
-                                // Specific render for Patterned Walls
-                                const isExternal = label.includes('External');
-                                const customStyle = isExternal ? {
-                                    backgroundImage: `repeating-linear-gradient(45deg, #ddd, #ddd 2px, transparent 2px, transparent 6px)`
-                                } : {};
-
-                                return (
-                                    <div
-                                        key={el.id}
-                                        className={`absolute transition-all duration-200 flex items-center justify-center`}
-                                        style={{ ...style, ...customStyle }}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (onElementClick) onElementClick(el);
-                                        }}
-                                    >
-                                        <ContextualTooltip content={renderTooltipContent(el)} className="w-full h-full block">
-                                            <div className={`w-full h-full ${colorClass}`}>
-
-                                                {/* Room Labels - Only show if room */}
-                                                {el.type === 'room' && (
-                                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20">
-                                                        <span className="text-[12px] font-bold text-black uppercase tracking-widest">{el.label}</span>
-                                                        <span className="text-[10px] text-gray-600 font-mono mt-0.5">{parseFloat(String(el.quantity || "0")).toFixed(1)} m²</span>
-                                                    </div>
-                                                )}
-
-                                            </div>
-                                        </ContextualTooltip>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
+                <div className="text-[10px] text-center text-muted-foreground bg-secondary/50 rounded px-2 py-1 mt-1 border border-secondary uppercase tracking-wider font-semibold hover:bg-secondary cursor-pointer hover:text-foreground transition-colors">
+                    Click to Rename
                 </div>
             </div>
         );
     }
 
-    // PDF / Image View (Untouched Logic mostly, just enhanced styling)
+    // Generic Fallback
     return (
-        <div className="relative w-full h-[600px] bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
-            {isImage ? (
-                <img src={fileUrl} alt="Drawing" className="w-full h-full object-contain" />
-            ) : (
-                <iframe src={fileUrl} className="w-full h-full" title="PDF Viewer" />
-            )}
-
-            {pageElements.map((el, idx) => {
-                const { colorClass } = getElementProps(el);
-                let className = `absolute border-2 transition-all cursor-pointer ${colorClass} `;
-                if (selectedElement === el.id) className += "ring-2 ring-offset-2 ring-blue-600 z-20 ";
-
-                return (
-                    <ContextualTooltip key={el.id} content={renderTooltipContent(el)}>
-                        <div
-                            key={`${el.id}-${idx}`}
-                            className={className}
-                            style={getOverlayStyle(el.bbox)}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedElement(el.id);
-                                if (onElementClick) onElementClick(el);
-                            }}
-                        />
-                    </ContextualTooltip>
-                );
-            })}
+        <div className="p-2 space-y-1">
+            <p className="font-semibold text-sm">{label}</p>
+            <p className="text-xs text-muted-foreground capitalize">{type}</p>
+            {el.quantity && <p className="text-xs">Qty: {el.quantity}</p>}
         </div>
     );
+};
+
+if (isIFC || isSVG) {
+    return (
+        <div className="relative w-full h-full bg-slate-950 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
+            <div className="absolute top-4 left-4 z-10 bg-slate-900/90 p-3 rounded-lg backdrop-blur-md shadow-xl border border-slate-700 w-64">
+                <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2 mb-2">
+                    <Layers className="w-4 h-4" />
+                    Architect Plan View
+                </h3>
+                <div className="text-[10px] text-amber-500 mb-2 font-mono border-b border-slate-700 pb-2">
+                    {smartElements.length} Elements | Net Area: {parsedElements.filter(e => e.type === 'room').reduce((acc, r) => acc + (parseFloat(r.quantity) || 0), 0).toFixed(1)} m²
+                </div>
+
+                {/* Legend */}
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                    <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-stone-300 border border-stone-800"></div> Ext. Wall</div>
+                    <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-stone-500 border border-stone-700"></div> Int. Wall</div>
+                    <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-cyan-200/40 border border-cyan-400"></div> Window</div>
+                    <div className="flex items-center gap-1.5 text-stone-300"><div className="w-3 h-3 bg-transparent border-2 border-dashed border-amber-500/50"></div> Room</div>
+                </div>
+            </div>
+
+            <div className="flex-1 relative bg-white p-8 overflow-hidden flex items-center justify-center">
+                {/* Placeholder for real IFC Viewer */}
+                {isIFC && (
+                    <div
+                        className="relative shadow-xl border-2 border-slate-900 bg-white"
+                        style={{
+                            width: '90%',
+                            aspectRatio: `${totalW} / ${totalH}`,
+                            maxHeight: '90%'
+                        }}
+                    >
+                        {/* Paper Grid (Subtle) */}
+                        <div className="absolute inset-0 opacity-20" style={{
+                            backgroundImage: `linear-gradient(#ccc 1px, transparent 1px), linear-gradient(90deg, #ccc 1px, transparent 1px)`,
+                            backgroundSize: '20px 20px'
+                        }}></div>
+
+                        {/* Render Elements */}
+                        {parsedElements.map((el: any, idx: number) => {
+                            const style = getOverlayStyle(el.bbox, el.geometry);
+                            const { colorClass, label } = getElementProps(el);
+
+                            // Specific render for Patterned Walls
+                            const isExternal = label.includes('External');
+                            const customStyle = isExternal ? {
+                                backgroundImage: `repeating-linear-gradient(45deg, #ddd, #ddd 2px, transparent 2px, transparent 6px)`
+                            } : {};
+
+                            return (
+                                <div
+                                    key={el.id}
+                                    className={`absolute transition-all duration-200 flex items-center justify-center`}
+                                    style={{ ...style, ...customStyle }}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onElementClick) onElementClick(el);
+                                    }}
+                                >
+                                    <ContextualTooltip content={renderTooltipContent(el)} className="w-full h-full block">
+                                        <div className={`w-full h-full ${colorClass}`}>
+
+                                            {/* Room Labels - Only show if room */}
+                                            {el.type === 'room' && (
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20">
+                                                    <span className="text-[12px] font-bold text-black uppercase tracking-widest">{el.label}</span>
+                                                    <span className="text-[10px] text-gray-600 font-mono mt-0.5">{parseFloat(String(el.quantity || "0")).toFixed(1)} m²</span>
+                                                </div>
+                                            )}
+
+                                        </div>
+                                    </ContextualTooltip>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// PDF / Image View (Untouched Logic mostly, just enhanced styling)
+return (
+    <div className="relative w-full h-[600px] bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
+        {isImage ? (
+            <img src={fileUrl} alt="Drawing" className="w-full h-full object-contain" />
+        ) : (
+            <iframe src={fileUrl} className="w-full h-full" title="PDF Viewer" />
+        )}
+
+        {pageElements.map((el, idx) => {
+            const { colorClass } = getElementProps(el);
+            let className = `absolute border-2 transition-all cursor-pointer ${colorClass} `;
+            if (selectedElement === el.id) className += "ring-2 ring-offset-2 ring-blue-600 z-20 ";
+
+            return (
+                <ContextualTooltip key={el.id} content={renderTooltipContent(el)}>
+                    <div
+                        key={`${el.id}-${idx}`}
+                        className={className}
+                        style={getOverlayStyle(el.bbox)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedElement(el.id);
+                            if (onElementClick) onElementClick(el);
+                        }}
+                    />
+                </ContextualTooltip>
+            );
+        })}
+    </div>
+);
 }
 
 function BoxIcon(props: any) {
