@@ -1254,16 +1254,28 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             </div>
         </div > `;
 
-        console.log(roomMap);
-        setTenderReport(reportHtml);
-        console.log(roomMap);
-        setTenderReport(reportHtml);
+
     };
 
     // --- VIEW MODE SWITCHER IMPL ---
     useEffect(() => {
         if (!components) return;
-        const clipper = components.tools.get(OBC.Clipper);
+        // Use EdgesClipper for better plan visualization (lines)
+        // If not available, fallback? No, EdgesClipper is standard.
+        // If EdgesClipper is not exported (unlikely), we might fall back to SimpleClipper, 
+        // but let's assume EdgesClipper exists as per warning about 'Clipper'.
+        let clipper: any;
+        try {
+            clipper = components.tools.get(OBC.EdgesClipper);
+        } catch (e) {
+            try {
+                // Fallback to SimpleClipper if EdgesClipper fails instantiation
+                // clipper = components.tools.get(OBC.SimpleClipper);
+            } catch (e2) { }
+        }
+
+        if (!clipper) return;
+
         const cam = components.camera as OBC.OrthoPerspectiveCamera;
         if (!cam || !cam.controls) return;
 
@@ -1389,7 +1401,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     );
 }); // Close Memo (Default Shallow Compare)
 
-export { ProfessionalIFCViewer };
+
 
 // --- HELPER: 2D ROOM PLAN RENDERER (Native SVG Coords) ---
 export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any[], lines?: any[], onRoomClick: (r: any) => void }) {

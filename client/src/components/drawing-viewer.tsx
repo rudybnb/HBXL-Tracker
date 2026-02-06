@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ContextualTooltip from "./contextual-tooltip";
 import ExtractedElementsPanel from "./extracted-elements-panel";
-import { ProfessionalIFCViewer, RoomPlan2DFinal } from "./professional-ifc-viewer-v2";
+import { ProfessionalIFCViewer } from "./professional-ifc-viewer-v2";
 
 interface JobFile {
     id: string;
