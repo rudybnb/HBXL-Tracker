@@ -643,8 +643,54 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                     }
                 }
 
+                if (generatedLines.length === 0) {
+                    console.warn("⚠️ Slicer returned 0 lines. Falling back to Bounding Box method.");
+                    // FALLBACK: Bounding Box Logic
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            const mesh = frag.mesh;
+                            const fid = frag.id;
+
+                            let type = null;
+                            if (walls && walls[fid]) type = 'wall';
+                            else if (doors && doors[fid]) type = 'door';
+                            else if (windows && windows[fid]) type = 'window';
+                            else if (proxies && proxies[fid]) type = 'structure';
+
+                            if (type) {
+                                if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+                                const baseBox = mesh.geometry.boundingBox!;
+
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    const count = mesh.count;
+                                    for (let i = 0; i < count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        const box = baseBox.clone();
+                                        box.applyMatrix4(tempMatrix);
+                                        box.applyMatrix4(mesh.matrixWorld);
+
+                                        generatedLines.push({
+                                            id: `${fid}-${i}`, type: type, subtype: 'bbox',
+                                            x: box.min.x, y: box.min.z,
+                                            w: box.max.x - box.min.x, h: box.max.z - box.min.z
+                                        });
+                                    }
+                                } else {
+                                    const box = baseBox.clone();
+                                    box.applyMatrix4(mesh.matrixWorld);
+                                    generatedLines.push({
+                                        id: fid, type: type, subtype: 'bbox',
+                                        x: box.min.x, y: box.min.z,
+                                        w: box.max.x - box.min.x, h: box.max.z - box.min.z
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (isActive) {
-                    console.log(`✅ Extracted ${generatedLines.length} Section Segments`);
+                    console.log(`✅ Extracted ${generatedLines.length} Plan Lines (Method: ${generatedLines[0]?.subtype || 'mixed'})`);
                     setExtractedLines(generatedLines);
                     if (onGeometryParsed) onGeometryParsed(generatedLines);
                 }
