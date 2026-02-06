@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ContextualTooltip from "./contextual-tooltip";
 import ExtractedElementsPanel from "./extracted-elements-panel";
-import { ProfessionalIFCViewer, RoomPlan2D } from "./professional-ifc-viewer-v2";
+import { ProfessionalIFCViewer, RoomPlan2DFinal } from "./professional-ifc-viewer-v2";
 
 interface JobFile {
     id: string;
@@ -115,7 +115,7 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onEleme
                 <div className={`absolute inset-0 bg-white transition-opacity duration-300 ${show2D ? 'opacity-100 z-20' : 'opacity-0 pointer-events-none'}`}>
                     {canShow2D ? (
                         <>
-                            <RoomPlan2D
+                            <RoomPlan2DFinal
                                 rooms={rooms}
                                 lines={lines}
                                 onRoomClick={(r) => {

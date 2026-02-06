@@ -1325,7 +1325,7 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
 export { ProfessionalIFCViewer };
 
 // --- HELPER: 2D ROOM PLAN RENDERER (Native SVG Coords) ---
-export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], lines?: any[], onRoomClick: (r: any) => void }) {
+export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any[], lines?: any[], onRoomClick: (r: any) => void }) {
     if ((!rooms || rooms.length === 0) && (!lines || lines.length === 0)) return <div className="text-xs text-gray-400 p-4">No data detected yet.</div>;
 
     // 1. Calculate World Bounds
