@@ -1315,9 +1315,14 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                     // 2. Position High Up & Fix Clipping
                     // Ensure the camera sees the whole slice
-                    cam.three.near = -500;
-                    cam.three.far = 5000;
-                    cam.three.updateProjectionMatrix();
+                    try {
+                        const activeCam = cam.get();
+                        if (activeCam) {
+                            activeCam.near = -500;
+                            activeCam.far = 5000;
+                            activeCam.updateProjectionMatrix();
+                        }
+                    } catch (e) { console.warn("Camera Clip Update Failed", e); }
 
                     const height = size * 2;
                     cam.controls.setPosition(cx, bbox.max.y + height, cz, true);
