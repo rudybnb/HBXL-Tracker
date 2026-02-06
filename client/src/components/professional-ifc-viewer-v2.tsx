@@ -1348,29 +1348,29 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
 
     // 2. PARSE ROOMS & ANALYZE SCALE
     const safeRooms = rooms?.filter(r => r && r.geometry) || [];
-    const parsedRooms: any[] = [];
-    let roomsMax = 0;
-
-    safeRooms.forEach(room => {
-        try {
-            const pts = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
-            if (Array.isArray(pts) && pts.length > 2) {
-                const rPts = pts.map((p: any) => ({ x: p.x ?? p[0], y: p.y ?? p[1] }));
-                rPts.forEach(p => {
-                    const mx = Math.max(Math.abs(p.x), Math.abs(p.y));
-                    if (mx > roomsMax) roomsMax = mx;
-                });
-                parsedRooms.push({ ...room, pts: rPts });
-            }
-        } catch (e) { }
-    });
+    // 2. PARSE ROOMS & ANALYZE SCALE (SKIPPED FOR CLEANUP)
+    // User requested to remove "the properter drawing circle" (Room Polygons).
+    // We will kept the parse logic if needed later but NOT include in bounds.
 
     // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
-    // If Rooms are MM (>2000) and Lines are Meters (<500), we must SCALE LINES UP.
+    // If Lines are Meters (<500), we must SCALE LINES UP to MM default?
+    // Actually, if we remove rooms, we don't have a mismatch reference.
+    // But we still want to render lines nicely. 
+    // If linesMax < 500 (Meters), let's render them as Meters (scale 1).
+    // But wait, previous fix forced them to 1000 if mismatch.
+    // If we remove rooms, we rely on lines. 
+    // If lines are Meters, they will be small (0-10) but mapDim will handle it.
+    // UNLESS autoScale forces them to be huge.
+
     let renderScaleLines = 1;
-    if (roomsMax > 2000 && linesMax > 0 && linesMax < 500) {
-        renderScaleLines = 1000;
-        console.log("📐 Scale Mismatch Detected: Scaling IFC Lines x1000 to match Rooms (MM)");
+    // If we have NO rooms, check if lines are small.
+    // If linesMax < 500, it's Meters.
+    // If linesMax > 500, it's Millimeters.
+
+    // We just render as is. Mappers handle min/max.
+    if (linesMax > 0 && linesMax < 500) {
+        // It is meters.
+        // renderScaleLines = 1; 
     }
 
     // 4. COMPUTE BOUNDS (With Scale Applied)
@@ -1385,9 +1385,12 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
         }
     });
 
+    // SKIP ROOM BOUNDS
+    /*
     parsedRooms.forEach(r => {
         r.pts.forEach((p: any) => updateBounds(p.x, p.y));
     });
+    */
 
     if (minX === Infinity) return <div className="p-4">Empty Geometry</div>;
 
@@ -1489,50 +1492,43 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
             >
                 <svg viewBox={vb} className="w-full h-full">
 
-                    {/* 1. ROOMS (Background) */}
-                    {parsedRooms.map(room => {
-                        const d = "M " + room.pts.map((p: any) => `${mapX(p.x)} ${mapY(p.y)}`).join(" L ") + " Z";
+                    {/* 1. ROOMS (Background) - DISABLED BY USER REQUEST */}
+                    {/* 
+                    parsedRooms.map(room => { ... }) 
+                    */}
 
-                        // Centroid
-                        let cx = 0, cy = 0;
-                        room.pts.forEach((p: any) => { cx += p.x; cy += p.y; });
-                        cx /= room.pts.length;
-                        cy /= room.pts.length;
+                    {/*
+                     return (
+                    <g
+                        key={room.id}
+                        onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                    >
+                        
+                        <path d={d} fill="#f1f5f9" fillOpacity="1" stroke="#cbd5e1" strokeWidth={strokeWidth} />
 
-                        // Map Centroid
-                        const svgCx = mapX(cx);
-                        const svgCy = mapY(cy);
-
-                        return (
-                            <g
-                                key={room.id}
-                                onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
-                                className="cursor-pointer hover:opacity-80 transition-opacity"
-                            >
-                                {/* Professional Style: Light Slate Fill, Subtle Border */}
-                                <path d={d} fill="#f1f5f9" fillOpacity="1" stroke="#cbd5e1" strokeWidth={strokeWidth} />
-
-                                <text
-                                    x={svgCx} y={svgCy}
-                                    textAnchor="middle" dominantBaseline="middle"
-                                    fontSize={fontSize}
-                                    fontWeight="bold" fill="#0f172a"
-                                    style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
-                                >
-                                    {room.name}
-                                </text>
-                                <text
-                                    x={svgCx} y={svgCy + fontSize * 1.2}
-                                    textAnchor="middle" dominantBaseline="middle"
-                                    fontSize={fontSize * 0.7}
-                                    fill="#64748b"
-                                    style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
-                                >
-                                    {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
-                                </text>
-                            </g>
-                        )
+                        <text
+                            x={svgCx} y={svgCy}
+                            textAnchor="middle" dominantBaseline="middle"
+                            fontSize={fontSize}
+                            fontWeight="bold" fill="#0f172a"
+                            style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
+                        >
+                            {room.name}
+                        </text>
+                        <text
+                            x={svgCx} y={svgCy + fontSize * 1.2}
+                            textAnchor="middle" dominantBaseline="middle"
+                            fontSize={fontSize * 0.7}
+                            fill="#64748b"
+                            style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
+                        >
+                            {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
+                        </text>
+                    </g>
+                    )
                     })}
+                    */}
 
                     {/* 2. STRUCTURE / LINES (Foreground) */}
                     {/* 2. STRUCTURE / LINES (Foreground) */}
