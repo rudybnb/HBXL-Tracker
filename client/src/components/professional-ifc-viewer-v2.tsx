@@ -1313,7 +1313,12 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     // 1. Fix Orientation: When looking straight down (Y), UP must be Z
                     cam.controls.camera.up.set(0, 0, -1);
 
-                    // 2. Position High Up
+                    // 2. Position High Up & Fix Clipping
+                    // Ensure the camera sees the whole slice
+                    cam.three.near = -500;
+                    cam.three.far = 5000;
+                    cam.three.updateProjectionMatrix();
+
                     const height = size * 2;
                     cam.controls.setPosition(cx, bbox.max.y + height, cz, true);
                     cam.controls.setTarget(cx, cy, cz, true);
