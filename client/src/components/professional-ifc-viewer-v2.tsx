@@ -1258,85 +1258,85 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     };
 
     // --- VIEW MODE SWITCHER IMPL ---
+    // --- VIEW MODE SWITCHER IMPL ---
     useEffect(() => {
         if (!components) return;
-        // Use EdgesClipper for better plan visualization (lines)
-        // If not available, fallback? No, EdgesClipper is standard.
-        // If EdgesClipper is not exported (unlikely), we might fall back to SimpleClipper, 
-        // but let's assume EdgesClipper exists as per warning about 'Clipper'.
-        // Revert to Standard Clipper for Reliability
-        let clipper: any;
-        try {
-            // Try Standard Clipper First (SimpleClipper)
-            clipper = components.tools.get(OBC.Clipper);
-        } catch (e) {
-            console.warn("Clipper not found", e);
-        }
 
-        if (!clipper) return;
-
+        // 1. CAMERA LOGIC (PRIORITY)
         const cam = components.camera as OBC.OrthoPerspectiveCamera;
-        if (!cam || !cam.controls) return;
+        if (cam && cam.controls) {
+            if (viewMode === '2d') {
+                // Switch to Ortho
+                try { cam.setProjection('Orthographic'); } catch (e) { console.warn("Proj Switch Error", e); }
 
-        if (viewMode === '2d') {
-            // 1. Switch to Ortho
-            cam.setProjection('Orthographic');
+                // Position Top Down
+                const bbox = new THREE.Box3();
+                const scene = components.scene.get();
+                scene.traverse((child) => {
+                    if (child instanceof THREE.Mesh && child.geometry && child.geometry.boundingBox) {
+                        const b = child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld);
+                        bbox.union(b);
+                    }
+                });
 
-            // 2. Position Top Down
-            // We need model center. 'camera.fit' caches bounds?
-            // Let's assume controls.fitToBox was called on load.
-            cam.controls.setPosition(0, 100, 0, true);
-            cam.controls.setTarget(0, 0, 0, true);
-            // We need a proper "Top View" orientation
-            // control.setLookAt(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, enableTransition)
+                if (!bbox.isEmpty()) {
+                    const cx = (bbox.min.x + bbox.max.x) / 2;
+                    const cy = (bbox.min.y + bbox.max.y) / 2;
+                    const cz = (bbox.min.z + bbox.max.z) / 2;
 
-            // We need to re-find bbox to center correctly
-            const bbox = new THREE.Box3();
-            // ... re-calc bbox logic or cache it? Cached 'interactables' won't help bounds.
-            // Let's assume (0,0,0) is roughly center or re-use fitToBox logic if we exposed it.
-            // For now, let's just trigger "Plan View" on the controls if available
-            // cam.controls.fitToBox(bbox, true); -> This preserves angle.
-
-            // Manual Box Search (Fast)
-            const scene = components.scene.get();
-            scene.traverse((child) => {
-                if (child instanceof THREE.Mesh && child.geometry && child.geometry.boundingBox) {
-                    const b = child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld);
-                    bbox.union(b);
+                    // Look Top Down
+                    cam.controls.setLookAt(cx, bbox.max.y + 50, cz, cx, cy, cz, true);
+                    cam.controls.fitToBox(bbox, true);
+                } else {
+                    // Fallback if no bounds
+                    cam.controls.setPosition(0, 100, 0, true);
+                    cam.controls.setTarget(0, 0, 0, true);
                 }
-            });
 
-            if (!bbox.isEmpty()) {
-                const cx = (bbox.min.x + bbox.max.x) / 2;
-                const cy = (bbox.min.y + bbox.max.y) / 2;
-                const cz = (bbox.min.z + bbox.max.z) / 2;
-                const size = Math.max(bbox.max.x - bbox.min.x, bbox.max.z - bbox.min.z);
-
-                // Look Top Down
-                cam.controls.setLookAt(cx, bbox.max.y + 50, cz, cx, 0, cz, true);
-                // Zoom to fit?
-                // Ortho zoom is handled by camera.zoom or frustum
-                // controls.dollyTo(distance, enableTransition)
-                // fitToBox handles it.
-                cam.controls.fitToBox(bbox, true);
-            }
-
-            // 3. Enable Floor Plan Clipper
-            clipper.enabled = true;
-            // Safer check for planes existence
-            if (clipper.planes && clipper.planes.length === 0) {
-                clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.2, 0));
-            } else if (!clipper.planes) {
-                // Fallback if planes prop missing (some versions)
+                // Try to hide grid (Optional)
                 try {
-                    clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.2, 0));
+                    const grid = components.tools.get(OBC.SimpleGrid);
+                    if (grid) grid.visible = false;
+                } catch (e) { }
+
+            } else {
+                // 3D Mode
+                try { cam.setProjection('Perspective'); } catch (e) { }
+
+                // Restore Grid
+                try {
+                    const grid = components.tools.get(OBC.SimpleGrid);
+                    if (grid) grid.visible = true;
                 } catch (e) { }
             }
-        } else {
-            // 3D Mode
-            cam.setProjection('Perspective');
-            clipper.deleteAll(); // Remove sections
-            clipper.enabled = false;
+        }
+
+        // 2. CLIPPER LOGIC (SECONDARY)
+        let clipper: any;
+        try { clipper = components.tools.get(OBC.EdgesClipper); } catch (e) { }
+        if (!clipper) {
+            try { clipper = components.tools.get(OBC.SimpleClipper); } catch (e) { }
+        }
+        // Last resort try generic Clipper token
+        if (!clipper) {
+            try { clipper = components.tools.get(OBC.Clipper); } catch (e) { }
+        }
+
+        if (clipper) {
+            if (viewMode === '2d') {
+                clipper.enabled = true;
+                // Create Plane if needed
+                const hasPlanes = clipper.planes && clipper.planes.length > 0;
+                // Also check private properties if necessary or just try creation
+                if (!hasPlanes) {
+                    try {
+                        clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.5, 0));
+                    } catch (e) { console.warn("Clip Create Error", e); }
+                }
+            } else {
+                clipper.enabled = false;
+                clipper.deleteAll();
+            }
         }
 
     }, [viewMode, components]);
