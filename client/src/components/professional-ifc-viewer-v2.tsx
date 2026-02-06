@@ -1594,10 +1594,6 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                         )
                     })}
 
-                    <text x={svgW / 2} y={svgH / 2} fill="red" fontSize={fontSize * 5} textAnchor="middle">
-                        DEBUG: RENDERER V2 ACTIVE
-                    </text>
-                    })}
 
                 </svg>
             </div>
