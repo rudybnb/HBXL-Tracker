@@ -1578,19 +1578,25 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                         else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
                         else if (l.type === 'door') { strokeColor = '#d97706'; }
 
-                        return (
-                            <rect
-                                key={`rect-${i}`}
-                                x={mapX_Scaled(l.x)}
-                                y={mapY_Scaled(l.y + l.h)}
-                                width={mapDim_Scaled(l.w)}
-                                height={mapDim_Scaled(l.h)}
-                                fill="none"
-                                stroke={strokeColor}
-                                strokeWidth={mapDim(0.02 * scale)} // Thinner line
-                                strokeDasharray={`${0.1 * scale},${0.1 * scale}`} // Dashed
-                            />
+                        <rect
+                            key={`rect-${i}`}
+                            x={mapX_Scaled(l.x)}
+                            y={mapY_Scaled(l.y + l.h)}
+                            width={mapDim_Scaled(l.w)}
+                            height={mapDim_Scaled(l.h)}
+                            fill="none"
+                            fillOpacity="0"
+                            style={{ fill: 'none' }}
+                            stroke="red" // FORCE RED DEBUG
+                            strokeWidth={mapDim(0.05 * scale)}
+                            strokeDasharray={`${0.2 * scale},${0.2 * scale}`}
+                        />
                         )
+                    })}
+
+                    <text x={svgW / 2} y={svgH / 2} fill="red" fontSize={fontSize * 5} textAnchor="middle">
+                        DEBUG: RENDERER V2 ACTIVE
+                    </text>
                     })}
 
                 </svg>
