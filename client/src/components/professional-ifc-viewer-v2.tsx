@@ -1269,35 +1269,45 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // Switch to Ortho
                 try { cam.setProjection('Orthographic'); } catch (e) { console.warn("Proj Switch Error", e); }
 
-                // Position Top Down
-                const bbox = new THREE.Box3();
-                const scene = components.scene.get();
-                scene.traverse((child) => {
-                    if (child instanceof THREE.Mesh && child.geometry && child.geometry.boundingBox) {
-                        const b = child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld);
-                        bbox.union(b);
+                // ASYNC BOUNDS CALCULATION (Prevent Freeze)
+                setTimeout(() => {
+                    const bbox = new THREE.Box3();
+                    // Method 1: Use Fragment Manager (Much Faster)
+                    try {
+                        const fragments = components.tools.get(OBC.FragmentManager);
+                        // Iterate Meshes (InstancedMesh) directly
+                        for (const mesh of fragments.meshes) {
+                            if (mesh.geometry && mesh.geometry.boundingBox) {
+                                // Apply World Matrix (InstancedMesh usually at 0,0,0 but just in case)
+                                const b = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+                                bbox.union(b);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Fragment bounds failed", e);
                     }
-                });
 
-                if (!bbox.isEmpty()) {
-                    const cx = (bbox.min.x + bbox.max.x) / 2;
-                    const cy = (bbox.min.y + bbox.max.y) / 2;
-                    const cz = (bbox.min.z + bbox.max.z) / 2;
+                    if (!bbox.isEmpty()) {
+                        const cx = (bbox.min.x + bbox.max.x) / 2;
+                        const cy = (bbox.min.y + bbox.max.y) / 2;
+                        const cz = (bbox.min.z + bbox.max.z) / 2;
 
-                    // Look Top Down
-                    cam.controls.setLookAt(cx, bbox.max.y + 50, cz, cx, cy, cz, true);
-                    cam.controls.fitToBox(bbox, true);
-                } else {
-                    // Fallback if no bounds
-                    cam.controls.setPosition(0, 100, 0, true);
-                    cam.controls.setTarget(0, 0, 0, true);
-                }
+                        // Look Top Down
+                        cam.controls.setLookAt(cx, bbox.max.y + 20, cz, cx, cy, cz, true);
+                        cam.controls.fitToBox(bbox, true);
+                    } else {
+                        // Fallback if no bounds found
+                        cam.controls.setPosition(0, 50, 0, true);
+                        cam.controls.setTarget(0, 0, 0, true);
+                    }
 
-                // Try to hide grid (Optional)
-                try {
-                    const grid = components.tools.get(OBC.SimpleGrid);
-                    if (grid) grid.visible = false;
-                } catch (e) { }
+                    // Try to hide grid (Optional)
+                    try {
+                        const grid = components.tools.get(OBC.SimpleGrid);
+                        if (grid) grid.visible = false;
+                    } catch (e) { }
+
+                }, 50);
 
             } else {
                 // 3D Mode
