@@ -1348,9 +1348,28 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
 
     // 2. PARSE ROOMS & ANALYZE SCALE
     const safeRooms = rooms?.filter(r => r && r.geometry) || [];
-    // 2. PARSE ROOMS & ANALYZE SCALE (SKIPPED FOR CLEANUP)
-    // User requested to remove "the properter drawing circle" (Room Polygons).
-    // We will kept the parse logic if needed later but NOT include in bounds.
+    // 2. PARSE ROOMS
+    const parsedRooms: any[] = [];
+    safeRooms.forEach(room => {
+        try {
+            let pts: any[] = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
+            if (!Array.isArray(pts) || pts.length < 3) return;
+
+            // Basic Centroid
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            pts.forEach(p => {
+                if (p.x < minX) minX = p.x;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
+            });
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+
+            parsedRooms.push({ ...room, pts, cx, cy });
+        } catch (e) { }
+    });
+
 
     // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
     // If Lines are Meters (<500), we must SCALE LINES UP to MM default?
@@ -1492,43 +1511,46 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
             >
                 <svg viewBox={vb} className="w-full h-full">
 
-                    {/* 1. ROOMS (Background) - DISABLED BY USER REQUEST */}
-                    {/* 
-                    parsedRooms.map(room => { ... }) 
-                    */}
+                    {/* 1. ROOMS (Transparent Interactive Layer) */}
+                    {parsedRooms.map(room => {
+                        // Build Path
+                        if (!room.pts || room.pts.length < 2) return null;
+                        const d = `M ${room.pts.map((p: any) => `${mapX_Scaled(p.x * renderScaleLines)} ${mapY_Scaled(p.y * renderScaleLines)}`).join(" L ")} Z`;
 
-                    {/*
-                     return (
-                    <g
-                        key={room.id}
-                        onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
-                        className="cursor-pointer hover:opacity-80 transition-opacity"
-                    >
-                        
-                        <path d={d} fill="#f1f5f9" fillOpacity="1" stroke="#cbd5e1" strokeWidth={strokeWidth} />
+                        const svgCx = mapX_Scaled(room.cx * renderScaleLines);
+                        const svgCy = mapY_Scaled(room.cy * renderScaleLines);
 
-                        <text
-                            x={svgCx} y={svgCy}
-                            textAnchor="middle" dominantBaseline="middle"
-                            fontSize={fontSize}
-                            fontWeight="bold" fill="#0f172a"
-                            style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
-                        >
-                            {room.name}
-                        </text>
-                        <text
-                            x={svgCx} y={svgCy + fontSize * 1.2}
-                            textAnchor="middle" dominantBaseline="middle"
-                            fontSize={fontSize * 0.7}
-                            fill="#64748b"
-                            style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
-                        >
-                            {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
-                        </text>
-                    </g>
-                    )
+                        return (
+                            <g
+                                key={room.id}
+                                onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
+                                className="cursor-pointer hover:opacity-80 transition-opacity"
+                            >
+                                {/* Transparent Fill for Clickability, No Stroke */}
+                                <path d={d} fill="transparent" stroke="none" />
+
+                                <text
+                                    x={svgCx} y={svgCy}
+                                    textAnchor="middle" dominantBaseline="middle"
+                                    fontSize={fontSize}
+                                    fontWeight="bold" fill="#0f172a"
+                                    style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
+                                >
+                                    {room.name}
+                                </text>
+                                <text
+                                    x={svgCx} y={svgCy + fontSize * 1.2}
+                                    textAnchor="middle" dominantBaseline="middle"
+                                    fontSize={fontSize * 0.7}
+                                    fill="#64748b"
+                                    style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
+                                >
+                                    {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
+                                </text>
+                            </g>
+                        )
                     })}
-                    */}
+
 
                     {/* 2. STRUCTURE / LINES (Foreground) */}
                     {/* 2. STRUCTURE / LINES (Foreground) */}
