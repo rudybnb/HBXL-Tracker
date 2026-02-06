@@ -240,8 +240,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     path: "https://unpkg.com/web-ifc@0.0.54/",
                     absolute: true
                 }
-                ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
-                // ifcLoader.settings.webIfc.OPTIMIZE_PROFILES = true; // CAUSES CRASH ON RENDER
+                // ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // DISABLED TO DEBUG VISIBILITY
 
                 // Load
                 step = "3. Downloading Model";
@@ -255,12 +254,11 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 setLoadingStatus("Parsing Geometry...");
                 const model = await ifcLoader.load(buffer);
 
+                console.log("📦 Model Loaded. Items:", model ? model.items.length : 0);
+
                 // CAMERA FIT (Use High-Level Culler logic if available, or manual box)
                 // Manual Box Fit
                 if (model) {
-                    // const highlighter = new OBC.FragmentHighlighter(comps);
-                    // highlighter.update();
-
                     // Compute Bounding Box of all fragments
                     const bbox = new THREE.Box3();
                     for (const frag of model.items) {
@@ -270,10 +268,14 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                         bbox.union(box);
                     }
 
+                    console.log("📦 Calculated BBox:", JSON.stringify(bbox));
+
                     if (!bbox.isEmpty()) {
                         comps.camera.controls.fitToBox(bbox, true);
                         console.log("📸 Fits camera to model");
                         modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
+                    } else {
+                        console.warn("⚠️ Model Bounding Box is EMPTY!");
                     }
                 }
 
