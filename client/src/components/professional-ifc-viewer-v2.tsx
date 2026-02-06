@@ -1395,293 +1395,295 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
             // Lines M, Rooms MM -> Scale Rooms DOWN
             parsedRooms.forEach(r => {
                 r.pts.forEach((p: any) => { p.x *= 0.001; p.y *= 0.001; });
-            }
+                r.cx *= 0.001; r.cy *= 0.001;
+            });
+        }
     }
 
-        // 3B. CENTROID ALIGNMENT - DISABLED
-        // We rely on Scale Normalization (above).
-        // Manual Centroid Snapping introduces errors when wall thicknesses are asymmetrical (e.g. thick external vs thin internal).
-        // If the IFC coordinates are valid, scaling relative to (0,0) (point multiplication) is sufficient.
+    // 3B. CENTROID ALIGNMENT - DISABLED
+    // We rely on Scale Normalization (above).
+    // Manual Centroid Snapping introduces errors when wall thicknesses are asymmetrical (e.g. thick external vs thin internal).
+    // If the IFC coordinates are valid, scaling relative to (0,0) (point multiplication) is sufficient.
 
 
-        // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
-        // If Lines are Meters (<500), we must SCALE LINES UP to MM default?
-        // Actually, if we remove rooms, we don't have a mismatch reference.
-        // But we still want to render lines nicely. 
-        // If linesMax < 500 (Meters), let's render them as Meters (scale 1).
-        // But wait, previous fix forced them to 1000 if mismatch.
-        // If we remove rooms, we rely on lines. 
-        // If lines are Meters, they will be small (0-10) but mapDim will handle it.
-        // UNLESS autoScale forces them to be huge.
+    // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
+    // If Lines are Meters (<500), we must SCALE LINES UP to MM default?
+    // Actually, if we remove rooms, we don't have a mismatch reference.
+    // But we still want to render lines nicely. 
+    // If linesMax < 500 (Meters), let's render them as Meters (scale 1).
+    // But wait, previous fix forced them to 1000 if mismatch.
+    // If we remove rooms, we rely on lines. 
+    // If lines are Meters, they will be small (0-10) but mapDim will handle it.
+    // UNLESS autoScale forces them to be huge.
 
-        let renderScaleLines = 1;
-        // If we have NO rooms, check if lines are small.
-        // If linesMax < 500, it's Meters.
-        // If linesMax > 500, it's Millimeters.
+    let renderScaleLines = 1;
+    // If we have NO rooms, check if lines are small.
+    // If linesMax < 500, it's Meters.
+    // If linesMax > 500, it's Millimeters.
 
-        // We just render as is. Mappers handle min/max.
-        if (linesMax > 0 && linesMax < 500) {
-            // It is meters.
-            // renderScaleLines = 1; 
+    // We just render as is. Mappers handle min/max.
+    if (linesMax > 0 && linesMax < 500) {
+        // It is meters.
+        // renderScaleLines = 1; 
+    }
+
+    // 4. COMPUTE BOUNDS (With Scale Applied)
+    lines.forEach(l => {
+        if (l.subtype === 'segment') {
+            updateBounds(l.p1.x * renderScaleLines, l.p1.y * renderScaleLines);
+            updateBounds(l.p2.x * renderScaleLines, l.p2.y * renderScaleLines);
+        } else {
+            // Fallback Rect
+            updateBounds(l.x * renderScaleLines, l.y * renderScaleLines);
+            updateBounds((l.x + l.w) * renderScaleLines, (l.y + l.h) * renderScaleLines);
         }
+    });
 
-        // 4. COMPUTE BOUNDS (With Scale Applied)
-        lines.forEach(l => {
-            if (l.subtype === 'segment') {
-                updateBounds(l.p1.x * renderScaleLines, l.p1.y * renderScaleLines);
-                updateBounds(l.p2.x * renderScaleLines, l.p2.y * renderScaleLines);
-            } else {
-                // Fallback Rect
-                updateBounds(l.x * renderScaleLines, l.y * renderScaleLines);
-                updateBounds((l.x + l.w) * renderScaleLines, (l.y + l.h) * renderScaleLines);
-            }
-        });
+    // 4b. INCLUDE ROOMS IN BOUNDS
+    // NOW SAFE because we normalized scales.
+    parsedRooms.forEach(r => {
+        r.pts.forEach((p: any) => updateBounds(p.x, p.y));
+    });
 
-        // 4b. INCLUDE ROOMS IN BOUNDS
-        // NOW SAFE because we normalized scales.
-        parsedRooms.forEach(r => {
-            r.pts.forEach((p: any) => updateBounds(p.x, p.y));
-        });
+    if (minX === Infinity) return <div className="p-4">Empty Geometry</div>;
 
-        if (minX === Infinity) return <div className="p-4">Empty Geometry</div>;
+    // 2. Normalize & Scale
+    // Determine strict scaling if units mismatch (e.g. lines in meters, rooms in mm)
+    // For now, we assume they are roughly same space or handled by the parser.
+    // (The previous "auto-align" logic was risky, let's assume raw coords are correct from previous fixes)
 
-        // 2. Normalize & Scale
-        // Determine strict scaling if units mismatch (e.g. lines in meters, rooms in mm)
-        // For now, we assume they are roughly same space or handled by the parser.
-        // (The previous "auto-align" logic was risky, let's assume raw coords are correct from previous fixes)
+    const geomW = maxX - minX;
+    const geomH = maxY - minY;
 
-        const geomW = maxX - minX;
-        const geomH = maxY - minY;
+    // Add 10% padding
+    const padding = Math.max(geomW, geomH) * 0.1;
 
-        // Add 10% padding
-        const padding = Math.max(geomW, geomH) * 0.1;
+    // Coordinate Mappers
+    // SVG X = (worldX - minX) + padding
+    // SVG Y = (maxY - worldY) + padding  <-- FLIP Y HERE (Standard CAD to SVG)
 
-        // Coordinate Mappers
-        // SVG X = (worldX - minX) + padding
-        // SVG Y = (maxY - worldY) + padding  <-- FLIP Y HERE (Standard CAD to SVG)
+    const mapX = (x: number) => (x - minX) + padding;
+    const mapY = (y: number) => (maxY - y) + padding;
+    const mapDim = (d: number) => d; // Dimensions preserve scale
 
-        const mapX = (x: number) => (x - minX) + padding;
-        const mapY = (y: number) => (maxY - y) + padding;
-        const mapDim = (d: number) => d; // Dimensions preserve scale
+    // ADJUST MAPPER FOR RENDER SCALE
+    const mapX_Scaled = (x: number) => mapX(x * renderScaleLines);
+    const mapY_Scaled = (y: number) => mapY(y * renderScaleLines);
+    const mapDim_Scaled = (d: number) => mapDim(d * renderScaleLines);
 
-        // ADJUST MAPPER FOR RENDER SCALE
-        const mapX_Scaled = (x: number) => mapX(x * renderScaleLines);
-        const mapY_Scaled = (y: number) => mapY(y * renderScaleLines);
-        const mapDim_Scaled = (d: number) => mapDim(d * renderScaleLines);
+    const svgW = geomW + (padding * 2);
+    const svgH = geomH + (padding * 2);
+    const vb = `0 0 ${svgW} ${svgH}`;
 
-        const svgW = geomW + (padding * 2);
-        const svgH = geomH + (padding * 2);
-        const vb = `0 0 ${svgW} ${svgH}`;
+    // --- INTERACTION LOGIC ---
+    const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
+    const [isDragging, setIsDragging] = useState(false);
+    const lastPos = useRef({ x: 0, y: 0 });
 
-        // --- INTERACTION LOGIC ---
-        const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
-        const [isDragging, setIsDragging] = useState(false);
-        const lastPos = useRef({ x: 0, y: 0 });
+    const handleWheel = (e: React.WheelEvent) => {
+        e.stopPropagation(); e.preventDefault();
+        const scaleAmount = -e.deltaY * 0.001;
+        const newScale = Math.max(0.1, Math.min(transform.k * (1 + scaleAmount), 20));
+        setTransform(prev => ({ ...prev, k: newScale }));
+    };
 
-        const handleWheel = (e: React.WheelEvent) => {
-            e.stopPropagation(); e.preventDefault();
-            const scaleAmount = -e.deltaY * 0.001;
-            const newScale = Math.max(0.1, Math.min(transform.k * (1 + scaleAmount), 20));
-            setTransform(prev => ({ ...prev, k: newScale }));
-        };
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+        lastPos.current = { x: e.clientX, y: e.clientY };
+    };
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const dx = e.clientX - lastPos.current.x;
+        const dy = e.clientY - lastPos.current.y;
+        lastPos.current = { x: e.clientX, y: e.clientY };
+        setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+    };
+    const handleMouseUp = () => setIsDragging(false);
 
-        const handleMouseDown = (e: React.MouseEvent) => {
-            e.preventDefault();
-            setIsDragging(true);
-            lastPos.current = { x: e.clientX, y: e.clientY };
-        };
-        const handleMouseMove = (e: React.MouseEvent) => {
-            if (!isDragging) return;
-            e.preventDefault();
-            const dx = e.clientX - lastPos.current.x;
-            const dy = e.clientY - lastPos.current.y;
-            lastPos.current = { x: e.clientX, y: e.clientY };
-            setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-        };
-        const handleMouseUp = () => setIsDragging(false);
+    // Zoom Controls
+    const zoomIn = () => setTransform(prev => ({ ...prev, k: Math.min(prev.k * 1.2, 20) }));
+    const zoomOut = () => setTransform(prev => ({ ...prev, k: Math.max(prev.k / 1.2, 0.1) }));
+    const reset = () => setTransform({ x: 0, y: 0, k: 1 });
 
-        // Zoom Controls
-        const zoomIn = () => setTransform(prev => ({ ...prev, k: Math.min(prev.k * 1.2, 20) }));
-        const zoomOut = () => setTransform(prev => ({ ...prev, k: Math.max(prev.k / 1.2, 0.1) }));
-        const reset = () => setTransform({ x: 0, y: 0, k: 1 });
+    const fontSize = (Math.max(geomW, geomH) * 0.03) / transform.k;
+    const strokeWidth = (Math.max(geomW, geomH) * 0.002) / transform.k;
 
-        const fontSize = (Math.max(geomW, geomH) * 0.03) / transform.k;
-        const strokeWidth = (Math.max(geomW, geomH) * 0.002) / transform.k;
+    // AUTO-DETECT VISUAL SCALE IF MISSING
+    // If scene is HUGE (> 500 units), we assume MM.
+    // If lines/scale aren't provided, stroke will be tiny (0.25).
+    // so we default autoScale to 1000 if scene is large.
+    const autoScale = (Math.max(geomW, geomH) > 500) ? 1000 : 1;
 
-        // AUTO-DETECT VISUAL SCALE IF MISSING
-        // If scene is HUGE (> 500 units), we assume MM.
-        // If lines/scale aren't provided, stroke will be tiny (0.25).
-        // so we default autoScale to 1000 if scene is large.
-        const autoScale = (Math.max(geomW, geomH) > 500) ? 1000 : 1;
+    return (
+        <div className="relative w-full h-full overflow-hidden bg-white select-none">
+            {/* CONTROLS */}
+            <div className="absolute top-2 right-2 z-30 flex flex-col gap-1 bg-white border rounded shadow p-1">
+                <button onClick={zoomIn} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Zoom In">+</button>
+                <button onClick={zoomOut} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Zoom Out">-</button>
+                <button onClick={reset} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Reset">R</button>
+            </div>
 
-        return (
-            <div className="relative w-full h-full overflow-hidden bg-white select-none">
-                {/* CONTROLS */}
-                <div className="absolute top-2 right-2 z-30 flex flex-col gap-1 bg-white border rounded shadow p-1">
-                    <button onClick={zoomIn} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Zoom In">+</button>
-                    <button onClick={zoomOut} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Zoom Out">-</button>
-                    <button onClick={reset} className="p-1 hover:bg-slate-100 rounded text-slate-600 font-bold text-xs" title="Reset">R</button>
-                </div>
+            <div className="absolute top-2 left-2 z-30 bg-black/50 text-white text-[10px] px-2 py-1 rounded pointer-events-none">
+                Scroll to Zoom • Drag to Pan
+            </div>
 
-                <div className="absolute top-2 left-2 z-30 bg-black/50 text-white text-[10px] px-2 py-1 rounded pointer-events-none">
-                    Scroll to Zoom • Drag to Pan
-                </div>
+            {/* TRANSFORM CONTAINER */}
+            <div
+                className="w-full h-full cursor-grab active:cursor-grabbing"
+                onWheel={handleWheel}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                style={{
+                    transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+                    transformOrigin: 'center center',
+                    transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+                }}
+            >
+                <svg viewBox={vb} className="w-full h-full">
 
-                {/* TRANSFORM CONTAINER */}
-                <div
-                    className="w-full h-full cursor-grab active:cursor-grabbing"
-                    onWheel={handleWheel}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseUp}
-                    style={{
-                        transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
-                        transformOrigin: 'center center',
-                        transition: isDragging ? 'none' : 'transform 0.1s ease-out'
-                    }}
-                >
-                    <svg viewBox={vb} className="w-full h-full">
+                    {/* 1. ROOMS (Transparent Interactive Layer) */}
+                    {parsedRooms.map(room => {
+                        // Build Path (room.pts are ALREADY SCALED by roomScale now)
+                        // But mapX_Scaled applies renderScaleLines?
+                        // Wait: Lines didn't get scaled in loop 3. renderScaleLines is 1.
+                        // So mapX_Scaled calls mapX(x * 1).
 
-                        {/* 1. ROOMS (Transparent Interactive Layer) */}
-                        {parsedRooms.map(room => {
-                            // Build Path (room.pts are ALREADY SCALED by roomScale now)
-                            // But mapX_Scaled applies renderScaleLines?
-                            // Wait: Lines didn't get scaled in loop 3. renderScaleLines is 1.
-                            // So mapX_Scaled calls mapX(x * 1).
+                        if (!room.pts || room.pts.length < 2) return null;
+                        const d = `M ${room.pts.map((p: any) => `${mapX_Scaled(p.x)} ${mapY_Scaled(p.y)}`).join(" L ")} Z`;
 
-                            if (!room.pts || room.pts.length < 2) return null;
-                            const d = `M ${room.pts.map((p: any) => `${mapX_Scaled(p.x)} ${mapY_Scaled(p.y)}`).join(" L ")} Z`;
+                        const svgCx = mapX_Scaled(room.cx);
+                        const svgCy = mapY_Scaled(room.cy);
 
-                            const svgCx = mapX_Scaled(room.cx);
-                            const svgCy = mapY_Scaled(room.cy);
+                        return (
+                            <g
+                                key={room.id}
+                                onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
+                                className="cursor-pointer hover:opacity-80 transition-opacity"
+                            >
+                                {/* Transparent Click Target + Subtle Outline for Verification */}
+                                <path d={d} fill="transparent" stroke="#cbd5e1" strokeWidth={mapDim(0.02 * renderScaleLines)} strokeDasharray="5,5" />
 
-                            return (
-                                <g
-                                    key={room.id}
-                                    onClick={(e) => { e.stopPropagation(); onRoomClick(room); }}
-                                    className="cursor-pointer hover:opacity-80 transition-opacity"
+                                <text
+                                    x={svgCx} y={svgCy}
+                                    textAnchor="middle" dominantBaseline="middle"
+                                    fontSize={fontSize}
+                                    fontWeight="bold" fill="#0f172a"
+                                    style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
                                 >
-                                    {/* Transparent Click Target + Subtle Outline for Verification */}
-                                    <path d={d} fill="transparent" stroke="#cbd5e1" strokeWidth={mapDim(0.02 * renderScaleLines)} strokeDasharray="5,5" />
-
-                                    <text
-                                        x={svgCx} y={svgCy}
-                                        textAnchor="middle" dominantBaseline="middle"
-                                        fontSize={fontSize}
-                                        fontWeight="bold" fill="#0f172a"
-                                        style={{ fontFamily: 'Inter, sans-serif', textTransform: 'uppercase', pointerEvents: 'none' }}
-                                    >
-                                        {room.name}
-                                    </text>
-                                    <text
-                                        x={svgCx} y={svgCy + fontSize * 1.2}
-                                        textAnchor="middle" dominantBaseline="middle"
-                                        fontSize={fontSize * 0.7}
-                                        fill="#64748b"
-                                        style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
-                                    >
-                                        {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
-                                    </text>
-                                </g>
-                            )
-                        })}
+                                    {room.name}
+                                </text>
+                                <text
+                                    x={svgCx} y={svgCy + fontSize * 1.2}
+                                    textAnchor="middle" dominantBaseline="middle"
+                                    fontSize={fontSize * 0.7}
+                                    fill="#64748b"
+                                    style={{ fontFamily: 'Inter, sans-serif', pointerEvents: 'none' }}
+                                >
+                                    {room.area ? `${parseFloat(room.area).toFixed(1)} m²` : ''}
+                                </text>
+                            </g>
+                        )
+                    })}
 
 
-                        {/* 2. STRUCTURE / LINES (Foreground) */}
-                        {/* 2. STRUCTURE / LINES (Foreground) */}
-                        {lines.map((l, i) => {
-                            // NEW: Handle Segments (Vectors)
-                            // NEW: Handle Segments (Vectors)
-                            if (l.subtype === 'segment') {
-                                // PHYSICAL SIZES (in Meters)
-                                // AUTO-DETECT SCALE if unitScale missing
-                                // Use l.unitScale if present, else trigger Auto logic depending on scene size?
-                                // Safest: Use l.unitScale OR fallback to autoScale.
-                                const scale = l.unitScale || autoScale;
-                                let physicalWidth = 0.05 * scale;
-                                let stroke = '#1e293b';
+                    {/* 2. STRUCTURE / LINES (Foreground) */}
+                    {/* 2. STRUCTURE / LINES (Foreground) */}
+                    {lines.map((l, i) => {
+                        // NEW: Handle Segments (Vectors)
+                        // NEW: Handle Segments (Vectors)
+                        if (l.subtype === 'segment') {
+                            // PHYSICAL SIZES (in Meters)
+                            // AUTO-DETECT SCALE if unitScale missing
+                            // Use l.unitScale if present, else trigger Auto logic depending on scene size?
+                            // Safest: Use l.unitScale OR fallback to autoScale.
+                            const scale = l.unitScale || autoScale;
+                            let physicalWidth = 0.05 * scale;
+                            let stroke = '#1e293b';
 
-                                // Wall = 0.25m -> 250mm
-                                if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25 * scale; }
-                                // Window = 0.05m -> 50mm
-                                else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1 * scale; }
-                                else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.05 * scale; }
-                                else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3 * scale; }
-
-                                return (
-                                    <line
-                                        key={`seg-${i}`}
-                                        x1={mapX_Scaled(l.p1.x)}
-                                        y1={mapY_Scaled(l.p1.y)}
-                                        x2={mapX_Scaled(l.p2.x)}
-                                        y2={mapY_Scaled(l.p2.y)}
-                                        stroke={stroke}
-                                        strokeWidth={mapDim(physicalWidth)}
-                                        strokeLinecap="square"
-                                        opacity={0.9}
-                                    />
-                                )
-                            }
-
-                            // FALLBACK: ENHANCED VISUALIZATION
-                            let strokeColor = '#94a3b8'; // Default Slate
-                            let strokeW = strokeWidth;   // Default Thin
-                            let fill = 'none';
-                            let fillOpacity = 1; // Initialize fillOpacity
-                            let dashArray = `${strokeWidth * 4},${strokeWidth * 4}`; // Default Dashed
-
-                            // 1. WALLS: Distinguish External vs Internal by Thickness
-                            if (l.type === 'wall') {
-                                // Find the thinner dimension to estimate wall thickness
-                                const minDim = Math.min(l.w, l.h) * (l.unitScale || 1); // Check absolute size
-                                const isExternal = (minDim > 0.25) || (minDim > 250); // >250mm is likely external
-
-                                strokeColor = '#0f172a'; // Black for all walls
-                                if (isExternal) {
-                                    strokeW = strokeWidth * 3; // Thick for External
-                                    dashArray = 'none';        // Solid for External
-                                } else {
-                                    strokeW = strokeWidth * 1.5; // Medium for Internal
-                                    dashArray = 'none';          // Solid for Internal (Clearer than dashed)
-                                }
-                            }
-                            // 2. WINDOWS: Blue Glazing Style
-                            else if (l.type === 'window') {
-                                strokeColor = '#0ea5e9'; // Sky Blue
-                                fill = '#e0f2fe';        // Very Light Blue Fill
-                                fillOpacity = 0.5;
-                                dashArray = 'none';      // Solid
-                                strokeW = strokeWidth;
-                            }
-                            // 3. DOORS: Wood Style
-                            else if (l.type === 'door') {
-                                strokeColor = '#d97706'; // Amber/Brown
-                                fill = 'none';
-                                dashArray = `${strokeWidth * 2},${strokeWidth * 2}`; // Dotted for swing
-                                strokeW = strokeWidth;
-                            }
+                            // Wall = 0.25m -> 250mm
+                            if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25 * scale; }
+                            // Window = 0.05m -> 50mm
+                            else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1 * scale; }
+                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.05 * scale; }
+                            else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3 * scale; }
 
                             return (
-                                <rect
-                                    key={`rect-${i}`}
-                                    x={mapX_Scaled(l.x)}
-                                    y={mapY_Scaled(l.y + l.h)}
-                                    width={mapDim_Scaled(l.w)}
-                                    height={mapDim_Scaled(l.h)}
-                                    fill={fill}
-                                    fillOpacity={fillOpacity}
-                                    stroke={strokeColor}
-                                    strokeWidth={strokeW}
-                                    strokeDasharray={dashArray}
+                                <line
+                                    key={`seg-${i}`}
+                                    x1={mapX_Scaled(l.p1.x)}
+                                    y1={mapY_Scaled(l.p1.y)}
+                                    x2={mapX_Scaled(l.p2.x)}
+                                    y2={mapY_Scaled(l.p2.y)}
+                                    stroke={stroke}
+                                    strokeWidth={mapDim(physicalWidth)}
+                                    strokeLinecap="square"
+                                    opacity={0.9}
                                 />
                             )
+                        }
 
-                        })}
+                        // FALLBACK: ENHANCED VISUALIZATION
+                        let strokeColor = '#94a3b8'; // Default Slate
+                        let strokeW = strokeWidth;   // Default Thin
+                        let fill = 'none';
+                        let fillOpacity = 1; // Initialize fillOpacity
+                        let dashArray = `${strokeWidth * 4},${strokeWidth * 4}`; // Default Dashed
+
+                        // 1. WALLS: Distinguish External vs Internal by Thickness
+                        if (l.type === 'wall') {
+                            // Find the thinner dimension to estimate wall thickness
+                            const minDim = Math.min(l.w, l.h) * (l.unitScale || 1); // Check absolute size
+                            const isExternal = (minDim > 0.25) || (minDim > 250); // >250mm is likely external
+
+                            strokeColor = '#0f172a'; // Black for all walls
+                            if (isExternal) {
+                                strokeW = strokeWidth * 3; // Thick for External
+                                dashArray = 'none';        // Solid for External
+                            } else {
+                                strokeW = strokeWidth * 1.5; // Medium for Internal
+                                dashArray = 'none';          // Solid for Internal (Clearer than dashed)
+                            }
+                        }
+                        // 2. WINDOWS: Blue Glazing Style
+                        else if (l.type === 'window') {
+                            strokeColor = '#0ea5e9'; // Sky Blue
+                            fill = '#e0f2fe';        // Very Light Blue Fill
+                            fillOpacity = 0.5;
+                            dashArray = 'none';      // Solid
+                            strokeW = strokeWidth;
+                        }
+                        // 3. DOORS: Wood Style
+                        else if (l.type === 'door') {
+                            strokeColor = '#d97706'; // Amber/Brown
+                            fill = 'none';
+                            dashArray = `${strokeWidth * 2},${strokeWidth * 2}`; // Dotted for swing
+                            strokeW = strokeWidth;
+                        }
+
+                        return (
+                            <rect
+                                key={`rect-${i}`}
+                                x={mapX_Scaled(l.x)}
+                                y={mapY_Scaled(l.y + l.h)}
+                                width={mapDim_Scaled(l.w)}
+                                height={mapDim_Scaled(l.h)}
+                                fill={fill}
+                                fillOpacity={fillOpacity}
+                                stroke={strokeColor}
+                                strokeWidth={strokeW}
+                                strokeDasharray={dashArray}
+                            />
+                        )
+
+                    })}
 
 
-                    </svg>
-                </div>
+                </svg>
             </div>
-        );
-    }
+        </div>
+    );
+}
