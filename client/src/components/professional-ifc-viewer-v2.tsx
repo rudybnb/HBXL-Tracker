@@ -235,7 +235,7 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                     absolute: true
                 }
                 ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
-                ifcLoader.settings.webIfc.OPTIMIZE_PROFILES = true;
+                // ifcLoader.settings.webIfc.OPTIMIZE_PROFILES = true; // CAUSES CRASH ON RENDER
 
                 // Load
                 step = "3. Downloading Model";
