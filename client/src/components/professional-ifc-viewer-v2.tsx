@@ -557,8 +557,51 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                         }
                     }
                     if (lowestY === Infinity) lowestY = 0;
-                    const cutY = lowestY + 1.2;
-                    console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)}`);
+
+                    // DETECT UNITS (Heuristic)
+                    // If the bounding box is HUGE (e.g. > 100 on Y or overall), it's likely Millimeters.
+                    // Standard House is ~3-10m high. In MM that's 3000-10000.
+                    let unitScale = 1;
+                    // Check if likely MM
+                    // We can't rely just on lowestY position (could be far from origin).
+                    // Let's check the size of the first frag?
+                    if (Math.abs(lowestY) > 500) {
+                        // Suspiciously large offset? Or just far from origin.
+                        // Better check: iterate all boxes and find Max Dimension.
+                    }
+
+                    // Better Heuristic: Check typical wall height? 
+                    // Let's default to Meters unless we see huge numbers.
+                    // If lowestY is > 1000, probably MM? Not necessarily.
+                    // Let's assume user screenshot (coordinates ~6000) implies MM.
+                    // Let's force check average coord size?
+
+                    // Let's use a simpler check: If cutY calculation at 1.2 yields 'nothing', we might need 1200.
+                    // But we need to know BEFORE slicing.
+
+                    // Let's assume if the model bounds width/height > 500, it is MM.
+                    let maxDim = 0;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            if (frag.mesh && frag.mesh.geometry.boundingBox) {
+                                const b = frag.mesh.geometry.boundingBox;
+                                maxDim = Math.max(maxDim, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+                            }
+                        }
+                    }
+
+                    // If max dimension of a single fragment (like a wall) is > 100, it's definitely MM.
+                    if (maxDim > 50) {
+                        unitScale = 1000;
+                        console.log("📏 Detected Millimeters (Fragment Dim > 50). Scale Factor: 1000");
+                    } else {
+                        console.log("📏 Detected Meters. Scale Factor: 1");
+                    }
+
+                    // Cut Plane
+                    const cutOffset = 1.2 * unitScale;
+                    const cutY = lowestY + cutOffset;
+                    console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)} (Base: ${lowestY.toFixed(2)} + Offset: ${cutOffset})`);
 
                     if (model.items) {
                         for (const frag of model.items) {
@@ -606,7 +649,8 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                                                 generatedLines.push({
                                                     id: `${fid}-${i}`, type: type!, subtype: 'segment',
                                                     p1: { x: points[0].x, y: points[0].z },
-                                                    p2: { x: points[1].x, y: points[1].z }
+                                                    p2: { x: points[1].x, y: points[1].z },
+                                                    unitScale: unitScale // Pass scale to renderer
                                                 });
                                             }
                                         };
@@ -654,7 +698,8 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                                         generatedLines.push({
                                             id: `${fid}-${i}`, type: type, subtype: 'bbox',
                                             x: box.min.x, y: box.min.z,
-                                            w: box.max.x - box.min.x, h: box.max.z - box.min.z
+                                            w: box.max.x - box.min.x, h: box.max.z - box.min.z,
+                                            unitScale: unitScale
                                         });
                                     }
                                 } else {
@@ -663,7 +708,8 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                                     generatedLines.push({
                                         id: fid, type: type, subtype: 'bbox',
                                         x: box.min.x, y: box.min.z,
-                                        w: box.max.x - box.min.x, h: box.max.z - box.min.z
+                                        w: box.max.x - box.min.x, h: box.max.z - box.min.z,
+                                        unitScale: unitScale
                                     });
                                 }
                             }
@@ -672,7 +718,7 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                 }
 
                 if (isActive && shouldExtract) {
-                    console.log(`✅ Extracted ${generatedLines.length} Plan Lines (Method: ${generatedLines[0]?.subtype || 'mixed'})`);
+                    console.log(`✅ Extracted ${generatedLines.length} Plan Lines. UnitScale: ${unitScale}`);
                     setExtractedLines(generatedLines);
                     if (onGeometryParsed) onGeometryParsed(generatedLines);
                 }
@@ -1456,19 +1502,20 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                     {/* 2. STRUCTURE / LINES (Foreground) */}
                     {lines.map((l, i) => {
                         // NEW: Handle Segments (Vectors)
+                        // NEW: Handle Segments (Vectors)
                         if (l.subtype === 'segment') {
                             // PHYSICAL SIZES (in Meters)
-                            let physicalWidth = 0.05; // Default 5cm
+                            // SCALE ADJUSTMENT: If unitScale is 1000 (MM), we multiply sizes by 1000.
+                            const scale = l.unitScale || 1;
+                            let physicalWidth = 0.05 * scale;
                             let stroke = '#1e293b';
 
-                            // Wall = 0.2m (20cm) - Standard Brick
-                            if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25; }
-                            // Window = 0.05m (glass pane)
-                            else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1; }
-                            // Door = 0.05m (panel)
-                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.1; }
-                            // Structure = 0.3m
-                            else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3; }
+                            // Wall = 0.2m -> 200mm
+                            if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25 * scale; }
+                            // Window = 0.05m -> 50mm
+                            else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1 * scale; }
+                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.1 * scale; }
+                            else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3 * scale; }
 
                             return (
                                 <line
@@ -1490,6 +1537,7 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                         let fill = '#94a3b8'; // Slate 400
                         let opacity = 0.5;
                         let strokeColor = '#475569'; // Slate 600
+                        const scale = l.unitScale || 1;
 
                         if (l.type === 'wall') { fill = '#334155'; opacity = 0.8; strokeColor = '#0f172a'; } // Dark Slate
                         else if (l.type === 'window') { fill = '#bae6fd'; opacity = 0.6; strokeColor = '#0ea5e9'; }
@@ -1505,7 +1553,7 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                                 fill={fill}
                                 fillOpacity={opacity}
                                 stroke={strokeColor}
-                                strokeWidth={mapDim(0.05)} // Fixed 5cm border
+                                strokeWidth={mapDim(0.05 * scale)} // Fixed 5cm border (Scaled)
                             />
                         )
                     })}
