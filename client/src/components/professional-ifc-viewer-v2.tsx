@@ -1475,12 +1475,18 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                     {lines.map((l, i) => {
                         // NEW: Handle Segments (Vectors)
                         if (l.subtype === 'segment') {
-                            let stroke = '#1e293b'; // Slate 800
-                            let lw = strokeWidth * 2; // Thicker walls
+                            // PHYSICAL SIZES (in Meters)
+                            let physicalWidth = 0.05; // Default 5cm
+                            let stroke = '#1e293b';
 
-                            if (l.type === 'wall') { stroke = '#0f172a'; lw = strokeWidth * 3; } // Slate 900
-                            if (l.type === 'window') { stroke = '#38bdf8'; lw = strokeWidth * 2; } // Sky 400
-                            if (l.type === 'door') { stroke = '#d97706'; lw = strokeWidth * 2; } // Amber 600
+                            // Wall = 0.2m (20cm) - Standard Brick
+                            if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25; }
+                            // Window = 0.05m (glass pane)
+                            else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1; }
+                            // Door = 0.05m (panel)
+                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.1; }
+                            // Structure = 0.3m
+                            else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3; }
 
                             return (
                                 <line
@@ -1490,8 +1496,9 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                                     x2={mapX(l.p2.x)}
                                     y2={mapY(l.p2.y)}
                                     stroke={stroke}
-                                    strokeWidth={lw}
-                                    strokeLinecap="round"
+                                    strokeWidth={mapDim(physicalWidth)}
+                                    strokeLinecap="square"
+                                    opacity={0.9}
                                 />
                             )
                         }
