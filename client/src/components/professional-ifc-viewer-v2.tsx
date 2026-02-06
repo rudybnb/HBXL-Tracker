@@ -1678,16 +1678,43 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                             )
                         }
 
-                        // FALLBACK: Old Rectangle Logic
-                        // Use OUTLINE ONLY for fallback to prevent "Blue Box" hiding everything.
-                        let strokeColor = '#94a3b8'; // Lighter Slate (Default)
+                        // FALLBACK: ENHANCED VISUALIZATION
+                        let strokeColor = '#94a3b8'; // Default Slate
+                        let strokeW = strokeWidth;   // Default Thin
+                        let fill = 'none';
+                        let fillOpacity = 1; // Initialize fillOpacity
+                        let dashArray = `${strokeWidth * 4},${strokeWidth * 4}`; // Default Dashed
 
-                        // Use dynamic strokeWidth from scene bounds (Line 1458)
-                        // This ensures consistent 1px-ish lines regardless of units (MM/M).
+                        // 1. WALLS: Distinguish External vs Internal by Thickness
+                        if (l.type === 'wall') {
+                            // Find the thinner dimension to estimate wall thickness
+                            const minDim = Math.min(l.w, l.h) * (l.unitScale || 1); // Check absolute size
+                            const isExternal = (minDim > 0.25) || (minDim > 250); // >250mm is likely external
 
-                        if (l.type === 'wall') { strokeColor = '#0f172a'; }
-                        else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
-                        else if (l.type === 'door') { strokeColor = '#d97706'; }
+                            strokeColor = '#0f172a'; // Black for all walls
+                            if (isExternal) {
+                                strokeW = strokeWidth * 3; // Thick for External
+                                dashArray = 'none';        // Solid for External
+                            } else {
+                                strokeW = strokeWidth * 1.5; // Medium for Internal
+                                dashArray = 'none';          // Solid for Internal (Clearer than dashed)
+                            }
+                        }
+                        // 2. WINDOWS: Blue Glazing Style
+                        else if (l.type === 'window') {
+                            strokeColor = '#0ea5e9'; // Sky Blue
+                            fill = '#e0f2fe';        // Very Light Blue Fill
+                            fillOpacity = 0.5;
+                            dashArray = 'none';      // Solid
+                            strokeW = strokeWidth;
+                        }
+                        // 3. DOORS: Wood Style
+                        else if (l.type === 'door') {
+                            strokeColor = '#d97706'; // Amber/Brown
+                            fill = 'none';
+                            dashArray = `${strokeWidth * 2},${strokeWidth * 2}`; // Dotted for swing
+                            strokeW = strokeWidth;
+                        }
 
                         return (
                             <rect
@@ -1696,12 +1723,14 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
                                 y={mapY_Scaled(l.y + l.h)}
                                 width={mapDim_Scaled(l.w)}
                                 height={mapDim_Scaled(l.h)}
-                                fill="none"
+                                fill={fill}
+                                fillOpacity={fillOpacity}
                                 stroke={strokeColor}
-                                strokeWidth={strokeWidth} // DYNAMIC THIN LINE
-                                strokeDasharray={`${strokeWidth * 4},${strokeWidth * 4}`} // Dashed relative to line thickness
+                                strokeWidth={strokeW}
+                                strokeDasharray={dashArray}
                             />
                         )
+
                     })}
 
 
