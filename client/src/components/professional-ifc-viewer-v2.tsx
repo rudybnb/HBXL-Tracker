@@ -1424,6 +1424,12 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
     const fontSize = (Math.max(geomW, geomH) * 0.03) / transform.k;
     const strokeWidth = (Math.max(geomW, geomH) * 0.002) / transform.k;
 
+    // AUTO-DETECT VISUAL SCALE IF MISSING
+    // If scene is HUGE (> 500 units), we assume MM.
+    // If lines/scale aren't provided, stroke will be tiny (0.25).
+    // so we default autoScale to 1000 if scene is large.
+    const autoScale = (Math.max(geomW, geomH) > 500) ? 1000 : 1;
+
     return (
         <div className="relative w-full h-full overflow-hidden bg-white select-none">
             {/* CONTROLS */}
@@ -1505,16 +1511,18 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                         // NEW: Handle Segments (Vectors)
                         if (l.subtype === 'segment') {
                             // PHYSICAL SIZES (in Meters)
-                            // SCALE ADJUSTMENT: If unitScale is 1000 (MM), we multiply sizes by 1000.
-                            const scale = l.unitScale || 1;
+                            // AUTO-DETECT SCALE if unitScale missing
+                            // Use l.unitScale if present, else trigger Auto logic depending on scene size?
+                            // Safest: Use l.unitScale OR fallback to autoScale.
+                            const scale = l.unitScale || autoScale;
                             let physicalWidth = 0.05 * scale;
                             let stroke = '#1e293b';
 
-                            // Wall = 0.2m -> 200mm
+                            // Wall = 0.25m -> 250mm
                             if (l.type === 'wall') { stroke = '#0f172a'; physicalWidth = 0.25 * scale; }
                             // Window = 0.05m -> 50mm
                             else if (l.type === 'window') { stroke = '#38bdf8'; physicalWidth = 0.1 * scale; }
-                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.1 * scale; }
+                            else if (l.type === 'door') { stroke = '#d97706'; physicalWidth = 0.05 * scale; }
                             else if (l.type === 'structure') { stroke = '#475569'; physicalWidth = 0.3 * scale; }
 
                             return (
