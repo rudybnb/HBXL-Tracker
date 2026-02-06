@@ -1338,32 +1338,55 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
         if (y > maxY) maxY = y;
     };
 
+    // 1. ANALYZE SCALES FIRST
+    let linesMax = 0;
     lines.forEach(l => {
-        if (l.subtype === 'segment') {
-            updateBounds(l.p1.x, l.p1.y);
-            updateBounds(l.p2.x, l.p2.y);
-        } else {
-            // Fallback Rect
-            updateBounds(l.x, l.y);
-            updateBounds(l.x + l.w, l.y + l.h);
-        }
+        // rough max check
+        const mx = (l.subtype === 'segment') ? Math.max(Math.abs(l.p1.x), Math.abs(l.p2.x)) : Math.max(Math.abs(l.x + l.w));
+        if (mx > linesMax) linesMax = mx;
     });
 
+    // 2. PARSE ROOMS & ANALYZE SCALE
     const safeRooms = rooms?.filter(r => r && r.geometry) || [];
     const parsedRooms: any[] = [];
+    let roomsMax = 0;
 
     safeRooms.forEach(room => {
         try {
             const pts = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
             if (Array.isArray(pts) && pts.length > 2) {
-                // Check unit scale (Simple heuristic: if huge coords, it's MM)
-                // We normalize everything to METERS visually approx or just keep relative
                 const rPts = pts.map((p: any) => ({ x: p.x ?? p[0], y: p.y ?? p[1] }));
-
-                rPts.forEach(p => updateBounds(p.x, p.y));
+                rPts.forEach(p => {
+                    const mx = Math.max(Math.abs(p.x), Math.abs(p.y));
+                    if (mx > roomsMax) roomsMax = mx;
+                });
                 parsedRooms.push({ ...room, pts: rPts });
             }
         } catch (e) { }
+    });
+
+    // 3. DETECT MISMATCH & DETERMINE RENDER SCALE
+    // If Rooms are MM (>2000) and Lines are Meters (<500), we must SCALE LINES UP.
+    let renderScaleLines = 1;
+    if (roomsMax > 2000 && linesMax > 0 && linesMax < 500) {
+        renderScaleLines = 1000;
+        console.log("📐 Scale Mismatch Detected: Scaling IFC Lines x1000 to match Rooms (MM)");
+    }
+
+    // 4. COMPUTE BOUNDS (With Scale Applied)
+    lines.forEach(l => {
+        if (l.subtype === 'segment') {
+            updateBounds(l.p1.x * renderScaleLines, l.p1.y * renderScaleLines);
+            updateBounds(l.p2.x * renderScaleLines, l.p2.y * renderScaleLines);
+        } else {
+            // Fallback Rect
+            updateBounds(l.x * renderScaleLines, l.y * renderScaleLines);
+            updateBounds((l.x + l.w) * renderScaleLines, (l.y + l.h) * renderScaleLines);
+        }
+    });
+
+    parsedRooms.forEach(r => {
+        r.pts.forEach((p: any) => updateBounds(p.x, p.y));
     });
 
     if (minX === Infinity) return <div className="p-4">Empty Geometry</div>;
@@ -1386,6 +1409,11 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
     const mapX = (x: number) => (x - minX) + padding;
     const mapY = (y: number) => (maxY - y) + padding;
     const mapDim = (d: number) => d; // Dimensions preserve scale
+
+    // ADJUST MAPPER FOR RENDER SCALE
+    const mapX_Scaled = (x: number) => mapX(x * renderScaleLines);
+    const mapY_Scaled = (y: number) => mapY(y * renderScaleLines);
+    const mapDim_Scaled = (d: number) => mapDim(d * renderScaleLines);
 
     const svgW = geomW + (padding * 2);
     const svgH = geomH + (padding * 2);
@@ -1530,10 +1558,10 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                             return (
                                 <line
                                     key={`seg-${i}`}
-                                    x1={mapX(l.p1.x)}
-                                    y1={mapY(l.p1.y)}
-                                    x2={mapX(l.p2.x)}
-                                    y2={mapY(l.p2.y)}
+                                    x1={mapX_Scaled(l.p1.x)}
+                                    y1={mapY_Scaled(l.p1.y)}
+                                    x2={mapX_Scaled(l.p2.x)}
+                                    y2={mapY_Scaled(l.p2.y)}
                                     stroke={stroke}
                                     strokeWidth={mapDim(physicalWidth)}
                                     strokeLinecap="square"
@@ -1556,10 +1584,10 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                         return (
                             <rect
                                 key={`rect-${i}`}
-                                x={mapX(l.x)}
-                                y={mapY(l.y + l.h)}
-                                width={mapDim(l.w)}
-                                height={mapDim(l.h)}
+                                x={mapX_Scaled(l.x)}
+                                y={mapY_Scaled(l.y + l.h)}
+                                width={mapDim_Scaled(l.w)}
+                                height={mapDim_Scaled(l.h)}
                                 fill={fill}
                                 fillOpacity={opacity}
                                 stroke={strokeColor}
