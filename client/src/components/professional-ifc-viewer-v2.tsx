@@ -1571,7 +1571,8 @@ export function RoomPlan2D({ rooms, lines = [], onRoomClick }: { rooms: any[], l
                         let fill = 'none';
                         let opacity = 0;
                         let strokeColor = '#94a3b8'; // Lighter Slate
-                        const scale = l.unitScale || 1;
+                        // Use autoScale here too!
+                        const scale = l.unitScale || autoScale;
 
                         if (l.type === 'wall') { strokeColor = '#0f172a'; }
                         else if (l.type === 'window') { strokeColor = '#0ea5e9'; }
