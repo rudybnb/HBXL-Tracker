@@ -12,10 +12,21 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = {};
+  let body;
+
+  if (data instanceof FormData) {
+    body = data;
+    // Do not set Content-Type for FormData, browser does it automatically with boundary
+  } else if (data) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(data);
+  }
+
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
+    headers,
+    body,
     credentials: "include",
   });
 
@@ -28,37 +39,37 @@ export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
-  async ({ queryKey }) => {
-    let url = queryKey[0] as string;
-    
-    // Handle query parameters
-    if (queryKey.length > 1 && queryKey[1] && typeof queryKey[1] === 'object') {
-      const params = new URLSearchParams();
-      const queryParams = queryKey[1] as Record<string, string>;
-      
-      for (const [key, value] of Object.entries(queryParams)) {
-        if (value && value !== '') {
-          params.append(key, value);
+    async ({ queryKey }) => {
+      let url = queryKey[0] as string;
+
+      // Handle query parameters
+      if (queryKey.length > 1 && queryKey[1] && typeof queryKey[1] === 'object') {
+        const params = new URLSearchParams();
+        const queryParams = queryKey[1] as Record<string, string>;
+
+        for (const [key, value] of Object.entries(queryParams)) {
+          if (value && value !== '') {
+            params.append(key, value);
+          }
+        }
+
+        const paramString = params.toString();
+        if (paramString) {
+          url += '?' + paramString;
         }
       }
-      
-      const paramString = params.toString();
-      if (paramString) {
-        url += '?' + paramString;
+
+      const res = await fetch(url, {
+        credentials: "include",
+      });
+
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        return null;
       }
-    }
 
-    const res = await fetch(url, {
-      credentials: "include",
-    });
-
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
-
-    await throwIfResNotOk(res);
-    return await res.json();
-  };
+      await throwIfResNotOk(res);
+      return await res.json();
+    };
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -66,7 +77,7 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
+      staleTime: 0,
       retry: false,
     },
     mutations: {

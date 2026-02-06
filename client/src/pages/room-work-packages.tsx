@@ -20,7 +20,9 @@ import {
     Clock,
     CircleDot,
     User,
-    Calendar
+    Calendar,
+    Plus,
+    Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +32,19 @@ import {
     CollapsibleContent,
     CollapsibleTrigger
 } from "@/components/ui/collapsible";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 
 // Types matching the API response
@@ -77,175 +92,42 @@ interface RoomWorkPackagesResponse {
     generatedAt: string;
 }
 
-// Status badge component
-function StatusBadge({ status }: { status: string }) {
-    const config = {
-        not_started: { label: "Not Started", icon: CircleDot, className: "bg-slate-600 text-slate-200" },
-        in_progress: { label: "In Progress", icon: Clock, className: "bg-amber-600 text-amber-100" },
-        complete: { label: "Complete", icon: CheckCircle2, className: "bg-green-600 text-green-100" }
-    };
-
-    const { label, icon: Icon, className } = config[status as keyof typeof config] || config.not_started;
-
-    return (
-        <Badge className={`${className} gap-1`}>
-            <Icon className="h-3 w-3" />
-            {label}
-        </Badge>
-    );
-}
-
-// Room Card component
-function RoomCard({ room }: { room: RoomData }) {
-    const [isOpen, setIsOpen] = useState(true);
-
-    return (
-        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-            <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
-                {/* Room Header */}
-                <CollapsibleTrigger asChild>
-                    <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-700/50 transition-colors">
-                        <div className="flex items-center gap-3">
-                            {isOpen ? (
-                                <ChevronDown className="h-5 w-5 text-slate-400" />
-                            ) : (
-                                <ChevronRight className="h-5 w-5 text-slate-400" />
-                            )}
-                            <Home className="h-5 w-5 text-amber-400" />
-                            <div>
-                                <h3 className="text-lg font-bold text-white">{room.name}</h3>
-                                {room.floor && (
-                                    <p className="text-xs text-slate-400">{room.floor}</p>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <StatusBadge status={room.status} />
-                            <div className="text-xl font-semibold text-amber-400">
-                                £{room.totalValue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </div>
-                        </div>
-                    </div>
-                </CollapsibleTrigger>
-
-                {/* Room Content - Elements and Items */}
-                <CollapsibleContent>
-                    <div className="border-t border-slate-700">
-                        {room.elements.length === 0 ? (
-                            <div className="p-6 text-center text-slate-500 italic">
-                                No elements in this room
-                            </div>
-                        ) : (
-                            room.elements.map(element => (
-                                <ElementSection key={element.id} element={element} />
-                            ))
-                        )}
-                    </div>
-                </CollapsibleContent>
-            </div>
-        </Collapsible>
-    );
-}
-
-// Element Section component
-function ElementSection({ element }: { element: ElementData }) {
-    const [isOpen, setIsOpen] = useState(true);
-
-    return (
-        <div className="border-b border-slate-700/50 last:border-b-0">
-            {/* Element Header */}
-            <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-                <CollapsibleTrigger asChild>
-                    <div className="px-6 py-3 bg-slate-900/50 flex items-center justify-between cursor-pointer hover:bg-slate-900 transition-colors">
-                        <div className="flex items-center gap-2">
-                            {isOpen ? (
-                                <ChevronDown className="h-4 w-4 text-slate-500" />
-                            ) : (
-                                <ChevronRight className="h-4 w-4 text-slate-500" />
-                            )}
-                            <span className="font-medium text-slate-300">{element.name}</span>
-                            {element.measurementSummary && (
-                                <span className="text-xs text-slate-500">({element.measurementSummary})</span>
-                            )}
-                        </div>
-                        <span className="text-sm font-medium text-slate-400">
-                            £{element.subtotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </span>
-                    </div>
-                </CollapsibleTrigger>
-
-                {/* Payable Items Table */}
-                <CollapsibleContent>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead className="bg-slate-800/80 text-slate-400 font-medium">
-                                <tr>
-                                    <th className="px-6 py-2 text-left">Description</th>
-                                    <th className="px-4 py-2 text-right">Qty</th>
-                                    <th className="px-4 py-2 text-right">Unit</th>
-                                    <th className="px-4 py-2 text-right">Rate</th>
-                                    <th className="px-4 py-2 text-right">Total</th>
-                                    <th className="px-4 py-2 text-center">Status</th>
-                                    <th className="px-4 py-2 text-left">Assigned</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-700/30">
-                                {element.items.map(item => (
-                                    <tr key={item.id} className="hover:bg-slate-700/30 transition-colors">
-                                        <td className="px-6 py-3 text-slate-200 max-w-xs truncate" title={item.description}>
-                                            {item.description}
-                                        </td>
-                                        <td className="px-4 py-3 text-right text-slate-300">
-                                            {item.quantity.toFixed(2)}
-                                        </td>
-                                        <td className="px-4 py-3 text-right text-slate-400 text-xs uppercase">
-                                            {item.unit}
-                                        </td>
-                                        <td className="px-4 py-3 text-right text-slate-300">
-                                            £{item.rate.toFixed(2)}
-                                        </td>
-                                        <td className="px-4 py-3 text-right font-medium text-amber-500">
-                                            £{item.total.toFixed(2)}
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                            <StatusBadge status={item.status} />
-                                        </td>
-                                        <td className="px-4 py-3 text-left">
-                                            {item.assignedContractorName ? (
-                                                <span className="flex items-center gap-1 text-green-400">
-                                                    <User className="h-3 w-3" />
-                                                    {item.assignedContractorName}
-                                                </span>
-                                            ) : (
-                                                <Button variant="ghost" size="sm" className="h-7 text-xs text-slate-400 hover:text-amber-400">
-                                                    Assign
-                                                </Button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                                {element.items.length === 0 && (
-                                    <tr>
-                                        <td colSpan={7} className="px-6 py-8 text-center text-slate-500 italic">
-                                            No payable items in this element
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </CollapsibleContent>
-            </Collapsible>
-        </div>
-    );
-}
-
 // Main Page Component
 export default function RoomWorkPackages() {
     const { id } = useParams<{ id: string }>();
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+    const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [newRoomName, setNewRoomName] = useState("");
+    const [newRoomFloor, setNewRoomFloor] = useState("");
 
     const { data, isLoading, error } = useQuery<RoomWorkPackagesResponse>({
         queryKey: [`/api/jobs/${id}/rooms`],
+    });
+
+    const createRoomMutation = useMutation({
+        mutationFn: async () => {
+            const res = await fetch(`/api/jobs/${id}/rooms`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name: newRoomName,
+                    floor: newRoomFloor || "Ground Floor"
+                })
+            });
+            if (!res.ok) throw new Error("Failed to create room");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}/rooms`] });
+            setIsCreateDialogOpen(false);
+            setNewRoomName("");
+            setNewRoomFloor("");
+            toast({ title: "Room Created", description: `Added ${newRoomName} to work packages.` });
+        },
+        onError: () => {
+            toast({ title: "Error", description: "Failed to create room.", variant: "destructive" });
+        }
     });
 
     if (isLoading) {
@@ -307,12 +189,67 @@ export default function RoomWorkPackages() {
                                     Room Work Packages
                                 </h1>
                                 <p className="text-xs text-slate-400">
-                                    Project: {data.projectName} | {data.rooms.length} Rooms | {completedItems}/{totalItems} Items Complete
+                                    Project: {data?.projectName} | {data?.rooms.length || 0} Rooms | {completedItems}/{totalItems} Items Complete
                                 </p>
                             </div>
                         </div>
                         <div className="flex items-center gap-4">
-                            <div className="text-right">
+                            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Button className="bg-amber-600 hover:bg-amber-700 text-white">
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Add Room
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="bg-slate-800 text-slate-100 border-slate-700">
+                                    <DialogHeader>
+                                        <DialogTitle>Add New Room</DialogTitle>
+                                        <DialogDescription className="text-slate-400">
+                                            Manually add a room to this job. You can populate it with items later.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <Label htmlFor="name" className="text-right text-slate-300">
+                                                Name
+                                            </Label>
+                                            <Input
+                                                id="name"
+                                                value={newRoomName}
+                                                onChange={(e) => setNewRoomName(e.target.value)}
+                                                className="col-span-3 bg-slate-700 border-slate-600 text-slate-100"
+                                                placeholder="e.g. Master Bedroom"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-4 items-center gap-4">
+                                            <Label htmlFor="floor" className="text-right text-slate-300">
+                                                Floor
+                                            </Label>
+                                            <Input
+                                                id="floor"
+                                                value={newRoomFloor}
+                                                onChange={(e) => setNewRoomFloor(e.target.value)}
+                                                className="col-span-3 bg-slate-700 border-slate-600 text-slate-100"
+                                                placeholder="e.g. First Floor"
+                                            />
+                                        </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button
+                                            onClick={() => createRoomMutation.mutate()}
+                                            disabled={createRoomMutation.isPending || !newRoomName}
+                                            className="bg-amber-600 hover:bg-amber-700"
+                                        >
+                                            {createRoomMutation.isPending && (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            )}
+                                            Create Room
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+
+                            <div className="text-right hidden sm:block">
                                 <p className="text-xs text-slate-400">Total Contract Value</p>
                                 <p className="text-2xl font-bold text-amber-400">
                                     £{grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
@@ -399,6 +336,112 @@ export default function RoomWorkPackages() {
                         ))
                     )}
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function RoomCard({ room }: { room: RoomData }) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    // Dynamic status color
+    const statusColor = room.status === 'complete' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
+        room.status === 'in_progress' ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' :
+            'text-slate-500 border-slate-700 bg-slate-800';
+
+    return (
+        <Collapsible open={isOpen} onOpenChange={setIsOpen} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden transition-all duration-200 shadow-sm hover:shadow-md hover:border-slate-600">
+            {/* Header Trigger */}
+            <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-750 transition-colors" onClick={() => setIsOpen(!isOpen)}>
+                <div className="flex items-center gap-4">
+                    <div className={`p-1 rounded transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
+                        <ChevronDown className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h3 className="font-semibold text-slate-100 text-lg tracking-tight">{room.name}</h3>
+                            {room.floor && (
+                                <Badge variant="secondary" className="bg-slate-700 text-slate-400 text-[10px] h-5">
+                                    {room.floor}
+                                </Badge>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-slate-500">{room.elements.length} elements</span>
+                            <span className="text-slate-700 mx-1">•</span>
+                            <span className="text-xs text-slate-500">
+                                {room.elements.reduce((acc, el) => acc + el.items.length, 0)} items
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-6">
+                    <Badge variant="outline" className={`${statusColor} capitalize`}>
+                        {room.status.replace('_', ' ')}
+                    </Badge>
+                    <div className="text-right min-w-[100px]">
+                        <p className="text-xs text-slate-500 uppercase tracking-wider mb-0.5">Value</p>
+                        <p className="font-mono text-amber-400 font-bold text-lg">
+                            £{room.totalValue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <CollapsibleContent>
+                <div className="px-4 pb-4 pt-0 space-y-3">
+                    <div className="h-px bg-slate-700/50 mb-4" />
+                    {room.elements.length === 0 ? (
+                        <div className="text-center py-8 border-2 border-dashed border-slate-700/50 rounded-lg">
+                            <p className="text-slate-500 text-sm">No elements have been identified for this room yet.</p>
+                        </div>
+                    ) : (
+                        room.elements.map(el => <ElementRow key={el.id} element={el} />)
+                    )}
+                </div>
+            </CollapsibleContent>
+        </Collapsible>
+    )
+}
+
+function ElementRow({ element }: { element: ElementData }) {
+    return (
+        <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50 hover:border-slate-600 transition-colors">
+            <div className="flex justify-between items-center mb-3">
+                <h4 className="text-slate-200 font-medium text-sm flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/50" />
+                    {element.name}
+                </h4>
+                <div className="flex items-center gap-4">
+                    {element.measurementSummary && (
+                        <span className="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
+                            {element.measurementSummary}
+                        </span>
+                    )}
+                    <span className="text-slate-400 text-sm font-mono font-medium">
+                        £{element.subtotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                    </span>
+                </div>
+            </div>
+
+            <div className="space-y-1 bg-slate-950/30 rounded px-3 py-2">
+                {element.items.length === 0 ? (
+                    <p className="text-xs text-slate-600 italic">No payable items linked</p>
+                ) : (
+                    element.items.map(item => (
+                        <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-4 text-xs text-slate-400 py-1.5 border-b border-slate-800/50 last:border-0 hover:text-slate-300">
+                            <span className="truncate pr-4">{item.description}</span>
+                            <div className="flex items-center gap-3 text-slate-500">
+                                <span className="font-mono">{item.quantity} {item.unit}</span>
+                                <span className="text-slate-600">x</span>
+                                <span className="font-mono">£{item.rate}</span>
+                            </div>
+                            <span className="font-mono text-slate-300 w-[70px] text-right">
+                                £{item.total.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     );

@@ -37,6 +37,8 @@ import TelegramMessages from "@/pages/telegram-messages";
 import ContractCashflow from "@/pages/contract-cashflow";
 import VoiceControl from "@/pages/voice-control";
 import FinancialDashboard from "@/pages/financial-dashboard";
+import SubcontractorTenderView from "@/pages/subcontractor-tender";
+
 
 import NotFound from "@/pages/not-found";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -228,6 +230,9 @@ function Router() {
             <VoiceControl />
           </ProtectedRoute>
         )} />
+
+        {/* Public Tender Link for Subcontractors */}
+        <Route path="/tender/:id" component={SubcontractorTenderView} />
 
         <Route component={NotFound} />
       </Switch>

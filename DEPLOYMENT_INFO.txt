@@ -1,0 +1,50 @@
+ERdesignandbuild - Render Deployment Package
+===========================================
+
+Generated: 2026-02-06
+
+Services Required:
+------------------
+1. Node.js Web Service (erdesignandbuild-web)
+   - Runtime: Node
+   - Build: npm install
+   - Start: npm run dev
+   - Port: Auto (Render assigns)
+
+2. Python API Service (erdesignandbuild-telegram-api)
+   - Runtime: Python 3
+   - Build: pip install -r requirements.txt
+   - Start: uvicorn app:app --host 0.0.0.0 --port $PORT
+   - Port: Auto (Render assigns)
+
+Database:
+---------
+PostgreSQL (Connect your existing Render database)
+
+Required Environment Variables:
+-------------------------------
+See RENDER_DEPLOYMENT_GUIDE.md for complete list
+
+Node.js Service:
+- DATABASE_URL
+- SESSION_SECRET
+- TWILIO_ACCOUNT_SID
+- TWILIO_AUTH_TOKEN
+- TWILIO_PHONE_NUMBER
+- ELEVEN_API_KEY
+- ELEVEN_VOICE_ID
+- PYTHON_API_URL (set after Python service deployed)
+
+Python Service:
+- DATABASE_URL
+
+Next Steps:
+-----------
+1. Push this code to GitHub
+2. Deploy Python service first on Render
+3. Deploy Node.js service second
+4. Set environment variables
+5. Verify both services are live
+
+For detailed instructions, see:
+- RENDER_DEPLOYMENT_GUIDE.md

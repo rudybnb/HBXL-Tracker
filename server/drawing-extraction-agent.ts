@@ -100,11 +100,10 @@ export interface ExtractionResult {
 }
 
 
-const EXTRACTION_PROMPT = `You are a STRUCTURAL ELEMENT EXPERT AGENT.
+const EXTRACTION_PROMPT = `You are a STRUCTURAL ELEMENT & ROOM ANALYSIS AGENT.
 
 Your SOLE Purpose:
-Identify FIXED STRUCTURAL ELEMENTS (Doors, Windows, Sanitary) with high precision.
-You do NOT care about room names, labels, or electrical symbols.
+Identify FIXED STRUCTURAL ELEMENTS (Doors, Windows, Sanitary) AND ROOM NAMES with high precision.
 
 CRITICAL - COORDINATE SYSTEM:
 - Return NORMALIZED COORDINATES based on a 0-1000 scale.
@@ -113,8 +112,8 @@ CRITICAL - COORDINATE SYSTEM:
 - IMPORANT: 0-1000 scale applies to the FULL IMAGE CANVAS, including any white margins or borders.
 - Do NOT crop the image mentally. (0,0) is the top-left pixel of the file.
 
-TASK: STRUCTURAL ELEMENT EXTRACTION
-Identify boundaries and fixed building elements.
+TASK: STRUCTURAL & SPATIAL EXTRACTION
+Identify boundaries, fixed building elements, and spatial labels.
 
 SYMBOLS TO FIND:
 1. WINDOWS ("window"):
@@ -129,15 +128,24 @@ SYMBOLS TO FIND:
    - Toilets (WC), Sinks (Basins), Showers, Baths.
    - Fixed joinery.
 
+4. ROOM LABELS ("room"):
+   - Text indicating function (e.g. "Kitchen", "Lounge", "Bedroom 1", "En-suite").
+   - Look for large text labels usually centered in the room.
+   - Ignore small dimension text or specification notes.
+
 DO NOT EXTRACT:
-- Do NOT extract Room Names. (Another agent handles this).
 - Do NOT extract Lights, Sockets, or Switches. (Electrical agent handles these).
+- Do NOT extract measurements as separate elements (unless part of room data).
 
 OUTPUT FORMAT (JSON ONLY):
 {
+  "rooms": [
+      { "name": "Kitchen", "bbox": [100, 100, 400, 400], "floor": "Ground" },
+      { "name": "Lounge", "bbox": [500, 100, 900, 400], "floor": "Ground" }
+  ],
   "detailedElements": [
-      { "type": "window", "name": "Standard Window", "bbox": [10, 10, 50, 20] },
-      { "type": "sanitary", "name": "WC", "bbox": [500, 500, 550, 550] }
+      { "type": "window", "name": "Standard Window", "bbox": [10, 10, 50, 20], "room": "Kitchen" },
+      { "type": "sanitary", "name": "WC", "bbox": [500, 500, 550, 550], "room": "En-suite" }
   ]
 }
 `;

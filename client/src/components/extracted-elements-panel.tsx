@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock, Home, Box } from "lucide-react";
+import { Loader2, Layers, RefreshCw, AlertCircle, CheckCircle2, Clock, Home, Box, Pencil, Edit, X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 
 // Room extracted from drawing (costs come from CSV)
@@ -37,6 +39,88 @@ interface ExtractedElementsPanelProps {
     files?: JobFile[];
 }
 
+function RoomCard({ room, queryClient }: { room: ExtractedRoom; queryClient: any }) {
+    const { toast } = useToast();
+    const [isEditing, setIsEditing] = useState(false);
+    const [newName, setNewName] = useState(room.name);
+
+    const renameMutation = useMutation({
+        mutationFn: async (args: { id: string; name: string }) => {
+            const response = await fetch(`/api/rooms/${args.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: args.name }),
+            });
+            if (!response.ok) throw new Error('Failed to rename room');
+            return response.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs`] }); // Invalidate general job data
+            // We need to invalidate the specific room query passed from parent, but simpler to rely on general invalidation or optimistic updates
+            toast({ title: "Room Renamed", description: "The room name has been updated." });
+            setIsEditing(false);
+            // Force reload of this specific panel's data
+            // This is a bit hacky but ensures the list updates immediately
+            setTimeout(() => {
+                window.dispatchEvent(new Event('room-renamed'));
+            }, 100);
+        },
+        onError: () => {
+            toast({ title: "Update Failed", description: "Could not rename the room.", variant: "destructive" });
+        }
+    });
+
+    const handleSave = () => {
+        if (newName.trim()) {
+            renameMutation.mutate({ id: room.id, name: newName });
+        }
+    };
+
+    return (
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-amber-500/30 transition-colors group">
+            <div className="flex items-start justify-between mb-2">
+                <div className="flex-1 mr-2">
+                    {isEditing ? (
+                        <div className="flex items-center space-x-2">
+                            <Input
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                className="h-8 text-sm"
+                                autoFocus
+                            />
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-green-400" onClick={handleSave}>
+                                <Check className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400" onClick={() => setIsEditing(false)}>
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center group/title">
+                            <h4 className="text-lg font-medium text-amber-400 mr-2">{room.name}</h4>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-amber-400"
+                                onClick={() => setIsEditing(true)}
+                            >
+                                <Edit className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    )}
+                    <p className="text-sm text-slate-400">{room.floor} Floor</p>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
+                    room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
+                        'bg-slate-500/20 text-slate-400'
+                    }`}>
+                    {room.status === 'not_started' ? 'Not Started' : room.status}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 export default function ExtractedElementsPanel({ jobId, files }: ExtractedElementsPanelProps) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -53,7 +137,7 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
 
     // Fetch ROOMS from drawing extraction (not fake elements)
     const { data: roomsData, isLoading } = useQuery<RoomsResponse>({
-        queryKey: [`/api/jobs/${jobId}/rooms`, { completedCount }],
+        queryKey: [`/api/jobs/${jobId}/extracted-rooms`, { completedCount }],
         staleTime: 0,
         refetchInterval: hasProcessing ? 3000 : false,
     });
@@ -80,7 +164,7 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
             return response.json();
         },
         onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/rooms`] });
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/extracted-rooms`] });
             queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/files`] });
             toast({
                 title: data.success ? "Extraction Complete" : "Extraction Issue",
@@ -105,6 +189,15 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
         f.fileType === 'application/pdf' ||
         f.filename.toLowerCase().endsWith('.ifc')
     );
+
+    // Listen for manual rename events to refresh list
+    useEffect(() => {
+        const handleRefresh = () => {
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/extracted-rooms`] });
+        };
+        window.addEventListener('room-renamed', handleRefresh);
+        return () => window.removeEventListener('room-renamed', handleRefresh);
+    }, [queryClient, jobId]);
 
     // Check if mutation is currently running
     const activelyProcessing = extractMutation.isPending;
@@ -189,23 +282,7 @@ export default function ExtractedElementsPanel({ jobId, files }: ExtractedElemen
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {rooms.map(room => (
-                                    <div
-                                        key={room.id}
-                                        className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
-                                    >
-                                        <div className="flex items-start justify-between">
-                                            <div>
-                                                <h4 className="text-lg font-medium text-amber-400">{room.name}</h4>
-                                                <p className="text-sm text-slate-400">{room.floor} Floor</p>
-                                            </div>
-                                            <span className={`text-xs px-2 py-1 rounded ${room.status === 'complete' ? 'bg-green-500/20 text-green-400' :
-                                                room.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
-                                                    'bg-slate-500/20 text-slate-400'
-                                                }`}>
-                                                {room.status === 'not_started' ? 'Not Started' : room.status}
-                                            </span>
-                                        </div>
-                                    </div>
+                                    <RoomCard key={room.id} room={room} queryClient={queryClient} />
                                 ))}
                             </div>
                         </div>

@@ -65,6 +65,7 @@ export async function initManusSchema(): Promise<void> {
     await db.execute(sql`
       ALTER TABLE job_cost_items 
       ADD COLUMN IF NOT EXISTS source_metadata TEXT,
+      ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual',
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW() NOT NULL
     `);
 
@@ -76,6 +77,7 @@ export async function initManusSchema(): Promise<void> {
         filename TEXT NOT NULL,
         original_name TEXT NOT NULL,
         file_url TEXT NOT NULL,
+        file_path TEXT,
         file_type TEXT NOT NULL,
         uploaded_by TEXT DEFAULT 'user',
         extraction_status TEXT DEFAULT 'pending',
@@ -88,7 +90,8 @@ export async function initManusSchema(): Promise<void> {
     await db.execute(sql`
       ALTER TABLE job_files 
       ADD COLUMN IF NOT EXISTS extraction_status TEXT DEFAULT 'pending',
-      ADD COLUMN IF NOT EXISTS extraction_error TEXT
+      ADD COLUMN IF NOT EXISTS extraction_error TEXT,
+      ADD COLUMN IF NOT EXISTS file_path TEXT
     `);
 
     // Create extracted_elements table for AI extraction results
@@ -111,6 +114,9 @@ export async function initManusSchema(): Promise<void> {
         notes TEXT,
         linked_cost_item_id VARCHAR(36) REFERENCES job_cost_items(id),
         raw_json TEXT,
+        geometry TEXT,
+        bbox TEXT,
+        page INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
     `);
@@ -123,7 +129,9 @@ export async function initManusSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT '0',
       ADD COLUMN IF NOT EXISTS room_name TEXT,
       ADD COLUMN IF NOT EXISTS page INTEGER DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS bbox TEXT;
+      ADD COLUMN IF NOT EXISTS bbox TEXT,
+      ADD COLUMN IF NOT EXISTS geometry TEXT,
+      ADD COLUMN IF NOT EXISTS raw_json TEXT;
     `);
 
     // Create room_status enum for Room-Based Commercial Model
@@ -148,6 +156,7 @@ export async function initManusSchema(): Promise<void> {
         total_value TEXT DEFAULT '0',
         page INTEGER DEFAULT 1,
         bbox TEXT,
+        geometry TEXT,
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       )
     `);
@@ -157,6 +166,7 @@ export async function initManusSchema(): Promise<void> {
       ALTER TABLE rooms
       ADD COLUMN IF NOT EXISTS page INTEGER DEFAULT 1,
       ADD COLUMN IF NOT EXISTS bbox TEXT,
+      ADD COLUMN IF NOT EXISTS geometry TEXT,
       ADD COLUMN IF NOT EXISTS file_id VARCHAR(36) REFERENCES job_files(id);
     `);
 
@@ -248,6 +258,12 @@ export async function initManusSchema(): Promise<void> {
         room_allocation_percent TEXT DEFAULT '100',
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       )
+    `);
+
+    // Add item_type to payable_items if it doesn't exist (Schema Patch)
+    await db.execute(sql`
+      ALTER TABLE payable_items
+      ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'MATERIAL';
     `);
 
     console.log('✅ Manus-n8n schema initialized successfully');

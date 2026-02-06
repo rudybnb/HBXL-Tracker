@@ -11,6 +11,8 @@ export const eventStatusEnum = pgEnum("event_status", ["scheduled", "completed",
 
 // Manus-n8n Integration - Cost Category Types
 export const costCategoryEnum = pgEnum("cost_category", ["LABOUR", "MATERIAL", "PLANT", "SUBCONTRACTOR"]);
+export const tenderStatusEnum = pgEnum("tender_status", ["draft", "sent", "viewed", "submitted", "accepted", "rejected"]);
+
 
 export const contractors = pgTable("contractors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -65,6 +67,7 @@ export const jobCostItems = pgTable("job_cost_items", {
   rate: text("rate").notNull().default("0"), // Unit rate in pence
   total: text("total").notNull().default("0"), // Total cost in pence (qty * rate)
   supplier: text("supplier"), // Supplier name if applicable
+  source: text("source").default("manual"),
   sourceMetadata: text("source_metadata"), // JSON for additional HBXL data
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -75,6 +78,7 @@ export const jobFiles = pgTable("job_files", {
   filename: text("filename").notNull(),
   originalName: text("original_name").notNull(),
   fileUrl: text("file_url").notNull(),
+  filePath: text("file_path"),
   fileType: text("file_type").notNull(), // "image/png", "application/pdf"
   uploadedBy: text("uploaded_by").default("user"),
   extractionStatus: text("extraction_status").default("pending"), // "pending", "processing", "completed", "failed"
@@ -103,6 +107,7 @@ export const extractedElements = pgTable("extracted_elements", {
   rawJson: text("raw_json"), // Full AI response for debugging
   page: integer("page").default(1),
   bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
+  geometry: text("geometry"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -127,6 +132,8 @@ export const rooms = pgTable("rooms", {
   totalValue: text("total_value").default("0"), // Sum of all payable items in pence
   page: integer("page").default(1),
   bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
+  geometry: text("geometry"),
+  area: text("area"), // Room area in sqm
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -152,6 +159,9 @@ export const payableItems = pgTable("payable_items", {
   rate: text("rate").notNull(),         // In pence
   total: text("total").notNull(),       // In pence
 
+  // New Field for Labour Tender Filtering
+  itemType: text("item_type").default("MATERIAL"), // 'LABOUR' or 'MATERIAL'
+
   // Assignment fields (only allowed at this level per AGENTS.md 8)
   assignedContractorId: varchar("assigned_contractor_id").references(() => contractors.id),
   assignedContractorName: text("assigned_contractor_name"),
@@ -165,6 +175,25 @@ export const payableItems = pgTable("payable_items", {
   hbxlOriginalQty: text("hbxl_original_qty"),    // Original HBXL Quantity
   roomAllocationPercent: text("room_allocation_percent").default("100"), // Allocation %
 
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// NEW: Tender Submissions Table
+export const tenderSubmissions = pgTable("tender_submissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").notNull().references(() => jobs.id),
+  contractorId: varchar("contractor_id"), // Optional if public link
+  contractorName: text("contractor_name").notNull(),
+  contractorEmail: text("contractor_email"),
+  status: tenderStatusEnum("status").default("draft").notNull(),
+  totalPrice: text("total_price").default("0"), // Total labour price submitted
+  submittedAt: timestamp("submitted_at"),
+
+  // JSON blob for storing the granular rates per item
+  // Structure: { [itemId]: { rate: 5000, total: 10000 } } (in pence)
+  lineItemRates: text("line_item_rates"),
+
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -182,6 +211,12 @@ export const insertRoomElementSchema = createInsertSchema(roomElements).omit({
 export const insertPayableItemSchema = createInsertSchema(payableItems).omit({
   id: true,
   createdAt: true,
+});
+
+export const insertTenderSubmissionSchema = createInsertSchema(tenderSubmissions).omit({
+  id: true,
+  createdAt: true,
+  submittedAt: true,
 });
 
 export const csvUploads = pgTable("csv_uploads", {
@@ -779,3 +814,5 @@ export type InsertRoomElement = z.infer<typeof insertRoomElementSchema>;
 export type RoomElement = typeof roomElements.$inferSelect;
 export type InsertPayableItem = z.infer<typeof insertPayableItemSchema>;
 export type PayableItem = typeof payableItems.$inferSelect;
+export type InsertTenderSubmission = z.infer<typeof insertTenderSubmissionSchema>;
+export type TenderSubmission = typeof tenderSubmissions.$inferSelect;

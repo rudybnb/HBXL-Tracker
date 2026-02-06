@@ -1,6 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
-import { FileText, ArrowLeft, Download, Calculator, CheckCircle2 } from "lucide-react";
+import { FileText, ArrowLeft, Download, Calculator, CheckCircle2, Upload } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from "date-fns";
@@ -37,6 +40,44 @@ interface QSTenderDocument {
 
 export default function JobTenderView() {
     const { id } = useParams<{ id: string }>();
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const uploadMutation = useMutation({
+        mutationFn: async (file: File) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await apiRequest('POST', `/api/jobs/${id}/import-hbxl`, formData);
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || "Upload failed");
+            }
+            return res.json();
+        },
+        onSuccess: (data) => {
+            toast({
+                title: "Budget Imported Successfully",
+                description: `Processed ${data.rooms} rooms. Grand Total: £${(data.totals.grand_total_pence / 100).toFixed(2)}`
+            });
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}/qs-tender`] });
+        },
+        onError: (err) => {
+            toast({
+                title: "Import Failed",
+                description: err instanceof Error ? err.message : "Unknown error",
+                variant: "destructive"
+            });
+        }
+    });
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            uploadMutation.mutate(e.target.files[0]);
+        }
+        // Reset input
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
 
     const { data: tender, isLoading, error } = useQuery<QSTenderDocument>({
         queryKey: [`/api/jobs/${id}/qs-tender`],
@@ -85,11 +126,13 @@ export default function JobTenderView() {
     if (error || !tender) {
         return (
             <div className="p-8 bg-slate-900 min-h-screen text-slate-100 flex flex-col items-center">
-                <h1 className="text-2xl text-red-500 mb-4">Error loading Tender Document</h1>
-                <p className="text-slate-400 mb-6">Could not retrieve QS Breakdown for this Job.</p>
-                <Link href="/">
-                    <Button variant="outline">Return Dashboard</Button>
-                </Link>
+                <h1 className="text-2xl text-amber-500 mb-4">Tender Not Yet Generated</h1>
+                <p className="text-slate-400 mb-6">No QS data found. Please import HBXL/CSV data to generate the tender.</p>
+                <div className="flex gap-4">
+                    <Link href="/">
+                        <Button variant="outline">Return Dashboard</Button>
+                    </Link>
+                </div>
             </div>
         );
     }
@@ -115,7 +158,7 @@ export default function JobTenderView() {
                                 <p className="text-xs text-slate-400">Project: {tender.projectName} | Generated: {format(new Date(tender.generatedAt), 'dd/MM/yyyy HH:mm')}</p>
                             </div>
                         </div>
-                        <div>
+                        <div className="flex gap-2">
                             <Button onClick={exportToExcel} className="bg-green-600 hover:bg-green-700 text-white">
                                 <Download className="mr-2 h-4 w-4" />
                                 Export Excel
@@ -145,6 +188,37 @@ export default function JobTenderView() {
                                 £{tender.grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                             </div>
                             <p className="text-slate-500 text-xs mt-2">*Excludes Prelims & Welfare (HBXL Included)</p>
+
+                            {/* Breakdown Grid */}
+                            <div className="grid grid-cols-3 gap-4 mt-8 pt-6 border-t border-slate-700/50">
+                                {(() => {
+                                    let labour = 0, material = 0, plant = 0;
+                                    tender.sections.forEach(s => s.items.forEach(i => {
+                                        const type = i.element.toUpperCase();
+                                        if (type === 'LABOUR') labour += i.total;
+                                        else if (type === 'PLANT') plant += i.total;
+                                        else material += i.total; // Default to material if unknown or MATERIAL
+                                        // Note: If you have SUBCONTRACTOR, it falls to material here, unless we add a 4th box.
+                                        // Let's keep it simple for now matching the user request.
+                                    }));
+                                    return (
+                                        <>
+                                            <div className="bg-slate-900/50 rounded p-3">
+                                                <div className="text-xs text-slate-400 uppercase">Labour</div>
+                                                <div className="text-xl font-semibold text-blue-400">£{labour.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                            </div>
+                                            <div className="bg-slate-900/50 rounded p-3">
+                                                <div className="text-xs text-slate-400 uppercase">Material</div>
+                                                <div className="text-xl font-semibold text-emerald-400">£{material.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                            </div>
+                                            <div className="bg-slate-900/50 rounded p-3">
+                                                <div className="text-xs text-slate-400 uppercase">Plant</div>
+                                                <div className="text-xl font-semibold text-purple-400">£{plant.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
+                            </div>
                         </div>
 
                         {/* Sections */}

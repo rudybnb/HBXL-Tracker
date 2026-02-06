@@ -1,26 +1,46 @@
 
-import 'dotenv/config';
 import { db } from "./server/db";
-import { extractedElements, jobs } from "./shared/schema";
-import { desc } from "drizzle-orm";
+import { extractedElements } from "@shared/schema";
+import { like, eq } from "drizzle-orm";
 
 async function check() {
+    console.log("Checking Wall Elements in DB...");
     try {
-        console.log("Checking DB...");
+        const walls = await db.select().from(extractedElements);
 
-        // Check Jobs
-        const jobList = await db.select().from(jobs).orderBy(desc(jobs.id)).limit(5);
-        console.log("\n--- Recent Jobs ---");
-        jobList.forEach(j => console.log(`ID: ${j.id} | Code: ${j.code} | Client: ${j.client_name}`));
+        console.log(`Total Extracted Elements: ${walls.length}`);
 
-        // Check Elements
-        const els = await db.select().from(extractedElements).orderBy(desc(extractedElements.id)).limit(20);
-        console.log(`\n--- Recent Elements (${els.length}) ---`);
-        els.forEach(e => console.log(`ID: ${e.id} | JobID: ${e.jobId} | [${e.elementType}] ${e.description}`));
+        // Filter in JS to match client logic
+        const jsWalls = walls.filter(w =>
+            (w.elementType || '').toLowerCase().includes('wall') ||
+            (w.description || '').toLowerCase().includes('wall')
+        );
+
+        console.log(`Potential Walls found: ${jsWalls.length}`);
+
+        if (jsWalls.length > 0) {
+            console.log("--- Sample Walls ---");
+            jsWalls.slice(0, 5).forEach(w => {
+                console.log(`ID: ${w.id}`);
+                console.log(`Type: ${w.elementType}`);
+                console.log(`Desc: ${w.description}`);
+                console.log(`Dimensions (BBox): ${w.dimensions}`);
+                console.log(`Geometry (Raw): ${typeof w.geometry === 'string' ? w.geometry.substring(0, 50) + "..." : w.geometry}`);
+
+                // Try parsing geometry
+                let geom = w.geometry;
+                if (typeof geom === 'string') {
+                    try { geom = JSON.parse(geom); } catch (e) { geom = "INVALID JSON"; }
+                }
+                console.log(`Geometry (Parsed):`, JSON.stringify(geom));
+                console.log("----------------");
+            });
+        }
 
     } catch (e) {
         console.error(e);
     }
     process.exit(0);
 }
+
 check();

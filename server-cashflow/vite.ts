@@ -29,6 +29,14 @@ export async function setupVite(app: Express, server: Server) {
   const vite = await createViteServer({
     ...viteConfig,
     configFile: false,
+    root: path.resolve(import.meta.dirname, "..", "client-cashflow"),
+    resolve: {
+      ...viteConfig.resolve,
+      alias: {
+        ...viteConfig.resolve?.alias,
+        "@": path.resolve(import.meta.dirname, "..", "client-cashflow", "src"),
+      },
+    },
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -48,7 +56,7 @@ export async function setupVite(app: Express, server: Server) {
       const clientTemplate = path.resolve(
         import.meta.dirname,
         "..",
-        "client",
+        "client-cashflow",
         "index.html",
       );
 

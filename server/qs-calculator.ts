@@ -48,7 +48,7 @@ export class QSCalculator {
     /**
      * Generates the Full QS Tender Document for a Job
      */
-    static calculate(job: Job): QSTenderDocument {
+    static calculate(job: Job): QSTenderDocument | null {
         // 1. Parse CSV Data (Phase Task Data)
         // The previous import logic stores it as a JSON string in phaseTaskData or similar field
         // We need to robustly parse it.
@@ -61,6 +61,21 @@ export class QSCalculator {
             }
         } catch (e) {
             console.error("Failed to parse job phase data", e);
+        }
+
+        // Safety check: specific to "New Job" state
+        // Return empty document instead of null to allow UI to render (and show 0 items)
+        if (!resourceData ||
+            (Object.keys(resourceData).length === 0) ||
+            (!resourceData.financials && !resourceData.rooms && !resourceData.phases)) {
+
+            return {
+                projectId: job.id,
+                projectName: job.title,
+                generatedAt: new Date().toISOString(),
+                grandTotal: 0,
+                sections: []
+            };
         }
 
         // Check if this is Materials Used format (Job 49 style)
@@ -128,6 +143,44 @@ export class QSCalculator {
             };
         }
 
+        // Check for NEW JobPayload format (Room-Based)
+        if (resourceData.rooms && Array.isArray(resourceData.rooms)) {
+            console.log("📊 Using ROOM-BASED JobPayload for QS Tender");
+            const sections: QSSection[] = [];
+            let grandTotal = 0;
+
+            (resourceData.rooms as any[]).forEach((room, idx) => {
+                const sectionItems: QSItem[] = room.tasks.map((t: any) => ({
+                    element: t.type, // LABOUR, MATERIAL
+                    description: t.description,
+                    quantity: t.qty,
+                    unit: t.unit,
+                    rate: (t.hbxl_unit_rate_pence || 0) / 100,
+                    total: (t.contractor_total_pence ?? t.hbxl_total_pence) / 100,
+                    isCalculated: false
+                }));
+
+                const sectionTotal = sectionItems.reduce((acc, i) => acc + i.total, 0);
+                grandTotal += sectionTotal;
+
+                sections.push({
+                    id: (idx + 1).toString(),
+                    title: room.room_name,
+                    description: `${sectionItems.length} items`,
+                    total: sectionTotal,
+                    items: sectionItems
+                });
+            });
+
+            return {
+                projectId: job.id.toString(),
+                projectName: job.title || "Project " + job.id,
+                generatedAt: new Date().toISOString(),
+                grandTotal: grandTotal,
+                sections
+            };
+        }
+
         // Helper to find resources by Phase Name
         // The "enhanced" import stores phases in `phases` object
         // usage: getItems("Footings")
@@ -162,7 +215,7 @@ export class QSCalculator {
         grandTotal += screed.total;
 
         // --- 4. EXTERNAL WALLS ---
-        // This uses the SPECIAL RULE: 6.685m x 4
+        // Map external wall items assigned to Masonry Shell
         const walls = this.calculateExternalWalls(getItems("Masonry Shell"));
         sections.push(walls);
         grandTotal += walls.total;
@@ -210,110 +263,9 @@ export class QSCalculator {
         // Combine items
         const allItems = [...(items1 || []), ...(items2 || [])];
 
-        // Attempt to extract Real Costs from CSV
-        let concreteVol = 0;
-        let concreteCost = 0;
-
         allItems.forEach(item => {
-            // Check for Concrete
-            if (item.description.toLowerCase().includes("concrete") && item.unit === "m³") {
-                concreteVol += item.quantity;
-                concreteCost += item.totalCost || 0;
-            }
+            section.items.push(this.mapItemToQS(item, "Foundation Item"));
         });
-
-        // Add mapped items
-        if (concreteVol > 0) {
-            section.items.push({
-                element: "Concrete to strip foundations",
-                description: "Ready Mix Concrete from CSV",
-                quantity: concreteVol,
-                unit: "m³",
-                rate: concreteCost / concreteVol,
-                total: concreteCost,
-                isCalculated: false
-            });
-        }
-
-        // Add PLACEHOLDER items if missing (as per prompt rules)
-        if (section.items.length === 0) {
-            // Theoretical calculation based on wall length?
-            // For now, we add a "Not Found" item or estimate
-            const estimatedVol = (CONSTANTS.EXTERNAL_WALL_LENGTH * CONSTANTS.EXTERNAL_WALL_COUNT) * 0.6 * 1.0; // Length * Width * Depth
-            section.items.push({
-                element: "Excavation (Estimate)",
-                description: "Theoretical Excavation based on Perimter",
-                quantity: parseFloat(estimatedVol.toFixed(2)),
-                unit: "m³",
-                rate: 25.00, // Hardcoded estimate
-                total: parseFloat((estimatedVol * 25).toFixed(2)),
-                isCalculated: true
-            });
-        }
-
-        section.total = section.items.reduce((sum, item) => sum + item.total, 0);
-        return section;
-    }
-
-    private static calculateConcreteFloor(items: any[]): QSSection {
-        const section: QSSection = {
-            id: "2",
-            title: "CONCRETE FLOOR BUILD-UP",
-            description: "Ground Floor Slab",
-            total: 0,
-            items: []
-        };
-
-        // Logic: Look for "Polythene", "Concrete", "Insulation" in this phase
-        (items || []).forEach(item => {
-            if (item.totalCost > 0) {
-                section.items.push({
-                    element: "Material",
-                    description: item.description,
-                    quantity: item.quantity,
-                    unit: item.unit,
-                    rate: item.unitPrice || 0,
-                    total: item.totalCost,
-                    isCalculated: false
-                });
-            }
-        });
-
-        section.total = section.items.reduce((sum, item) => sum + item.total, 0);
-        return section;
-    }
-
-    private static calculateScreed(items: any[]): QSSection {
-        const section: QSSection = {
-            id: "3",
-            title: "SCREED",
-            description: "Screed applied over structural slab",
-            total: 0,
-            items: []
-        };
-
-        // Look for "Screed"
-        let found = false;
-        (items || []).forEach(item => {
-            if (item.description.toLowerCase().includes("screed")) {
-                section.items.push(this.mapItemToQS(item, "Screed"));
-                found = true;
-            }
-        });
-
-        if (!found) {
-            // Estimate based on Floor Area (approx internal of 6.685 sq?)
-            const area = (CONSTANTS.EXTERNAL_WALL_LENGTH - 0.6) * (CONSTANTS.EXTERNAL_WALL_LENGTH - 0.6); // Simple box
-            section.items.push({
-                element: "Screed Area (Estimate)",
-                description: "Estimated area",
-                quantity: parseFloat(area.toFixed(2)),
-                unit: "sqm",
-                rate: 15.00,
-                total: parseFloat((area * 15).toFixed(2)),
-                isCalculated: true
-            });
-        }
 
         section.total = section.items.reduce((sum, item) => sum + item.total, 0);
         return section;
@@ -323,52 +275,13 @@ export class QSCalculator {
         const section: QSSection = {
             id: "4",
             title: "EXTERNAL WALLS",
-            description: `Four external elevations, each measuring ${CONSTANTS.EXTERNAL_WALL_LENGTH}m length`,
+            description: "External elevations masonry and blockwork",
             total: 0,
             items: []
         };
 
-        // 1. CALCULATE WALL AREA (RULE)
-        // Area = Length * Height * 4 walls
-        const totalArea = CONSTANTS.EXTERNAL_WALL_LENGTH * CONSTANTS.EXTERNAL_WALL_HEIGHT * 4;
-
-        // 2. PRICING OPTION A: BRICKWORK (Area Based)
-        const brickCost = totalArea * CONSTANTS.RATES.BRICKWORK_SQM;
-
-        section.items.push({
-            element: "A. Outer Leaf - Facing Brickwork",
-            description: `Measured Area (${CONSTANTS.EXTERNAL_WALL_LENGTH}m x ${CONSTANTS.EXTERNAL_WALL_HEIGHT}m x 4)`,
-            quantity: parseFloat(totalArea.toFixed(2)),
-            unit: "sqm",
-            rate: CONSTANTS.RATES.BRICKWORK_SQM,
-            total: parseFloat(brickCost.toFixed(2)),
-            isCalculated: true
-        });
-
-        // 3. CAVITY INSULATION
-        const insCost = totalArea * CONSTANTS.RATES.CAVITY_INSULATION_SQM;
-        section.items.push({
-            element: "B. Cavity Insulation",
-            description: "Measured Area (matches wall area)",
-            quantity: parseFloat(totalArea.toFixed(2)),
-            unit: "sqm",
-            rate: CONSTANTS.RATES.CAVITY_INSULATION_SQM,
-            total: parseFloat(insCost.toFixed(2)),
-            isCalculated: true
-        });
-
-        // 4. INNER LEAF BLOCKS
-        // Rate is £1.00 per block. Standard block is 10/m2.
-        const blockCount = totalArea * 10;
-        const blockCost = blockCount * CONSTANTS.RATES.BLOCKWORK_LAYING_EACH;
-        section.items.push({
-            element: "C. Inner Leaf - Blockwork",
-            description: "Standard 10 blocks/m2",
-            quantity: parseFloat(blockCount.toFixed(0)),
-            unit: "nr",
-            rate: CONSTANTS.RATES.BLOCKWORK_LAYING_EACH,
-            total: parseFloat(blockCost.toFixed(2)),
-            isCalculated: true
+        (items || []).forEach(item => {
+            section.items.push(this.mapItemToQS(item, "External Wall Item"));
         });
 
         section.total = section.items.reduce((sum, item) => sum + item.total, 0);

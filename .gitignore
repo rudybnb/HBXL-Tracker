@@ -49,3 +49,8 @@ vite.config.ts.*
 # Replit specific
 .replit
 replit.nix
+uploads/
+
+node_modules_trash/
+
+tsc_output.txt

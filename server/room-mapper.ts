@@ -145,7 +145,9 @@ const ELEMENT_MAPPINGS: Record<string, string> = {
 // OpenAI for AI-powered allocation
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy initialization logic inside function to prevent crash on module load
+// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 
 /**
  * Uses GPT to intelligently match an item to the most appropriate room
@@ -156,6 +158,13 @@ async function aiMatchItemToRoom(
     roomNames: string[]
 ): Promise<{ room: string | null; isGlobal: boolean; confidence: number }> {
     try {
+        if (!process.env.OPENAI_API_KEY) {
+            // Silently fail back to rule-based routing if no key
+            return { room: null, isGlobal: true, confidence: 0 };
+        }
+
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
         const prompt = `You are a construction QS expert. Given a construction cost item, determine which room it belongs to.
 
 ITEM:
@@ -201,6 +210,38 @@ Respond with JSON only:
 export class RoomMapper {
 
     /**
+     * Clears all allocated costs from rooms for a specific job
+     * Used before re-running allocation to prevent duplication
+     */
+    async clearRoomCosts(jobId: string): Promise<void> {
+        console.log(`🧹 Clearing room allocations for Job ${jobId}...`);
+
+        const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+        if (jobRooms.length === 0) return;
+
+        const roomIds = jobRooms.map(r => r.id);
+
+        // Find all elements in these rooms
+        // Note: Drizzle doesn't support 'inArray' easily on delete with joins in all drivers, 
+        // but we can select IDs first.
+        // Actually, let's iterate to be safe and simple, or use whereIn if available.
+        // We will stick to simple logic: 
+        // 1. Get elements 
+        // 2. Delete payable items for those elements
+        // 3. Reset values
+
+        for (const room of jobRooms) {
+            const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+            for (const el of elements) {
+                await db.delete(payableItems).where(eq(payableItems.elementId, el.id));
+                await db.update(roomElements).set({ subtotal: '0' }).where(eq(roomElements.id, el.id));
+            }
+            await db.update(rooms).set({ totalValue: '0' }).where(eq(rooms.id, room.id));
+        }
+        console.log(`✅ Room costs reset.`);
+    }
+
+    /**
      * Allocates HBXL phase data to EXISTING rooms from drawing extraction
      * 
      * CRITICAL: This does NOT create rooms - rooms come from drawing extraction only!
@@ -216,11 +257,8 @@ export class RoomMapper {
         // Get existing rooms from drawing extraction
         let existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
 
-        if (existingRooms.length === 0) {
-            console.log('⚠️ No rooms found from drawing extraction. Costs will be held as unallocated.');
-            console.log('   Upload a drawing to identify rooms, then costs will be allocated.');
-            return;
-        }
+        // Proceed to auto-creation even if no rooms exist
+        // if (existingRooms.length === 0) { ... } REMOVED
 
         console.log(`🏠 Allocating HBXL costs to ${existingRooms.length} rooms from drawing`);
 
@@ -234,10 +272,45 @@ export class RoomMapper {
                 floor: 'N/A',
                 status: 'not_started',
                 totalValue: '0',
-                source: 'system' // Not from drawing, but system-generated for allocation
+                notes: 'System generated for allocation'
             }).returning();
             globalRoom = newGlobalRoom;
             existingRooms = [...existingRooms, globalRoom];
+        }
+
+        // AUTO-CREATE ROOMS FROM CSV DATA (Fallback for incomplete drawings)
+        // If CSV explicitly mentions "Lounge Sockets", we should create "Lounge" if missing
+        console.log('🔍 Scanning CSV data for missing rooms...');
+        const potentialRoomNames = new Set<string>();
+
+        for (const items of Object.values(phaseTaskData)) {
+            for (const item of items) {
+                const desc = (item.description || '').toLowerCase();
+                // Check against known room types
+                for (const [roomType, keywords] of Object.entries(ROOM_KEYWORDS)) {
+                    // Check strict room name presence or strong keywords
+                    if (desc.includes(roomType.toLowerCase())) {
+                        potentialRoomNames.add(roomType);
+                    }
+                    // Also check specific keywords that strongly imply a room (e.g. "Bedroom 1")
+                }
+            }
+        }
+
+        for (const roomName of potentialRoomNames) {
+            const exists = existingRooms.some(r => r.name.toLowerCase().includes(roomName.toLowerCase()));
+            if (!exists) {
+                console.log(`✨ Auto-creating missing room from CSV context: "${roomName}"`);
+                const [newRoom] = await db.insert(rooms).values({
+                    jobId,
+                    name: roomName,
+                    floor: 'Ground', // Default, user can change
+                    status: 'not_started',
+                    totalValue: '0',
+                    notes: 'Auto-created from CSV context'
+                }).returning();
+                existingRooms = [...existingRooms, newRoom];
+            }
         }
 
         // Track allocation stats
@@ -393,6 +466,19 @@ export class RoomMapper {
 
             console.log(`💰 Item: ${item.description?.substring(0, 30)}... | Rate: £${rateValue} -> ${ratePence}p | Total: £${totalValue} -> ${totalPence}p`);
 
+            // Determine Item Type for Labour Tender Filtering
+            let itemType = 'MATERIAL';
+            if (item.type) {
+                const t = item.type.toUpperCase();
+                if (t.includes('LABOUR') || t.includes('LABOR')) itemType = 'LABOUR';
+                else if (t.includes('MATERIAL')) itemType = 'MATERIAL';
+                else if (t.includes('PLANT')) itemType = 'PLANT';
+                else if (t.includes('SUBCONTRACTOR')) itemType = 'SUBCONTRACTOR';
+            } else if (item.category) {
+                const t = item.category.toUpperCase();
+                if (t.includes('LABOUR')) itemType = 'LABOUR';
+            }
+
             await db.insert(payableItems).values({
                 elementId: element.id,
                 description: item.description || item.task || 'Unknown Item',
@@ -402,7 +488,8 @@ export class RoomMapper {
                 total: String(totalPence),
                 hbxlSourcePhase: phase,
                 hbxlOriginalQty: String(item.quantity || 1),
-                roomAllocationPercent: '100'
+                roomAllocationPercent: '100',
+                itemType: itemType
             });
         } catch (error) {
             console.error(`Error adding item to room:`, error);
@@ -518,7 +605,9 @@ export class RoomMapper {
                 elements: elementData,
                 fileId: room.fileId || undefined,
                 page: room.page || 1,
-                bbox: room.bbox ? JSON.parse(room.bbox) : undefined
+                bbox: room.bbox ? JSON.parse(room.bbox) : undefined,
+                geometry: room.geometry ? JSON.parse(room.geometry) : undefined,
+                area: room.area || undefined
             });
         }
 
@@ -537,6 +626,8 @@ export interface RoomData {
     fileId?: string;
     page?: number;
     bbox?: number[];
+    geometry?: any[][]; // Polygon coordinates
+    area?: string;
 }
 
 export interface ElementData {
