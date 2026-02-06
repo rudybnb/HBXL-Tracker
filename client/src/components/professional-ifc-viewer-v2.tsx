@@ -237,7 +237,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                 // ... (Keep existing Loader Settings) ...
                 ifcLoader.settings.wasm = {
-                    path: "https://unpkg.com/web-ifc@0.0.53/",
+                    path: "https://unpkg.com/web-ifc@0.0.54/",
                     absolute: true
                 }
                 ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
