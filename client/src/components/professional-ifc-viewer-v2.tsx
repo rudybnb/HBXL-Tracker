@@ -460,23 +460,17 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                 // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
                 // ============================================
 
-                // CHECK CACHE FIRST (Prevent Remount Flash)
-                if (cachedLines && cachedLines.length > 0) {
-                    console.log("🧠 Using Cached 2D Geometry from Parent");
-                    setLoading(false);
-                    return;
-                }
-
-                // PREVENT RE-RUN: If we already extracted for this model, skip.
-                if (processedModelRef.current === model.uuid) {
-                    console.log("♻️ Skipping 2D Extraction: Already processed this model.");
-                    setLoading(false);
-                    return;
-                }
-                processedModelRef.current = model.uuid;
-
                 const generatedLines: any[] = [];
                 const tempMatrix = new THREE.Matrix4();
+
+                // DECISION: Use Query Cache OR Extract Fresh
+                const shouldExtract = !cachedLines || cachedLines.length === 0;
+
+                if (shouldExtract) {
+                    console.log("🔪 Starting Fresh 2D Extraction...");
+                } else {
+                    console.log("🧠 Skipping 2D Extraction (Using Cache)");
+                }
 
                 // Helper: Geometry Slicer
                 const sliceMesh = (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
@@ -549,115 +543,89 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                     }
                 };
 
-                // Determine Cut Height (Base + 1.2m)
-                // Use Wall BBox to find "floor" roughly
-                let lowestY = Infinity;
-                if (model.items) {
-                    for (const frag of model.items) {
-                        if (frag.mesh && frag.mesh.geometry.boundingBox) {
-                            const box = frag.mesh.geometry.boundingBox.clone();
-                            box.applyMatrix4(frag.mesh.matrixWorld);
-                            if (box.min.y < lowestY) lowestY = box.min.y;
+                // ONLY RUN EXTRACTION LOOP IF NEEDED
+                if (shouldExtract) {
+                    // Determine Cut Height (Base + 1.2m)
+                    let lowestY = Infinity;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            if (frag.mesh && frag.mesh.geometry.boundingBox) {
+                                const box = frag.mesh.geometry.boundingBox.clone();
+                                box.applyMatrix4(frag.mesh.matrixWorld);
+                                if (box.min.y < lowestY) lowestY = box.min.y;
+                            }
                         }
                     }
-                }
-                if (lowestY === Infinity) lowestY = 0;
-                // Cut Plane
-                const cutY = lowestY + 1.2; // 1.2m Above local zero
-                console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)} for Floor Plan...`);
+                    if (lowestY === Infinity) lowestY = 0;
+                    const cutY = lowestY + 1.2;
+                    console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)}`);
 
-                if (model.items) {
-                    for (const frag of model.items) {
-                        const mesh = frag.mesh;
-                        const fid = frag.id;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            const mesh = frag.mesh;
+                            const fid = frag.id;
 
-                        // ONLY SLICE WALLS, WINDOWS, DOORS, COLUMNS
-                        let type = null;
-                        if (walls && walls[fid]) type = 'wall';
-                        else if (doors && doors[fid]) type = 'door';
-                        else if (windows && windows[fid]) type = 'window';
-                        else if (proxies && proxies[fid]) type = 'structure'; // Columns/Foundations
+                            // TYPE CHECK
+                            let type = null;
+                            if (walls && walls[fid]) type = 'wall';
+                            else if (doors && doors[fid]) type = 'door';
+                            else if (windows && windows[fid]) type = 'window';
+                            else if (proxies && proxies[fid]) type = 'structure';
 
-                        // Ignore Furniture/Slabs/Roof for Section Cut (Cleaner Plan)
-                        if (type) {
-                            // Instance Handling
-                            if (mesh instanceof THREE.InstancedMesh) {
-                                const count = mesh.count;
-                                for (let i = 0; i < count; i++) {
-                                    // Create a temp Mesh for the instance to leverage existing logic? 
-                                    // No, too expensive. Update logic to handle instance Matrix.
-                                    // Just updating sliceMesh is complex for temp matrix injection.
-                                    // For now: Skip Instanced Logic or implement full transform.
-                                    // Most architectural walls are not instanced in basic exports.
-                                    // Only Columns might be.
-                                    // Let's rely on standard logic - if instanced, applying matrixWorld handles the *container*,
-                                    // but we need the *instance* matrix.
-                                    // IMPORTANT: fragments usually merge geometry into one mesh but keep them as 'Instances'?
-                                    // Actually openbim-components 'Fragment' IS InstancedMesh mostly.
+                            // SLICE
+                            if (type) {
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    const count = mesh.count;
+                                    for (let i = 0; i < count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        tempMatrix.premultiply(mesh.matrixWorld); // Combined
 
-                                    // Quick Fix: We need to apply instance matrix.
-                                    // Due to complexity, let's just use the bounding box center for now? 
-                                    // NO, User wants TRACE.
-                                    // Let's Apply Instance Matrix inside loop?
-                                    // sliceMesh uses `mesh.matrixWorld`. 
-                                    // We can temporarily Override `mesh.matrixWorld`? Risky.
+                                        // Re-impl Slicer for Instance
+                                        const geometry = mesh.geometry;
+                                        const index = geometry.index;
+                                        const pos = geometry.attributes.position;
+                                        const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+                                        const checkTriInst = (a: number, b: number, c: number) => {
+                                            v1.fromBufferAttribute(pos, a).applyMatrix4(tempMatrix);
+                                            v2.fromBufferAttribute(pos, b).applyMatrix4(tempMatrix);
+                                            v3.fromBufferAttribute(pos, c).applyMatrix4(tempMatrix);
 
-                                    mesh.getMatrixAt(i, tempMatrix);
-                                    // Combine with world
-                                    tempMatrix.premultiply(mesh.matrixWorld);
+                                            const d1 = v1.y - cutY;
+                                            const d2 = v2.y - cutY;
+                                            const d3 = v3.y - cutY;
 
-                                    // Pass Custom Matrix to Slicer
-                                    // Refactored sliceMesh inner logic...
-                                    // For speed, let's just clone the slice logic inline here or assume minimal instancing.
-                                    // Actually, Fragment IS usually Instanced.
+                                            const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
+                                            if (posCount === 0 || posCount === 3) return;
 
-                                    // RE-IMPLEMENT SLICER WITH PASSED MATRIX
-                                    const geometry = mesh.geometry;
-                                    const index = geometry.index;
-                                    const pos = geometry.attributes.position;
-                                    const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+                                            const points = [];
+                                            if ((d1 > 0) !== (d2 > 0)) points.push(new THREE.Vector3().lerpVectors(v1, v2, d1 / (d1 - d2)));
+                                            if ((d2 > 0) !== (d3 > 0)) points.push(new THREE.Vector3().lerpVectors(v2, v3, d2 / (d2 - d3)));
+                                            if ((d3 > 0) !== (d1 > 0)) points.push(new THREE.Vector3().lerpVectors(v3, v1, d3 / (d3 - d1)));
 
-                                    const checkTriInst = (a: number, b: number, c: number) => {
-                                        v1.fromBufferAttribute(pos, a).applyMatrix4(tempMatrix);
-                                        v2.fromBufferAttribute(pos, b).applyMatrix4(tempMatrix);
-                                        v3.fromBufferAttribute(pos, c).applyMatrix4(tempMatrix);
+                                            if (points.length >= 2) {
+                                                generatedLines.push({
+                                                    id: `${fid}-${i}`, type: type!, subtype: 'segment',
+                                                    p1: { x: points[0].x, y: points[0].z },
+                                                    p2: { x: points[1].x, y: points[1].z }
+                                                });
+                                            }
+                                        };
 
-                                        const d1 = v1.y - cutY;
-                                        const d2 = v2.y - cutY;
-                                        const d3 = v3.y - cutY;
-
-                                        const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
-                                        if (posCount === 0 || posCount === 3) return;
-
-                                        const points = [];
-                                        if ((d1 > 0) !== (d2 > 0)) points.push(new THREE.Vector3().lerpVectors(v1, v2, d1 / (d1 - d2)));
-                                        if ((d2 > 0) !== (d3 > 0)) points.push(new THREE.Vector3().lerpVectors(v2, v3, d2 / (d2 - d3)));
-                                        if ((d3 > 0) !== (d1 > 0)) points.push(new THREE.Vector3().lerpVectors(v3, v1, d3 / (d3 - d1)));
-
-                                        if (points.length >= 2) {
-                                            generatedLines.push({
-                                                id: `${fid}-${i}`, type: type!, subtype: 'segment',
-                                                p1: { x: points[0].x, y: points[0].z },
-                                                p2: { x: points[1].x, y: points[1].z }
-                                            });
+                                        if (index) {
+                                            for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
+                                        } else {
+                                            for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
                                         }
-                                    };
-
-                                    if (index) {
-                                        for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
-                                    } else {
-                                        for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
                                     }
+                                } else {
+                                    sliceMesh(mesh, cutY, type, fid);
                                 }
-                            } else {
-                                // Standard
-                                sliceMesh(mesh, cutY, type, fid);
                             }
                         }
                     }
                 }
 
-                if (generatedLines.length === 0) {
+                if (shouldExtract && generatedLines.length === 0) {
                     console.warn("⚠️ Slicer returned 0 lines. Falling back to Bounding Box method.");
                     // FALLBACK: Bounding Box Logic
                     if (model.items) {
@@ -703,7 +671,7 @@ const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onElementCl
                     }
                 }
 
-                if (isActive) {
+                if (isActive && shouldExtract) {
                     console.log(`✅ Extracted ${generatedLines.length} Plan Lines (Method: ${generatedLines[0]?.subtype || 'mixed'})`);
                     setExtractedLines(generatedLines);
                     if (onGeometryParsed) onGeometryParsed(generatedLines);
