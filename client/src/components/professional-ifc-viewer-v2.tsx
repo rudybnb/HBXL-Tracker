@@ -1382,27 +1382,60 @@ export function RoomPlan2DFinal({ rooms, lines = [], onRoomClick }: { rooms: any
 
     let roomScale = 1;
 
-    // IF we have both data sets
-    if (linesMax > 0 && roomsMax > 0) {
-        // Case A: Lines are MM (e.g. 8000), Rooms are M (e.g. 8)
-        // Ratio ~ 1000
-        if (linesMax > 1000 && roomsMax < 100) {
-            roomScale = 1000;
-            // Apply Scale to Parsed Rooms immediately
+    // 3. CENTROID ALIGNMENT (Fix Offset Issues)
+    // Calculate Line Bounds
+    let lMinX = Infinity, lMinY = Infinity, lMaxX = -Infinity, lMaxY = -Infinity;
+    if (lines.length > 0) {
+        lines.forEach(l => {
+            const x1 = (l.subtype === 'segment') ? l.p1.x : l.x;
+            const y1 = (l.subtype === 'segment') ? l.p1.y : l.y;
+            const x2 = (l.subtype === 'segment') ? l.p2.x : (l.x + l.w);
+            const y2 = (l.subtype === 'segment') ? l.p2.y : (l.y + l.h);
+            lMinX = Math.min(lMinX, x1, x2);
+            lMaxX = Math.max(lMaxX, x1, x2);
+            lMinY = Math.min(lMinY, y1, y2);
+            lMaxY = Math.max(lMaxY, y1, y2);
+        });
+
+        // Calculate Room Centroid
+        let rMinX = Infinity, rMinY = Infinity, rMaxX = -Infinity, rMaxY = -Infinity;
+        if (parsedRooms.length > 0) {
             parsedRooms.forEach(r => {
-                r.pts.forEach((p: any) => { p.x *= 1000; p.y *= 1000; });
-                r.cx *= 1000;
-                r.cy *= 1000;
+                r.pts.forEach((p: any) => {
+                    rMinX = Math.min(rMinX, p.x);
+                    rMaxX = Math.max(rMaxX, p.x);
+                    rMinY = Math.min(rMinY, p.y);
+                    rMaxY = Math.max(rMaxY, p.y);
+                });
             });
-        }
-        // Case B: Lines are M (8), Rooms are MM (8000) - Rare but possible
-        else if (linesMax < 100 && roomsMax > 1000) {
-            roomScale = 0.001;
-            parsedRooms.forEach(r => {
-                r.pts.forEach((p: any) => { p.x *= 0.001; p.y *= 0.001; });
-                r.cx *= 0.001;
-                r.cy *= 0.001;
-            });
+
+            const lCx = (lMinX + lMaxX) / 2;
+            const lCy = (lMinY + lMaxY) / 2;
+            const rCx = (rMinX + rMaxX) / 2;
+            const rCy = (rMinY + rMaxY) / 2;
+
+            // Dimensions
+            const lW = lMaxX - lMinX;
+            const lH = lMaxY - lMinY;
+            const maxL = Math.max(lW, lH);
+
+            const dist = Math.sqrt(Math.pow(lCx - rCx, 2) + Math.pow(lCy - rCy, 2));
+
+            // Heuristic: If distance is large (> max Dimension), SNAP.
+            // Or if we know they should overlap... let's just SNAP to center.
+            // Snapping centers preserves relative shape but fixes absolute offset.
+            // WARNING: If rooms are genuinely offset (e.g. extension), this breaks.
+            // But usually 2D view is single bounding box.
+
+            if (maxL > 0 && dist > maxL * 0.5) {
+                const offsetX = lCx - rCx;
+                const offsetY = lCy - rCy;
+                parsedRooms.forEach(r => {
+                    r.pts.forEach((p: any) => { p.x += offsetX; p.y += offsetY; });
+                    r.cx += offsetX;
+                    r.cy += offsetY;
+                });
+            }
         }
     }
 
