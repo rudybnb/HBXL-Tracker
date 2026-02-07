@@ -45,13 +45,46 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     const [showRoof, setShowRoof] = useState(true);
     const [tenderReport, setTenderReport] = useState<string | null>(null);
     const [isLabelMode, setIsLabelMode] = useState(false); // Added state for label mode
-    const [labelMenu, setLabelMenu] = useState<{ x: number, y: number, item: any } | null>(null); // Added state for label menu
+    // DEBUG INTERVAL
+    const [cameraStats, setCameraStats] = useState("Cam: Waiting...");
+    useEffect(() => {
+        const i = setInterval(() => {
+            if ((window as any).COMPONENTS) {
+                const c = (window as any).COMPONENTS.camera.get();
+                if (c) {
+                    const p = c.position;
+                    setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom.toFixed(3)}`);
+                }
+            }
+        }, 500);
+        return () => clearInterval(i);
+    }, []);
 
     // NEW: Extracted Plans from IFC Geometry
     const [extractedLines, setExtractedLines] = useState<any[]>([]);
 
     // Label Mode Ref for Event Listeners
     const isLabelModeRef = useRef(false);
+
+    // DEBUG INTERVAL
+    useEffect(() => {
+        const i = setInterval(() => {
+            if ((window as any).COMPONENTS) {
+                const c = (window as any).COMPONENTS.camera.get();
+                if (c) {
+                    setDebugLog(prev => {
+                        const n = [...prev];
+                        if (n.length > 5) n.shift();
+                        // Only add unique position log to reduce spam? No, spam is fine for signal.
+                        // actually just update a ref or separate state? 
+                        // Let's just log position occasionally or on change?
+                        return n;
+                    });
+                }
+            }
+        }, 1000);
+        return () => clearInterval(i);
+    }, []);
 
     // Interactive Objects Ref (Shared between IFC elements & DB Rooms)
     const interactables = useRef<THREE.Mesh[]>([]);
@@ -233,8 +266,17 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                 // Set Grid/Background
                 const scene = comps.scene.get();
-                scene.background = new THREE.Color(0xf0f2f5); // Light Gray background
+                scene.background = new THREE.Color(0xffffff); // Force White
+
+                // HUGE GRID for MM support
                 const grid = new OBC.SimpleGrid(comps, new THREE.Color(0x666666));
+                // Grid doesn't have simple size prop in OBC v1, but we can try scaling the mesh if accessible, 
+                // or just rely on the red cube.
+                // grid.get().scale.set(1000, 1000, 1000); // Try to scale grid?
+                try {
+                    const gridMesh = grid.get();
+                    gridMesh.scale.set(100, 100, 100); // 100x bigger
+                } catch (e) { }
 
                 // Lighting
                 const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2.0);
@@ -247,6 +289,15 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 (window as any).COMPONENTS = comps;
                 (window as any).RENDERER = internalRenderer;
                 (window as any).SCENE = scene;
+
+                // DIAGNOSTIC CUBE (Red Box at Origin)
+                const diagGeom = new THREE.BoxGeometry(1000, 1000, 1000);
+                const diagMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
+                const diagMesh = new THREE.Mesh(diagGeom, diagMat);
+                scene.add(diagMesh);
+                addLog("🟥 Added Debug Cube (1000x) at 0,0,0");
+
+                // 2. Loader
 
                 // 2. Loader
                 step = "2. Config Loader";
@@ -1459,6 +1510,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             {/* DEBUG OVERLAY */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
+                <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
             </div>
 
