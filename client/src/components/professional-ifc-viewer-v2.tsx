@@ -81,7 +81,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 const c = (window as any).COMPONENTS.camera.get();
                 if (c) {
                     const p = c.position;
-                    setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom.toFixed(3)}`);
+                    setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom?.toFixed(3)} | Far:${c.far}`);
                 }
             }
         }, 500);
@@ -679,17 +679,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                     // Check if likely MM
                     // We can't rely just on lowestY position (could be far from origin).
-                    // Let's check the size of the first frag?
-                    if (Math.abs(lowestY) > 500) {
-                        // Suspiciously large offset? Or just far from origin.
-                        // Better check: iterate all boxes and find Max Dimension.
-                    }
-
-                    // Better Heuristic: Check typical wall height? 
-                    // Let's default to Meters unless we see huge numbers.
-                    // If lowestY is > 1000, probably MM? Not necessarily.
-                    // Let's assume user screenshot (coordinates ~6000) implies MM.
-                    // Let's force check average coord size?
+                    // Better check: iterate all boxes and find Max Dimension.
 
                     // Let's use a simpler check: If cutY calculation at 1.2 yields 'nothing', we might need 1200.
                     // But we need to know BEFORE slicing.
@@ -1403,6 +1393,13 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // Switch to Ortho
                 try {
                     cam.setProjection('Orthographic');
+
+                    // FORCE FAR PLANE UPDATE (Fix for MM models)
+                    const activeCam = cam.get();
+                    activeCam.far = 500000; // 500m
+                    activeCam.updateProjectionMatrix();
+                    console.log("🟦 2D Projection Set. Far:", activeCam.far);
+
                     const scene = components.scene.get();
                     scene.background = new THREE.Color(0xffffff); // White BG for 2D Plan
 
@@ -1479,12 +1476,18 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // 3D Mode
                 try {
                     cam.setProjection('Perspective');
+
+                    // FORCE FAR PLANE UPDATE (Fix for MM models)
+                    const activeCam = cam.get();
+                    activeCam.far = 500000; // 500m
+                    activeCam.updateProjectionMatrix();
+
                     // Reset Orientation
                     cam.controls.camera.up.set(0, 1, 0);
 
                     const scene = components.scene.get();
                     scene.background = new THREE.Color(0xf0f2f5); // Restore
-                } catch (e) { }
+                } catch (e) { console.warn("Proj Switch Error", e); }
 
                 // Restore Grid
                 try {
@@ -1544,6 +1547,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
             {/* DEBUG OVERLAY */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
+                <div className="font-bold border-b border-white/20 mb-1 text-yellow-300">v2.5 - FIX DEPLOYED</div>
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
                 <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
