@@ -1508,8 +1508,34 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             try { clipper = components.tools.get(OBC.Clipper); } catch (e) { }
         }
 
-        // CLIPPER DISABLED FOR DIAGNOSIS
-        // if (clipper) { ... }
+        if (clipper) {
+            if (viewMode === '2d') {
+                clipper.enabled = true;
+                // Create Plane if not exists
+                if (!clipper.planes || clipper.planes.length === 0) {
+                    try {
+                        console.log("✂️ Creating 2D Slice Plane at Y=1500 (MM)...");
+                        // Use explicit normal and point for Standard cut
+                        // Try SimpleClipper method or generic
+                        if (clipper.createFromNormalAndCoplanarPoint) {
+                            clipper.createFromNormalAndCoplanarPoint(
+                                new THREE.Vector3(0, -1, 0), // Normal pointing DOWN
+                                new THREE.Vector3(0, 1500, 0) // Height 1.5m (1500mm)
+                            );
+                        } else if (clipper.create) {
+                            clipper.create(); // Fallback
+                        }
+                    } catch (e) {
+                        console.warn("Clip Create Error", e);
+                        // Fallback: try create()
+                        try { clipper.create(); } catch (e2) { }
+                    }
+                }
+            } else {
+                clipper.enabled = false;
+                clipper.deleteAll();
+            }
+        }
 
     }, [viewMode, components]);
 
@@ -1547,7 +1573,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
             {/* DEBUG OVERLAY */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
-                <div className="font-bold border-b border-white/20 mb-1 text-yellow-300">v2.5 - FIX DEPLOYED</div>
+                <div className="font-bold border-b border-white/20 mb-1 text-blue-300">v2.6 - CLIPPER ENABLED (1500mm)</div>
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
                 <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
