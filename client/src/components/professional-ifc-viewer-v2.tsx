@@ -28,6 +28,18 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     const [loadingStatus, setLoadingStatus] = useState("Initializing Engine...");
     const [inventory, setInventory] = useState<string>("Scanning...");
 
+    // LISTEN FOR FIT EVENT
+    useEffect(() => {
+        const handleFit = () => {
+            if (components && modelBoundsRef.current && !modelBoundsRef.current.isEmpty()) {
+                console.log("Manually fitting camera...");
+                components.camera.controls.fitToBox(modelBoundsRef.current, true);
+            }
+        };
+        window.addEventListener('viewer-fit-camera', handleFit);
+        return () => window.removeEventListener('viewer-fit-camera', handleFit);
+    }, [components]);
+
     const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
     const [tooltipData, setTooltipData] = useState({ visible: false, name: "", type: "", dims: "", qty: "" });
     const [showRoof, setShowRoof] = useState(true);
@@ -209,6 +221,12 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 internalRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
                 comps.camera = new OBC.OrthoPerspectiveCamera(comps);
+                // INCREASE CAMERA FAR PLANE FOR MM MODELS
+                const camObj = comps.camera.get();
+                camObj.far = 50000;
+                camObj.near = 0.1;
+                camObj.updateProjectionMatrix();
+
                 comps.raycaster = new OBC.SimpleRaycaster(comps);
 
                 await comps.init();
@@ -240,7 +258,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     path: "https://unpkg.com/web-ifc@0.0.54/",
                     absolute: true
                 }
-                // ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // DISABLED TO DEBUG VISIBILITY
+                ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // ENABLED FOR STABILITY
 
                 // Load
                 step = "3. Downloading Model";
@@ -255,6 +273,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 const model = await ifcLoader.load(buffer);
 
                 console.log("📦 Model Loaded. Items:", model ? model.items.length : 0);
+                addLog(`📦 Loaded ${model ? model.items.length : 0} Items`);
 
                 // CAMERA FIT (Use High-Level Culler logic if available, or manual box)
                 // Manual Box Fit
@@ -273,6 +292,9 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     if (!bbox.isEmpty()) {
                         comps.camera.controls.fitToBox(bbox, true);
                         console.log("📸 Fits camera to model");
+                        const c = new THREE.Vector3(); bbox.getCenter(c);
+                        const s = new THREE.Vector3(); bbox.getSize(s);
+                        addLog(`📸 Fit Cam: C:[${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)}] S:[${s.x.toFixed(0)},${s.y.toFixed(0)},${s.z.toFixed(0)}]`);
                         modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
                     } else {
                         console.warn("⚠️ Model Bounding Box is EMPTY!");
@@ -1303,38 +1325,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 const bbox = modelBoundsRef.current; // Use Pre-Calculated Box
                 console.log("📦 2D Bounds:", bbox ? `Found` : "MISSING");
 
-                // RE-ENABLED FOR STABILITY
-                // ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // This line is not in the current scope. Assuming it's meant to be placed before the bbox logic.
-                // The user provided snippet has `ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;` outside the `if (bbox && !bbox.isEmpty())` block.
-                // I will place it before the bbox check, assuming `ifcLoader` is accessible here.
-                // However, `ifcLoader` is not defined in this `useEffect` scope.
-                // I will assume `ifcLoader` is available from `components.ifcLoader` or similar, or that this line is meant to be placed elsewhere.
-                // Given the instruction, I will place it as provided, assuming `ifcLoader` is globally accessible or passed in a way not shown.
-                // If `ifcLoader` is not available, this will cause a runtime error.
-                // For now, I will place it as instructed, but comment out the `ifcLoader` part as it's not defined in this snippet.
-                // The instruction says "Re-enable COORDINATE_TO_ORIGIN", implying it was disabled.
-                // The provided code snippet for replacement does not include `ifcLoader` definition.
-                // I will add the line as provided, assuming `ifcLoader` is accessible.
 
-                // Assuming `ifcLoader` is available in this scope, e.g., from `components`
-                // if (components.ifcLoader && components.ifcLoader.settings && components.ifcLoader.settings.webIfc) {
-                //     components.ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // RE-ENABLED FOR STABILITY
-                // }
-                // The instruction explicitly states `ifcLoader.settings.webIfc.COORDINATE_TO_TO_ORIGIN = true;`
-                // I will add it as is, and if `ifcLoader` is not defined, it will be a runtime error.
-                // However, looking at the context, `ifcLoader` is likely part of the `components` object.
-                // Let's assume `components.ifcLoader` is the correct way to access it.
-                // The instruction does not provide the full context for `ifcLoader`.
-                // I will add the line as provided, but keep in mind it might need `components.` prefix.
-                // For now, I will add it as `ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;`
-                // But the provided snippet has `ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;` *before* the `if (bbox && !bbox.isEmpty())` block.
-                // This implies it should be at the top of the `if (viewMode === '2d')` block.
-
-                // Re-enabling COORDINATE_TO_ORIGIN
-                // This line assumes `ifcLoader` is globally accessible or passed in.
-                // If it's part of `components`, it should be `components.ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;`
-                // Sticking to the instruction's exact text for now.
-                // ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // RE-ENABLED FOR STABILITY
 
                 if (bbox && !bbox.isEmpty()) {
                     const sizeX = bbox.max.x - bbox.min.x;

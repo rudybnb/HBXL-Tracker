@@ -74,7 +74,17 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onEleme
                 </div>
 
                 {/* TOGGLE CONTROLS */}
-                <div className="flex bg-slate-200 rounded p-1 border border-slate-300">
+                <div className="flex bg-slate-200 rounded p-1 border border-slate-300 gap-1">
+                    <button
+                        onClick={() => {
+                            const e = new CustomEvent('viewer-fit-camera');
+                            window.dispatchEvent(e);
+                        }}
+                        className="px-3 py-1 text-xs font-bold rounded text-slate-600 hover:bg-slate-300 transition-all border-r border-slate-300 mr-1"
+                        title="Zoom Extents"
+                    >
+                        ⛶ FIT
+                    </button>
                     <button
                         onClick={() => setShow2D(false)}
                         className={`px-3 py-1 text-xs font-bold rounded transition-all ${!show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
