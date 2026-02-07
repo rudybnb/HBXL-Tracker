@@ -382,7 +382,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     electrical: new THREE.MeshBasicMaterial({ color: 0xFF0000, side: THREE.DoubleSide, depthTest: false }), // Red
                     misc: new THREE.MeshBasicMaterial({ color: 0x800080, side: THREE.DoubleSide, depthTest: false }), // Purple
 
-                    lines: new THREE.LineBasicMaterial({ color: 0x000000, depthTest: false }),
+                    lines: new THREE.LineBasicMaterial({ color: 0x333333, depthTest: false, linewidth: 2 }),
                 };
 
                 // Highlight Material - CYAN to avoid conflict with Electrical
@@ -1318,7 +1318,8 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 try {
                     cam.setProjection('Orthographic');
                     const scene = components.scene.get();
-                    scene.background = new THREE.Color(0x1a1a1a); // Dark BG for 2D
+                    scene.background = new THREE.Color(0xffffff); // White BG for 2D Plan
+
                 } catch (e) { console.warn("Proj Switch Error", e); }
 
                 // INSTANT VIEW SWITCH (Use Cached Bounds)
@@ -1365,7 +1366,13 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                     setTimeout(() => {
                         cam.controls.fitToBox(bbox, true);
-                    }, 50);
+                        // FORCE UPDATE NEAR/FAR AGAIN
+                        const activeCam = cam.get();
+                        if (activeCam) {
+                            activeCam.zoom = activeCam.zoom * 0.8; // Zoom out slightly
+                            activeCam.updateProjectionMatrix();
+                        }
+                    }, 100);
                 } else {
                     // Fallback
                     cam.controls.setPosition(0, 50, 0, true);
@@ -1412,24 +1419,8 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             try { clipper = components.tools.get(OBC.Clipper); } catch (e) { }
         }
 
-        if (clipper) {
-            if (viewMode === '2d') {
-                clipper.enabled = true;
-                // Create Plane if needed
-                const hasPlanes = clipper.planes && clipper.planes.length > 0;
-                // Also check private properties if necessary or just try creation
-                if (!hasPlanes) {
-                    try {
-                        // DISABLED FOR PERFORMANCE: Clipper creation freezes UI on large models
-                        // clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 1.5, 0));
-                        console.log("✂️ Clipper creation skipped for performance");
-                    } catch (e) { console.warn("Clip Create Error", e); }
-                }
-            } else {
-                clipper.enabled = false;
-                clipper.deleteAll();
-            }
-        }
+        // CLIPPER DISABLED FOR DIAGNOSIS
+        // if (clipper) { ... }
 
     }, [viewMode, components]);
 
