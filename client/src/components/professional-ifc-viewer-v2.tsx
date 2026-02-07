@@ -267,17 +267,17 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 if (!containerRef.current) throw new Error("No Container");
 
                 const renderer = new OBC.SimpleRenderer(comps, containerRef.current);
+                comps.renderer = renderer;
+                const internalRenderer = renderer.get();
+
                 // DISABLE SHADOWS FOR PERFORMANCE
                 internalRenderer.shadowMap.enabled = false;
-
-                // FORCE LOW POWER MODE? No, usually 'high-performance' is better to avoid switch lag,
-                // but let's stick to defaults.
 
                 // DISABLE POST-PRODUCTION ENTIRELY
                 if ((comps.renderer as any).postproduction) {
                     (comps.renderer as any).postproduction.enabled = false;
                 }
-                addLog("🚫 Shadows & Post-Proc Disabled");
+                addLog("🚫 Shadow & Post-Proc Disabled");
 
                 // Handle Resize Explicitly
                 const resizeObserver = new ResizeObserver(() => {
@@ -293,7 +293,6 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 resizeObserver.observe(containerRef.current);
 
                 const rect = containerRef.current.getBoundingClientRect();
-                const internalRenderer = renderer.get();
                 internalRenderer.setSize(rect.width, rect.height);
                 internalRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
