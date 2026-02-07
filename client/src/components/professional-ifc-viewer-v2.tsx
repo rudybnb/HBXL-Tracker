@@ -80,6 +80,13 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             if ((window as any).COMPONENTS) {
                 const c = (window as any).COMPONENTS.camera.get();
                 if (c) {
+                    // AGGRESSIVE FIX: Force Far Plane on every check
+                    if (c.far < 500000) {
+                        c.far = 500000;
+                        c.updateProjectionMatrix();
+                        console.log("🔥 Forced Camera Far Plane to 500k");
+                    }
+
                     const p = c.position;
                     setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom?.toFixed(3)} | Far:${c.far}`);
                 }
@@ -1573,7 +1580,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
             {/* DEBUG OVERLAY */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
-                <div className="font-bold border-b border-white/20 mb-1 text-blue-300">v2.6 - CLIPPER ENABLED (1500mm)</div>
+                <div className="font-bold border-b border-white/20 mb-1 text-red-400 animate-pulse">v2.7 - FORCE FAR PLANE</div>
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
                 <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
