@@ -84,1268 +84,1267 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 const p = c.position;
                 // setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom?.toFixed(3)} | Far:${c.far}`);
             }
-        }
         }, 500);
-    return () => clearInterval(i);
-}, []);
+        return () => clearInterval(i);
+    }, []);
 
-// NEW: Extracted Plans from IFC Geometry
-const [extractedLines, setExtractedLines] = useState<any[]>([]);
+    // NEW: Extracted Plans from IFC Geometry
+    const [extractedLines, setExtractedLines] = useState<any[]>([]);
 
-// Label Mode Ref for Event Listeners
-const isLabelModeRef = useRef(false);
-const viewModeRef = useRef(viewMode); // Track View Mode
+    // Label Mode Ref for Event Listeners
+    const isLabelModeRef = useRef(false);
+    const viewModeRef = useRef(viewMode); // Track View Mode
 
-// Sync Ref
-useEffect(() => {
-    viewModeRef.current = viewMode;
-}, [viewMode]);
+    // Sync Ref
+    useEffect(() => {
+        viewModeRef.current = viewMode;
+    }, [viewMode]);
 
-// DEBUG INTERVAL
-useEffect(() => {
-    const i = setInterval(() => {
-        if ((window as any).COMPONENTS) {
-            const c = (window as any).COMPONENTS.camera.get();
-            if (c) {
-                setDebugLog(prev => {
-                    const n = [...prev];
-                    if (n.length > 5) n.shift();
-                    // Only add unique position log to reduce spam? No, spam is fine for signal.
-                    // actually just update a ref or separate state? 
-                    // Let's just log position occasionally or on change?
-                    return n;
-                });
+    // DEBUG INTERVAL
+    useEffect(() => {
+        const i = setInterval(() => {
+            if ((window as any).COMPONENTS) {
+                const c = (window as any).COMPONENTS.camera.get();
+                if (c) {
+                    setDebugLog(prev => {
+                        const n = [...prev];
+                        if (n.length > 5) n.shift();
+                        // Only add unique position log to reduce spam? No, spam is fine for signal.
+                        // actually just update a ref or separate state? 
+                        // Let's just log position occasionally or on change?
+                        return n;
+                    });
+                }
             }
-        }
-    }, 1000);
-    return () => clearInterval(i);
-}, []);
+        }, 1000);
+        return () => clearInterval(i);
+    }, []);
 
-// Interactive Objects Ref (Shared between IFC elements & DB Rooms)
-const interactables = useRef<THREE.Mesh[]>([]);
+    // Interactive Objects Ref (Shared between IFC elements & DB Rooms)
+    const interactables = useRef<THREE.Mesh[]>([]);
 
-// Flag to prevent re-extraction of the same model
-const processedModelRef = useRef<string | null>(null);
-const modelBoundsRef = useRef<THREE.Box3 | null>(null); // NEW: Cache Bounds
+    // Flag to prevent re-extraction of the same model
+    const processedModelRef = useRef<string | null>(null);
+    const modelBoundsRef = useRef<THREE.Box3 | null>(null); // NEW: Cache Bounds
 
-// ... (Keep existing Init/Effect)
+    // ... (Keep existing Init/Effect)
 
-// NEW: Render Database Rooms Overlay
-useEffect(() => {
-    if (!components || !rooms.length) return;
+    // NEW: Render Database Rooms Overlay
+    useEffect(() => {
+        if (!components || !rooms.length) return;
 
-    const scene = components.scene.get();
-    const roomMeshes: THREE.Mesh[] = [];
+        const scene = components.scene.get();
+        const roomMeshes: THREE.Mesh[] = [];
 
-    // Material for DB Rooms (Transparent Amber)
-    const roomMat = new THREE.MeshBasicMaterial({
-        color: 0xF59E0B, // Amber-500
-        transparent: true,
-        opacity: 0.4, // Increased visibility
-        side: THREE.DoubleSide,
-        depthTest: false // Always visible on top
-    });
-
-    const borderMat = new THREE.LineBasicMaterial({
-        color: 0xF59E0B,
-        depthTest: false
-    });
-
-    rooms.forEach((room) => {
-        if (!room.geometry) return;
-
-        // Compute Shape
-        let points: any[] = [];
-        try {
-            points = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
-        } catch (e) { return; }
-
-        if (!Array.isArray(points) || points.length < 3) return;
-
-        const shape = new THREE.Shape();
-        // Assuming points are [x, z] or [x, y]? 
-        // DB Geometry from GeometricRoomDetector is usually [x, y] (2D).
-        // In 3D World, Y is Up. So we map 2D y -> 3D z.
-
-        // Check coordinate scale. GeometricRoomDetector uses Millimeters usually? Or scaled?
-        // Detector outputs "Normalized"? No, ifc-agent outputs world coords.
-        // Let's assume World Coords.
-
-        shape.moveTo(points[0].x || points[0][0], points[0].y || points[0][1]);
-        for (let i = 1; i < points.length; i++) {
-            shape.lineTo(points[i].x || points[i][0], points[i].y || points[i][1]);
-        }
-        shape.closePath();
-
-        const geom = new THREE.ShapeGeometry(shape);
-        // Rotate to lie on XZ plane (Floor)
-        geom.rotateX(Math.PI / 2);
-        // Check if we need to flip Y? 
-        // In Three.js, Y is Up. 2D [x,y] -> 3D [x,0,y] usually works if we rotate X -90?
-        // `geom.rotateX(Math.PI / 2)` rotates +Y to +Z ?
-        // Let's try. Initial simple Geometry is XY plane.
-        // shape (x, y) -> mesh (x, y, 0).
-        // Rotate X -90deg (-PI/2) -> (x, 0, y).
-        // Wait, standard rotation direction...
-
-        // Correction: Rotate X -90 deg
-        geom.rotateX(-Math.PI / 2);
-
-        // Lift slightly to avoid z-fighting with floor
-        geom.translate(0, 0.05, 0);
-
-        const mesh = new THREE.Mesh(geom, roomMat);
-        mesh.userData.api = {
-            id: room.id, // DB UUID!
-            name: room.name,
-            type: 'Database Room',
-            isSpace: true, // Treat as space for logic
-            isDbRoom: true // Flag
-        };
-
-        // Add Border
-        const edges = new THREE.EdgesGeometry(geom);
-        const line = new THREE.LineSegments(edges, borderMat);
-        mesh.add(line);
-
-        scene.add(mesh);
-        roomMeshes.push(mesh);
-
-        // REGISTER INTERACTIVITY
-        interactables.current.push(mesh);
-    });
-
-    console.log(`🏠 Rendered ${roomMeshes.length} Database Rooms in 3D`);
-
-    return () => {
-        roomMeshes.forEach(m => {
-            scene.remove(m);
-            if (m.geometry) m.geometry.dispose();
-
-            // UNREGISTER INTERACTIVITY
-            const idx = interactables.current.indexOf(m);
-            if (idx > -1) interactables.current.splice(idx, 1);
+        // Material for DB Rooms (Transparent Amber)
+        const roomMat = new THREE.MeshBasicMaterial({
+            color: 0xF59E0B, // Amber-500
+            transparent: true,
+            opacity: 0.4, // Increased visibility
+            side: THREE.DoubleSide,
+            depthTest: false // Always visible on top
         });
-    };
-}, [components, rooms]);
+
+        const borderMat = new THREE.LineBasicMaterial({
+            color: 0xF59E0B,
+            depthTest: false
+        });
+
+        rooms.forEach((room) => {
+            if (!room.geometry) return;
+
+            // Compute Shape
+            let points: any[] = [];
+            try {
+                points = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
+            } catch (e) { return; }
+
+            if (!Array.isArray(points) || points.length < 3) return;
+
+            const shape = new THREE.Shape();
+            // Assuming points are [x, z] or [x, y]? 
+            // DB Geometry from GeometricRoomDetector is usually [x, y] (2D).
+            // In 3D World, Y is Up. So we map 2D y -> 3D z.
+
+            // Check coordinate scale. GeometricRoomDetector uses Millimeters usually? Or scaled?
+            // Detector outputs "Normalized"? No, ifc-agent outputs world coords.
+            // Let's assume World Coords.
+
+            shape.moveTo(points[0].x || points[0][0], points[0].y || points[0][1]);
+            for (let i = 1; i < points.length; i++) {
+                shape.lineTo(points[i].x || points[i][0], points[i].y || points[i][1]);
+            }
+            shape.closePath();
+
+            const geom = new THREE.ShapeGeometry(shape);
+            // Rotate to lie on XZ plane (Floor)
+            geom.rotateX(Math.PI / 2);
+            // Check if we need to flip Y? 
+            // In Three.js, Y is Up. 2D [x,y] -> 3D [x,0,y] usually works if we rotate X -90?
+            // `geom.rotateX(Math.PI / 2)` rotates +Y to +Z ?
+            // Let's try. Initial simple Geometry is XY plane.
+            // shape (x, y) -> mesh (x, y, 0).
+            // Rotate X -90deg (-PI/2) -> (x, 0, y).
+            // Wait, standard rotation direction...
+
+            // Correction: Rotate X -90 deg
+            geom.rotateX(-Math.PI / 2);
+
+            // Lift slightly to avoid z-fighting with floor
+            geom.translate(0, 0.05, 0);
+
+            const mesh = new THREE.Mesh(geom, roomMat);
+            mesh.userData.api = {
+                id: room.id, // DB UUID!
+                name: room.name,
+                type: 'Database Room',
+                isSpace: true, // Treat as space for logic
+                isDbRoom: true // Flag
+            };
+
+            // Add Border
+            const edges = new THREE.EdgesGeometry(geom);
+            const line = new THREE.LineSegments(edges, borderMat);
+            mesh.add(line);
+
+            scene.add(mesh);
+            roomMeshes.push(mesh);
+
+            // REGISTER INTERACTIVITY
+            interactables.current.push(mesh);
+        });
+
+        console.log(`🏠 Rendered ${roomMeshes.length} Database Rooms in 3D`);
+
+        return () => {
+            roomMeshes.forEach(m => {
+                scene.remove(m);
+                if (m.geometry) m.geometry.dispose();
+
+                // UNREGISTER INTERACTIVITY
+                const idx = interactables.current.indexOf(m);
+                if (idx > -1) interactables.current.splice(idx, 1);
+            });
+        };
+    }, [components, rooms]);
 
 
-// Update Label Menu to Handle DB Rooms
-// ...
+    // Update Label Menu to Handle DB Rooms
+    // ...
 
-// (Returning to existing View Code)
-// ...
+    // (Returning to existing View Code)
+    // ...
 
 
-// 🔴 3D Engine Initialization Fix
-useEffect(() => {
-    if (!containerRef.current) return;
+    // 🔴 3D Engine Initialization Fix
+    useEffect(() => {
+        if (!containerRef.current) return;
 
-    // Cleanup old
-    if (components) {
-        components.dispose();
-        setComponents(null);
-    }
+        // Cleanup old
+        if (components) {
+            components.dispose();
+            setComponents(null);
+        }
 
-    let isActive = true;
+        let isActive = true;
 
-    const init = async () => {
-        if (!isActive) return;
-        console.log("🏁 Init Start: " + fileUrl);
-
-        // Clear Interactables on Init
-        interactables.current = [];
-
-        let step = "Starting";
-        try {
+        const init = async () => {
             if (!isActive) return;
-            // 1. Init
-            step = "1. Init Engine";
-            setLoadingStatus("Starting 3D Engine...");
-            const comps = new OBC.Components();
-            comps.scene = new OBC.SimpleScene(comps);
+            console.log("🏁 Init Start: " + fileUrl);
 
-            if (!containerRef.current) throw new Error("No Container");
+            // Clear Interactables on Init
+            interactables.current = [];
 
-            const renderer = new OBC.SimpleRenderer(comps, containerRef.current);
-            // DISABLE SHADOWS FOR PERFORMANCE
-            internalRenderer.shadowMap.enabled = false;
+            let step = "Starting";
+            try {
+                if (!isActive) return;
+                // 1. Init
+                step = "1. Init Engine";
+                setLoadingStatus("Starting 3D Engine...");
+                const comps = new OBC.Components();
+                comps.scene = new OBC.SimpleScene(comps);
 
-            // FORCE LOW POWER MODE? No, usually 'high-performance' is better to avoid switch lag,
-            // but let's stick to defaults.
+                if (!containerRef.current) throw new Error("No Container");
 
-            // DISABLE POST-PRODUCTION ENTIRELY
-            if ((comps.renderer as any).postproduction) {
-                (comps.renderer as any).postproduction.enabled = false;
-            }
-            addLog("🚫 Shadows & Post-Proc Disabled");
+                const renderer = new OBC.SimpleRenderer(comps, containerRef.current);
+                // DISABLE SHADOWS FOR PERFORMANCE
+                internalRenderer.shadowMap.enabled = false;
 
-            // Handle Resize Explicitly
-            const resizeObserver = new ResizeObserver(() => {
-                if (containerRef.current) {
-                    const { width, height } = containerRef.current.getBoundingClientRect();
-                    // Ignore invalid/collapsed dimensions
-                    if (width > 0 && height > 0) {
-                        renderer.get().setSize(width, height);
-                        comps.camera.updateAspect();
+                // FORCE LOW POWER MODE? No, usually 'high-performance' is better to avoid switch lag,
+                // but let's stick to defaults.
+
+                // DISABLE POST-PRODUCTION ENTIRELY
+                if ((comps.renderer as any).postproduction) {
+                    (comps.renderer as any).postproduction.enabled = false;
+                }
+                addLog("🚫 Shadows & Post-Proc Disabled");
+
+                // Handle Resize Explicitly
+                const resizeObserver = new ResizeObserver(() => {
+                    if (containerRef.current) {
+                        const { width, height } = containerRef.current.getBoundingClientRect();
+                        // Ignore invalid/collapsed dimensions
+                        if (width > 0 && height > 0) {
+                            renderer.get().setSize(width, height);
+                            comps.camera.updateAspect();
+                        }
+                    }
+                });
+                resizeObserver.observe(containerRef.current);
+
+                const rect = containerRef.current.getBoundingClientRect();
+                const internalRenderer = renderer.get();
+                internalRenderer.setSize(rect.width, rect.height);
+                internalRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+                comps.camera = new OBC.OrthoPerspectiveCamera(comps);
+                // INCREASE CAMERA FAR PLANE FOR MM MODELS
+                const camObj = comps.camera.get();
+                camObj.far = 50000;
+                camObj.near = 0.1;
+                camObj.updateProjectionMatrix();
+
+                comps.raycaster = new OBC.SimpleRaycaster(comps);
+
+                await comps.init();
+
+                // Set Grid/Background
+                const scene = comps.scene.get();
+                scene.background = new THREE.Color(0xffffff); // Force White
+
+                // HUGE GRID for MM support
+                const grid = new OBC.SimpleGrid(comps, new THREE.Color(0x666666));
+                // Grid doesn't have simple size prop in OBC v1, but we can try scaling the mesh if accessible, 
+                // or just rely on the red cube.
+                // grid.get().scale.set(1000, 1000, 1000); // Try to scale grid?
+                try {
+                    const gridMesh = grid.get();
+                    gridMesh.scale.set(100, 100, 100); // 100x bigger
+                } catch (e) { }
+
+                // Lighting
+                const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2.0);
+                scene.add(hemiLight);
+                const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                dirLight.position.set(50, 100, 50);
+                scene.add(dirLight);
+
+                // EXPOSE
+                (window as any).COMPONENTS = comps;
+                (window as any).RENDERER = internalRenderer;
+                (window as any).SCENE = scene;
+
+                // DIAGNOSTIC CUBE (Solid Red - ANIMATED)
+                const diagGeom = new THREE.BoxGeometry(2000, 200, 2000); // Floor Plate
+                const diagMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.3 });
+                const diagMesh = new THREE.Mesh(diagGeom, diagMat);
+                diagMesh.position.set(0, 0, 0);
+                scene.add(diagMesh);
+                (window as any).DEBUG_MESH = diagMesh;
+                addLog("🟥 Added Floor Plate (2000x) at 0,0,0");
+
+                // NO ANIMATION LOOP - IT KILLS REACT
+                // const animateDebug = () => { ... }
+                // animateDebug();
+
+                // 2. Loader
+
+                // 2. Loader
+                step = "2. Config Loader";
+                const fragments = new OBC.FragmentManager(comps);
+                const ifcLoader = new OBC.FragmentIfcLoader(comps);
+
+                // ... (Keep existing Loader Settings) ...
+                ifcLoader.settings.wasm = {
+                    path: "https://unpkg.com/web-ifc@0.0.54/",
+                    absolute: true
+                }
+                ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // ENABLED FOR STABILITY
+
+                // Load
+                step = "3. Downloading Model";
+                setLoadingStatus("Downloading File...");
+                setLoading(true);
+                const fileResponse = await fetch(fileUrl);
+                const data = await fileResponse.arrayBuffer();
+                const buffer = new Uint8Array(data);
+
+                step = "3b. Parsing IFC";
+                setLoadingStatus("Parsing Geometry...");
+                const model = await ifcLoader.load(buffer);
+
+                console.log("📦 Model Loaded. Items:", model ? model.items.length : 0);
+                addLog(`📦 Loaded ${model ? model.items.length : 0} Items`);
+
+                // CAMERA FIT (Use High-Level Culler logic if available, or manual box)
+                // Manual Box Fit
+                if (model) {
+                    // Compute Bounding Box of all fragments
+                    const bbox = new THREE.Box3();
+                    for (const frag of model.items) {
+                        if (!frag.mesh.geometry.boundingBox) frag.mesh.geometry.computeBoundingBox();
+                        const box = frag.mesh.geometry.boundingBox!.clone();
+                        box.applyMatrix4(frag.mesh.matrixWorld);
+                        bbox.union(box);
+                    }
+
+                    console.log("📦 Calculated BBox:", JSON.stringify(bbox));
+
+                    if (!bbox.isEmpty()) {
+                        comps.camera.controls.fitToBox(bbox, true);
+                        console.log("📸 Fits camera to model");
+                        const c = new THREE.Vector3(); bbox.getCenter(c);
+                        const s = new THREE.Vector3(); bbox.getSize(s);
+                        addLog(`📸 Fit Cam: C:[${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)}] S:[${s.x.toFixed(0)},${s.y.toFixed(0)},${s.z.toFixed(0)}]`);
+                        modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
+                    } else {
+                        console.warn("⚠️ Model Bounding Box is EMPTY!");
                     }
                 }
-            });
-            resizeObserver.observe(containerRef.current);
 
-            const rect = containerRef.current.getBoundingClientRect();
-            const internalRenderer = renderer.get();
-            internalRenderer.setSize(rect.width, rect.height);
-            internalRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                // 4. Classification & Inventory
+                step = "4. Classifying";
+                setLoadingStatus("Analyzing Model...");
 
-            comps.camera = new OBC.OrthoPerspectiveCamera(comps);
-            // INCREASE CAMERA FAR PLANE FOR MM MODELS
-            const camObj = comps.camera.get();
-            camObj.far = 50000;
-            camObj.near = 0.1;
-            camObj.updateProjectionMatrix();
+                const classifier = new OBC.FragmentClassifier(comps);
+                try {
+                    await classifier.byEntity(model);
+                } catch (e) { console.warn(e); }
 
-            comps.raycaster = new OBC.SimpleRaycaster(comps);
+                // LOGIC: Find Standard Elements
+                const doors = classifier.find({ entities: ["IFCDOOR"] });
+                const windows = classifier.find({ entities: ["IFCWINDOW"] });
+                const slabs = classifier.find({ entities: ["IFCSLAB"] });
+                const walls = classifier.find({ entities: ["IFCWALL", "IFCWALLSTANDARDCASE"] });
+                const roofs = classifier.find({ entities: ["IFCROOF"] });
 
-            await comps.init();
+                // LOGIC: Find MEP & Furnishings
+                const furniture = classifier.find({ entities: ["IFCFURNISHINGELEMENT"] });
+                // Sanitary: WC, Showers, Sinks usually fall under IfcFlowTerminal
+                const sanitary = classifier.find({ entities: ["IFCFLOWTERMINAL"] });
+                // Electrical: Lights, Sockets, Switches + General MEP
+                const electrical = classifier.find({ entities: ["IFCLIGHTFIXTURE", "IFCOUTLET", "IFCFLOWCONTROLLER", "IFCELECTRICDISTRIBUTIONPOINT", "IFCDISTRIBUTIONELEMENT", "IFCFLOWSEGMENT", "IFCFLOWFITTING"] });
+                // Proxies: Generic 3D Symbols or Assemblies
+                // Added IFCFOOTING and IFCCIVILELEMENT for foundations
+                const proxies = classifier.find({ entities: ["IFCBUILDINGELEMENTPROXY", "IFCVIRTUALELEMENT", "IFCELEMENTASSEMBLY", "IFCFOOTING", "IFCCIVILELEMENT", "IFCPILE"] });
 
-            // Set Grid/Background
-            const scene = comps.scene.get();
-            scene.background = new THREE.Color(0xffffff); // Force White
+                // ACCURATE COUNTING (Fixing Double Count)
+                const countUniqueItems = (map: any) => {
+                    if (!map) return 0;
+                    const uniqueIDs = new Set<string>();
+                    for (const fragID in map) {
+                        const ids = map[fragID];
+                        ids.forEach((id: string) => uniqueIDs.add(id));
+                    }
+                    return uniqueIDs.size;
+                };
 
-            // HUGE GRID for MM support
-            const grid = new OBC.SimpleGrid(comps, new THREE.Color(0x666666));
-            // Grid doesn't have simple size prop in OBC v1, but we can try scaling the mesh if accessible, 
-            // or just rely on the red cube.
-            // grid.get().scale.set(1000, 1000, 1000); // Try to scale grid?
-            try {
-                const gridMesh = grid.get();
-                gridMesh.scale.set(100, 100, 100); // 100x bigger
-            } catch (e) { }
+                // Counts
+                let doorCount = countUniqueItems(doors);
+                let winCount = countUniqueItems(windows);
+                let wallCount = countUniqueItems(walls);
+                let roofCount = countUniqueItems(roofs);
+                let slabCount = countUniqueItems(slabs);
 
-            // Lighting
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2.0);
-            scene.add(hemiLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-            dirLight.position.set(50, 100, 50);
-            scene.add(dirLight);
+                let furnCount = countUniqueItems(furniture);
+                let sanCount = countUniqueItems(sanitary);
+                let elecCount = countUniqueItems(electrical);
+                let miscCount = countUniqueItems(proxies);
 
-            // EXPOSE
-            (window as any).COMPONENTS = comps;
-            (window as any).RENDERER = internalRenderer;
-            (window as any).SCENE = scene;
+                setInventory(
+                    `Doors: ${doorCount} | Windows: ${winCount} \n` +
+                    `Walls: ${wallCount} | Roofs: ${roofCount} | Floors: ${slabCount} \n` +
+                    `Furn: ${furnCount} | Sanitary: ${sanCount} | Elec: ${elecCount} \n` +
+                    `Misc: ${miscCount} `
+                );
 
-            // DIAGNOSTIC CUBE (Solid Red - ANIMATED)
-            const diagGeom = new THREE.BoxGeometry(2000, 200, 2000); // Floor Plate
-            const diagMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.3 });
-            const diagMesh = new THREE.Mesh(diagGeom, diagMat);
-            diagMesh.position.set(0, 0, 0);
-            scene.add(diagMesh);
-            (window as any).DEBUG_MESH = diagMesh;
-            addLog("🟥 Added Floor Plate (2000x) at 0,0,0");
-
-            // NO ANIMATION LOOP - IT KILLS REACT
-            // const animateDebug = () => { ... }
-            // animateDebug();
-
-            // 2. Loader
-
-            // 2. Loader
-            step = "2. Config Loader";
-            const fragments = new OBC.FragmentManager(comps);
-            const ifcLoader = new OBC.FragmentIfcLoader(comps);
-
-            // ... (Keep existing Loader Settings) ...
-            ifcLoader.settings.wasm = {
-                path: "https://unpkg.com/web-ifc@0.0.54/",
-                absolute: true
-            }
-            ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true; // ENABLED FOR STABILITY
-
-            // Load
-            step = "3. Downloading Model";
-            setLoadingStatus("Downloading File...");
-            setLoading(true);
-            const fileResponse = await fetch(fileUrl);
-            const data = await fileResponse.arrayBuffer();
-            const buffer = new Uint8Array(data);
-
-            step = "3b. Parsing IFC";
-            setLoadingStatus("Parsing Geometry...");
-            const model = await ifcLoader.load(buffer);
-
-            console.log("📦 Model Loaded. Items:", model ? model.items.length : 0);
-            addLog(`📦 Loaded ${model ? model.items.length : 0} Items`);
-
-            // CAMERA FIT (Use High-Level Culler logic if available, or manual box)
-            // Manual Box Fit
-            if (model) {
-                // Compute Bounding Box of all fragments
-                const bbox = new THREE.Box3();
-                for (const frag of model.items) {
-                    if (!frag.mesh.geometry.boundingBox) frag.mesh.geometry.computeBoundingBox();
-                    const box = frag.mesh.geometry.boundingBox!.clone();
-                    box.applyMatrix4(frag.mesh.matrixWorld);
-                    bbox.union(box);
-                }
-
-                console.log("📦 Calculated BBox:", JSON.stringify(bbox));
-
-                if (!bbox.isEmpty()) {
-                    comps.camera.controls.fitToBox(bbox, true);
-                    console.log("📸 Fits camera to model");
-                    const c = new THREE.Vector3(); bbox.getCenter(c);
-                    const s = new THREE.Vector3(); bbox.getSize(s);
-                    addLog(`📸 Fit Cam: C:[${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)}] S:[${s.x.toFixed(0)},${s.y.toFixed(0)},${s.z.toFixed(0)}]`);
-                    modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
-                } else {
-                    console.warn("⚠️ Model Bounding Box is EMPTY!");
-                }
-            }
-
-            // 4. Classification & Inventory
-            step = "4. Classifying";
-            setLoadingStatus("Analyzing Model...");
-
-            const classifier = new OBC.FragmentClassifier(comps);
-            try {
-                await classifier.byEntity(model);
-            } catch (e) { console.warn(e); }
-
-            // LOGIC: Find Standard Elements
-            const doors = classifier.find({ entities: ["IFCDOOR"] });
-            const windows = classifier.find({ entities: ["IFCWINDOW"] });
-            const slabs = classifier.find({ entities: ["IFCSLAB"] });
-            const walls = classifier.find({ entities: ["IFCWALL", "IFCWALLSTANDARDCASE"] });
-            const roofs = classifier.find({ entities: ["IFCROOF"] });
-
-            // LOGIC: Find MEP & Furnishings
-            const furniture = classifier.find({ entities: ["IFCFURNISHINGELEMENT"] });
-            // Sanitary: WC, Showers, Sinks usually fall under IfcFlowTerminal
-            const sanitary = classifier.find({ entities: ["IFCFLOWTERMINAL"] });
-            // Electrical: Lights, Sockets, Switches + General MEP
-            const electrical = classifier.find({ entities: ["IFCLIGHTFIXTURE", "IFCOUTLET", "IFCFLOWCONTROLLER", "IFCELECTRICDISTRIBUTIONPOINT", "IFCDISTRIBUTIONELEMENT", "IFCFLOWSEGMENT", "IFCFLOWFITTING"] });
-            // Proxies: Generic 3D Symbols or Assemblies
-            // Added IFCFOOTING and IFCCIVILELEMENT for foundations
-            const proxies = classifier.find({ entities: ["IFCBUILDINGELEMENTPROXY", "IFCVIRTUALELEMENT", "IFCELEMENTASSEMBLY", "IFCFOOTING", "IFCCIVILELEMENT", "IFCPILE"] });
-
-            // ACCURATE COUNTING (Fixing Double Count)
-            const countUniqueItems = (map: any) => {
-                if (!map) return 0;
-                const uniqueIDs = new Set<string>();
-                for (const fragID in map) {
+                // Helper to check precise item existence
+                const isItemInMap = (map: any, fragID: string, expressID: string) => {
+                    if (!map) return false;
                     const ids = map[fragID];
-                    ids.forEach((id: string) => uniqueIDs.add(id));
-                }
-                return uniqueIDs.size;
-            };
+                    if (!ids) return false;
+                    if (ids.has) return ids.has(expressID);
+                    if (Array.isArray(ids)) return ids.includes(expressID);
+                    return false;
+                };
 
-            // Counts
-            let doorCount = countUniqueItems(doors);
-            let winCount = countUniqueItems(windows);
-            let wallCount = countUniqueItems(walls);
-            let roofCount = countUniqueItems(roofs);
-            let slabCount = countUniqueItems(slabs);
+                // MATERIALS - FORCE VISIBILITY (X-RAY MODE FOR MEP)
+                const styles = {
+                    wall: new THREE.MeshBasicMaterial({ color: 0x999999, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 1 }),
+                    door: new THREE.MeshBasicMaterial({ color: 0xA0522D, side: THREE.DoubleSide, depthTest: false }),
+                    window: new THREE.MeshBasicMaterial({ color: 0x00BFFF, side: THREE.DoubleSide, depthTest: false }),
+                    slab: new THREE.MeshBasicMaterial({ color: 0xCCCCCC, side: THREE.DoubleSide }),
+                    roof: new THREE.MeshBasicMaterial({ color: 0x2F4F4F, side: THREE.DoubleSide }),
 
-            let furnCount = countUniqueItems(furniture);
-            let sanCount = countUniqueItems(sanitary);
-            let elecCount = countUniqueItems(electrical);
-            let miscCount = countUniqueItems(proxies);
+                    furniture: new THREE.MeshBasicMaterial({ color: 0x8B4513, side: THREE.DoubleSide }), // SaddleBrown
+                    sanitary: new THREE.MeshBasicMaterial({ color: 0xFFFFFF, side: THREE.DoubleSide }), // White
 
-            setInventory(
-                `Doors: ${doorCount} | Windows: ${winCount} \n` +
-                `Walls: ${wallCount} | Roofs: ${roofCount} | Floors: ${slabCount} \n` +
-                `Furn: ${furnCount} | Sanitary: ${sanCount} | Elec: ${elecCount} \n` +
-                `Misc: ${miscCount} `
-            );
+                    // X-RAY STYLES (Always Visible) - RED for Electrical to stand out against highlighting
+                    electrical: new THREE.MeshBasicMaterial({ color: 0xFF0000, side: THREE.DoubleSide, depthTest: false }), // Red
+                    misc: new THREE.MeshBasicMaterial({ color: 0x800080, side: THREE.DoubleSide, depthTest: false }), // Purple
 
-            // Helper to check precise item existence
-            const isItemInMap = (map: any, fragID: string, expressID: string) => {
-                if (!map) return false;
-                const ids = map[fragID];
-                if (!ids) return false;
-                if (ids.has) return ids.has(expressID);
-                if (Array.isArray(ids)) return ids.includes(expressID);
-                return false;
-            };
+                    lines: new THREE.LineBasicMaterial({ color: 0x333333, depthTest: false, linewidth: 2 }),
+                };
 
-            // MATERIALS - FORCE VISIBILITY (X-RAY MODE FOR MEP)
-            const styles = {
-                wall: new THREE.MeshBasicMaterial({ color: 0x999999, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 1 }),
-                door: new THREE.MeshBasicMaterial({ color: 0xA0522D, side: THREE.DoubleSide, depthTest: false }),
-                window: new THREE.MeshBasicMaterial({ color: 0x00BFFF, side: THREE.DoubleSide, depthTest: false }),
-                slab: new THREE.MeshBasicMaterial({ color: 0xCCCCCC, side: THREE.DoubleSide }),
-                roof: new THREE.MeshBasicMaterial({ color: 0x2F4F4F, side: THREE.DoubleSide }),
-
-                furniture: new THREE.MeshBasicMaterial({ color: 0x8B4513, side: THREE.DoubleSide }), // SaddleBrown
-                sanitary: new THREE.MeshBasicMaterial({ color: 0xFFFFFF, side: THREE.DoubleSide }), // White
-
-                // X-RAY STYLES (Always Visible) - RED for Electrical to stand out against highlighting
-                electrical: new THREE.MeshBasicMaterial({ color: 0xFF0000, side: THREE.DoubleSide, depthTest: false }), // Red
-                misc: new THREE.MeshBasicMaterial({ color: 0x800080, side: THREE.DoubleSide, depthTest: false }), // Purple
-
-                lines: new THREE.LineBasicMaterial({ color: 0x333333, depthTest: false, linewidth: 2 }),
-            };
-
-            // Highlight Material - CYAN to avoid conflict with Electrical
-            const highlightMat = new THREE.MeshBasicMaterial({
-                color: 0x00FFFF, // Cyan
-                depthTest: false,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.5
-            });
-
-            if (model.items) {
-                for (const fragment of model.items) {
-                    const mesh = fragment.mesh;
-                    if (mesh) {
-                        try {
-                            mesh.position.set(0, 0, 0);
-                            mesh.updateMatrixWorld(true);
-                            scene.add(mesh);
-
-                            // Default to WALL style
-                            let mat = styles.wall;
-
-                            const fid = fragment.id;
-
-                            // 1. Check Keywords (Name-Based Override)
-                            // We need to peek at properties inside this loop slightly inefficiently but necessary for styling
-                            // However, styling happens before we iterate properties.
-                            // To solve this: simpler Map check first, then update 'pType' in the next loop.
-                            // Actually, we can check Maps here.
-
-                            if (doors && doors[fid]) mat = styles.door;
-                            else if (windows && windows[fid]) mat = styles.window;
-                            else if (slabs && slabs[fid]) mat = styles.slab;
-                            else if (roofs && roofs[fid]) mat = styles.roof;
-                            else if (furniture && furniture[fid]) mat = styles.furniture;
-                            else if (sanitary && sanitary[fid]) mat = styles.sanitary;
-                            else if (electrical && electrical[fid]) mat = styles.electrical;
-                            else if (proxies && proxies[fid]) mat = styles.misc;
-
-                            // Special Render Order
-                            if (mat === styles.door || mat === styles.window || mat === styles.electrical || mat === styles.misc) {
-                                mesh.renderOrder = 10; // High Priority
-                            }
-
-                            mesh.material = mat;
-
-                            if (mat === styles.wall || mat === styles.slab) {
-                                if (!(mesh instanceof THREE.InstancedMesh)) {
-                                    mesh.children = mesh.children.filter(c => !(c instanceof THREE.LineSegments));
-                                    const edges = new THREE.EdgesGeometry(mesh.geometry, 80);
-                                    const line = new THREE.LineSegments(edges, styles.lines);
-                                    line.renderOrder = 1;
-                                    mesh.add(line);
-                                }
-                            }
-                        } catch (e) { }
-                    }
-                }
-            }
-
-            // VIRTUAL FLOOR GENERATOR
-            // If no slabs detected, generate a floor plane so the model doesn't float in void
-            if (slabCount === 0 && wallCount > 0) {
-                // Calculate global bounding box of walls
-                const bbox = new THREE.Box3();
-                const wallIds = new Set(Object.values(walls || {}).flat()); // Approximate
+                // Highlight Material - CYAN to avoid conflict with Electrical
+                const highlightMat = new THREE.MeshBasicMaterial({
+                    color: 0x00FFFF, // Cyan
+                    depthTest: false,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.5
+                });
 
                 if (model.items) {
-                    for (const frag of model.items) {
-                        if (frag.mesh) {
-                            if (!frag.mesh.geometry.boundingBox) frag.mesh.geometry.computeBoundingBox();
-                            const box = frag.mesh.geometry.boundingBox!.clone();
-                            box.applyMatrix4(frag.mesh.matrixWorld);
-                            bbox.union(box);
+                    for (const fragment of model.items) {
+                        const mesh = fragment.mesh;
+                        if (mesh) {
+                            try {
+                                mesh.position.set(0, 0, 0);
+                                mesh.updateMatrixWorld(true);
+                                scene.add(mesh);
+
+                                // Default to WALL style
+                                let mat = styles.wall;
+
+                                const fid = fragment.id;
+
+                                // 1. Check Keywords (Name-Based Override)
+                                // We need to peek at properties inside this loop slightly inefficiently but necessary for styling
+                                // However, styling happens before we iterate properties.
+                                // To solve this: simpler Map check first, then update 'pType' in the next loop.
+                                // Actually, we can check Maps here.
+
+                                if (doors && doors[fid]) mat = styles.door;
+                                else if (windows && windows[fid]) mat = styles.window;
+                                else if (slabs && slabs[fid]) mat = styles.slab;
+                                else if (roofs && roofs[fid]) mat = styles.roof;
+                                else if (furniture && furniture[fid]) mat = styles.furniture;
+                                else if (sanitary && sanitary[fid]) mat = styles.sanitary;
+                                else if (electrical && electrical[fid]) mat = styles.electrical;
+                                else if (proxies && proxies[fid]) mat = styles.misc;
+
+                                // Special Render Order
+                                if (mat === styles.door || mat === styles.window || mat === styles.electrical || mat === styles.misc) {
+                                    mesh.renderOrder = 10; // High Priority
+                                }
+
+                                mesh.material = mat;
+
+                                if (mat === styles.wall || mat === styles.slab) {
+                                    if (!(mesh instanceof THREE.InstancedMesh)) {
+                                        mesh.children = mesh.children.filter(c => !(c instanceof THREE.LineSegments));
+                                        const edges = new THREE.EdgesGeometry(mesh.geometry, 80);
+                                        const line = new THREE.LineSegments(edges, styles.lines);
+                                        line.renderOrder = 1;
+                                        mesh.add(line);
+                                    }
+                                }
+                            } catch (e) { }
                         }
                     }
                 }
 
-                if (!bbox.isEmpty()) {
-                    const width = bbox.max.x - bbox.min.x;
-                    const depth = bbox.max.z - bbox.min.z;
-                    const centerX = (bbox.max.x + bbox.min.x) / 2;
-                    const centerZ = (bbox.max.z + bbox.min.z) / 2;
+                // VIRTUAL FLOOR GENERATOR
+                // If no slabs detected, generate a floor plane so the model doesn't float in void
+                if (slabCount === 0 && wallCount > 0) {
+                    // Calculate global bounding box of walls
+                    const bbox = new THREE.Box3();
+                    const wallIds = new Set(Object.values(walls || {}).flat()); // Approximate
 
-                    // Expand floor slightly
-                    const pad = 1.0;
-                    const geom = new THREE.PlaneGeometry(width + pad * 2, depth + pad * 2);
-                    const mat = new THREE.MeshBasicMaterial({ color: 0xE0E0E0, side: THREE.DoubleSide });
-                    const floorMesh = new THREE.Mesh(geom, mat);
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            if (frag.mesh) {
+                                if (!frag.mesh.geometry.boundingBox) frag.mesh.geometry.computeBoundingBox();
+                                const box = frag.mesh.geometry.boundingBox!.clone();
+                                box.applyMatrix4(frag.mesh.matrixWorld);
+                                bbox.union(box);
+                            }
+                        }
+                    }
 
-                    // Position at bottom (Y-up)
-                    floorMesh.rotation.x = -Math.PI / 2;
-                    floorMesh.position.set(centerX, bbox.min.y - 0.05, centerZ); // Slightly below
+                    if (!bbox.isEmpty()) {
+                        const width = bbox.max.x - bbox.min.x;
+                        const depth = bbox.max.z - bbox.min.z;
+                        const centerX = (bbox.max.x + bbox.min.x) / 2;
+                        const centerZ = (bbox.max.z + bbox.min.z) / 2;
 
-                    scene.add(floorMesh);
-                    console.log("🟦 Virtual Floor Generated");
+                        // Expand floor slightly
+                        const pad = 1.0;
+                        const geom = new THREE.PlaneGeometry(width + pad * 2, depth + pad * 2);
+                        const mat = new THREE.MeshBasicMaterial({ color: 0xE0E0E0, side: THREE.DoubleSide });
+                        const floorMesh = new THREE.Mesh(geom, mat);
+
+                        // Position at bottom (Y-up)
+                        floorMesh.rotation.x = -Math.PI / 2;
+                        floorMesh.position.set(centerX, bbox.min.y - 0.05, centerZ); // Slightly below
+
+                        scene.add(floorMesh);
+                        console.log("🟦 Virtual Floor Generated");
+                    }
                 }
-            }
 
-            // ============================================
-            // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
-            // ============================================
+                // ============================================
+                // 4b. GENERATE 2D PLAN LINES (SECTION CUT AT 1.2m)
+                // ============================================
 
-            const generatedLines: any[] = [];
-            const tempMatrix = new THREE.Matrix4();
-            let unitScale = 1; // DEFINE HERE (Top Scope)
+                const generatedLines: any[] = [];
+                const tempMatrix = new THREE.Matrix4();
+                let unitScale = 1; // DEFINE HERE (Top Scope)
 
-            // DECISION: Use Query Cache OR Extract Fresh
-            const shouldExtract = !cachedLines || cachedLines.length === 0;
+                // DECISION: Use Query Cache OR Extract Fresh
+                const shouldExtract = !cachedLines || cachedLines.length === 0;
 
-            if (shouldExtract) {
-                console.log("🔪 Starting Fresh 2D Extraction...");
-            } else {
-                console.log("🧠 Skipping 2D Extraction (Using Cache)");
-            }
+                if (shouldExtract) {
+                    console.log("🔪 Starting Fresh 2D Extraction...");
+                } else {
+                    console.log("🧠 Skipping 2D Extraction (Using Cache)");
+                }
 
-            // Helper: Geometry Slicer
-            const sliceMesh = (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
-                const geometry = mesh.geometry;
-                if (!geometry) return;
+                // Helper: Geometry Slicer
+                const sliceMesh = (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
+                    const geometry = mesh.geometry;
+                    if (!geometry) return;
 
-                const index = geometry.index;
-                const pos = geometry.attributes.position;
-                // Pre-allocate check vars
-                const v1 = new THREE.Vector3();
-                const v2 = new THREE.Vector3();
-                const v3 = new THREE.Vector3();
+                    const index = geometry.index;
+                    const pos = geometry.attributes.position;
+                    // Pre-allocate check vars
+                    const v1 = new THREE.Vector3();
+                    const v2 = new THREE.Vector3();
+                    const v3 = new THREE.Vector3();
 
-                // World Matrix for this instance
-                const matrix = mesh.matrixWorld;
+                    // World Matrix for this instance
+                    const matrix = mesh.matrixWorld;
 
-                const checkTri = (a: number, b: number, c: number) => {
-                    v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
-                    v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
-                    v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
+                    const checkTri = (a: number, b: number, c: number) => {
+                        v1.fromBufferAttribute(pos, a).applyMatrix4(matrix);
+                        v2.fromBufferAttribute(pos, b).applyMatrix4(matrix);
+                        v3.fromBufferAttribute(pos, c).applyMatrix4(matrix);
 
-                    // Check Plane Intersection (Y plane)
-                    const d1 = v1.y - planeY;
-                    const d2 = v2.y - planeY;
-                    const d3 = v3.y - planeY;
+                        // Check Plane Intersection (Y plane)
+                        const d1 = v1.y - planeY;
+                        const d2 = v2.y - planeY;
+                        const d3 = v3.y - planeY;
 
-                    // Identify edge crossings: Signs differ
-                    // Naive approach: count positives
-                    const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
-                    if (posCount === 0 || posCount === 3) return; // No intersection
+                        // Identify edge crossings: Signs differ
+                        // Naive approach: count positives
+                        const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
+                        if (posCount === 0 || posCount === 3) return; // No intersection
 
-                    // Find the two intersection points
-                    const points: THREE.Vector3[] = [];
+                        // Find the two intersection points
+                        const points: THREE.Vector3[] = [];
 
-                    // Edge 1-2
-                    if ((d1 > 0) !== (d2 > 0)) {
-                        const t = d1 / (d1 - d2); // Linear interp
-                        points.push(new THREE.Vector3().lerpVectors(v1, v2, t));
-                    }
-                    // Edge 2-3
-                    if ((d2 > 0) !== (d3 > 0)) {
-                        const t = d2 / (d2 - d3);
-                        points.push(new THREE.Vector3().lerpVectors(v2, v3, t));
-                    }
-                    // Edge 3-1
-                    if ((d3 > 0) !== (d1 > 0)) {
-                        const t = d3 / (d3 - d1);
-                        points.push(new THREE.Vector3().lerpVectors(v3, v1, t));
-                    }
+                        // Edge 1-2
+                        if ((d1 > 0) !== (d2 > 0)) {
+                            const t = d1 / (d1 - d2); // Linear interp
+                            points.push(new THREE.Vector3().lerpVectors(v1, v2, t));
+                        }
+                        // Edge 2-3
+                        if ((d2 > 0) !== (d3 > 0)) {
+                            const t = d2 / (d2 - d3);
+                            points.push(new THREE.Vector3().lerpVectors(v2, v3, t));
+                        }
+                        // Edge 3-1
+                        if ((d3 > 0) !== (d1 > 0)) {
+                            const t = d3 / (d3 - d1);
+                            points.push(new THREE.Vector3().lerpVectors(v3, v1, t));
+                        }
 
-                    if (points.length >= 2) {
-                        generatedLines.push({
-                            id: fid,
-                            type: type, // 'wall', 'window', 'door'
-                            subtype: 'segment',
-                            p1: { x: points[0].x, y: points[0].z }, // Top-down (XZ)
-                            p2: { x: points[1].x, y: points[1].z }
-                        });
+                        if (points.length >= 2) {
+                            generatedLines.push({
+                                id: fid,
+                                type: type, // 'wall', 'window', 'door'
+                                subtype: 'segment',
+                                p1: { x: points[0].x, y: points[0].z }, // Top-down (XZ)
+                                p2: { x: points[1].x, y: points[1].z }
+                            });
+                        }
+                    };
+
+                    if (index) {
+                        for (let i = 0; i < index.count; i += 3) {
+                            checkTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+                        }
+                    } else {
+                        for (let i = 0; i < pos.count; i += 3) {
+                            checkTri(i, i + 1, i + 2);
+                        }
                     }
                 };
 
-                if (index) {
-                    for (let i = 0; i < index.count; i += 3) {
-                        checkTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
-                    }
-                } else {
-                    for (let i = 0; i < pos.count; i += 3) {
-                        checkTri(i, i + 1, i + 2);
-                    }
-                }
-            };
-
-            // ONLY RUN EXTRACTION LOOP IF NEEDED
-            if (shouldExtract) {
-                // Determine Cut Height (Base + 1.2m)
-                let lowestY = Infinity;
-                if (model.items) {
-                    for (const frag of model.items) {
-                        if (frag.mesh && frag.mesh.geometry.boundingBox) {
-                            const box = frag.mesh.geometry.boundingBox.clone();
-                            box.applyMatrix4(frag.mesh.matrixWorld);
-                            if (box.min.y < lowestY) lowestY = box.min.y;
+                // ONLY RUN EXTRACTION LOOP IF NEEDED
+                if (shouldExtract) {
+                    // Determine Cut Height (Base + 1.2m)
+                    let lowestY = Infinity;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            if (frag.mesh && frag.mesh.geometry.boundingBox) {
+                                const box = frag.mesh.geometry.boundingBox.clone();
+                                box.applyMatrix4(frag.mesh.matrixWorld);
+                                if (box.min.y < lowestY) lowestY = box.min.y;
+                            }
                         }
                     }
-                }
-                if (lowestY === Infinity) lowestY = 0;
+                    if (lowestY === Infinity) lowestY = 0;
 
-                // DETECT UNITS (Heuristic)
-                // If the bounding box is HUGE (e.g. > 100 on Y or overall), it's likely Millimeters.
-                // Standard House is ~3-10m high. In MM that's 3000-10000.
-                // (unitScale is already defined in top scope)
+                    // DETECT UNITS (Heuristic)
+                    // If the bounding box is HUGE (e.g. > 100 on Y or overall), it's likely Millimeters.
+                    // Standard House is ~3-10m high. In MM that's 3000-10000.
+                    // (unitScale is already defined in top scope)
 
-                // Check if likely MM
-                // We can't rely just on lowestY position (could be far from origin).
-                // Better check: iterate all boxes and find Max Dimension.
+                    // Check if likely MM
+                    // We can't rely just on lowestY position (could be far from origin).
+                    // Better check: iterate all boxes and find Max Dimension.
 
-                // Let's use a simpler check: If cutY calculation at 1.2 yields 'nothing', we might need 1200.
-                // But we need to know BEFORE slicing.
+                    // Let's use a simpler check: If cutY calculation at 1.2 yields 'nothing', we might need 1200.
+                    // But we need to know BEFORE slicing.
 
-                // Let's assume if the model bounds width/height > 500, it is MM.
-                let maxDim = 0;
-                if (model.items) {
-                    for (const frag of model.items) {
-                        if (frag.mesh && frag.mesh.geometry.boundingBox) {
-                            const b = frag.mesh.geometry.boundingBox;
-                            maxDim = Math.max(maxDim, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+                    // Let's assume if the model bounds width/height > 500, it is MM.
+                    let maxDim = 0;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            if (frag.mesh && frag.mesh.geometry.boundingBox) {
+                                const b = frag.mesh.geometry.boundingBox;
+                                maxDim = Math.max(maxDim, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+                            }
                         }
                     }
-                }
 
-                // If max dimension of a single fragment (like a wall) is > 100, it's definitely MM.
-                if (maxDim > 50) {
-                    unitScale = 1000;
-                    console.log("📏 Detected Millimeters (Fragment Dim > 50). Scale Factor: 1000");
-                } else {
-                    console.log("📏 Detected Meters. Scale Factor: 1");
-                }
+                    // If max dimension of a single fragment (like a wall) is > 100, it's definitely MM.
+                    if (maxDim > 50) {
+                        unitScale = 1000;
+                        console.log("📏 Detected Millimeters (Fragment Dim > 50). Scale Factor: 1000");
+                    } else {
+                        console.log("📏 Detected Meters. Scale Factor: 1");
+                    }
 
-                // Cut Plane
-                const cutOffset = 1.2 * unitScale;
-                const cutY = lowestY + cutOffset;
-                console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)} (Base: ${lowestY.toFixed(2)} + Offset: ${cutOffset})`);
+                    // Cut Plane
+                    const cutOffset = 1.2 * unitScale;
+                    const cutY = lowestY + cutOffset;
+                    console.log(`🔪 Slicing Model at Y=${cutY.toFixed(2)} (Base: ${lowestY.toFixed(2)} + Offset: ${cutOffset})`);
 
-                if (model.items) {
-                    for (const frag of model.items) {
-                        const mesh = frag.mesh;
-                        const fid = frag.id;
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            const mesh = frag.mesh;
+                            const fid = frag.id;
 
-                        // TYPE CHECK
-                        let type = null;
-                        if (walls && walls[fid]) type = 'wall';
-                        else if (doors && doors[fid]) type = 'door';
-                        else if (windows && windows[fid]) type = 'window';
-                        else if (proxies && proxies[fid]) type = 'structure';
+                            // TYPE CHECK
+                            let type = null;
+                            if (walls && walls[fid]) type = 'wall';
+                            else if (doors && doors[fid]) type = 'door';
+                            else if (windows && windows[fid]) type = 'window';
+                            else if (proxies && proxies[fid]) type = 'structure';
 
-                        // CACHE BOUNDS (Robust & Performant)
-                        if (mesh && mesh.geometry && mesh.geometry.boundingBox) {
-                            if (mesh instanceof THREE.InstancedMesh) {
-                                for (let i = 0; i < mesh.count; i++) {
-                                    mesh.getMatrixAt(i, tempMatrix);
-                                    // Apply Instance + World
-                                    // Usually fragment meshes are at Identity world, but apply anyway
-                                    tempMatrix.premultiply(mesh.matrixWorld);
-                                    const b = mesh.geometry.boundingBox.clone().applyMatrix4(tempMatrix);
+                            // CACHE BOUNDS (Robust & Performant)
+                            if (mesh && mesh.geometry && mesh.geometry.boundingBox) {
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    for (let i = 0; i < mesh.count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        // Apply Instance + World
+                                        // Usually fragment meshes are at Identity world, but apply anyway
+                                        tempMatrix.premultiply(mesh.matrixWorld);
+                                        const b = mesh.geometry.boundingBox.clone().applyMatrix4(tempMatrix);
+                                        if (!modelBoundsRef.current) modelBoundsRef.current = new THREE.Box3();
+                                        modelBoundsRef.current.union(b);
+                                    }
+                                } else {
+                                    // Standard Mesh (rare for Fragments)
+                                    const b = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
                                     if (!modelBoundsRef.current) modelBoundsRef.current = new THREE.Box3();
                                     modelBoundsRef.current.union(b);
                                 }
-                            } else {
-                                // Standard Mesh (rare for Fragments)
-                                const b = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
-                                if (!modelBoundsRef.current) modelBoundsRef.current = new THREE.Box3();
-                                modelBoundsRef.current.union(b);
                             }
-                        }
 
-                        // SLICE
-                        if (type) {
-                            if (mesh instanceof THREE.InstancedMesh) {
-                                const count = mesh.count;
-                                for (let i = 0; i < count; i++) {
-                                    mesh.getMatrixAt(i, tempMatrix);
-                                    tempMatrix.premultiply(mesh.matrixWorld); // Combined
+                            // SLICE
+                            if (type) {
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    const count = mesh.count;
+                                    for (let i = 0; i < count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        tempMatrix.premultiply(mesh.matrixWorld); // Combined
 
-                                    // Re-impl Slicer for Instance
-                                    const geometry = mesh.geometry;
-                                    const index = geometry.index;
-                                    const pos = geometry.attributes.position;
-                                    const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
-                                    const checkTriInst = (a: number, b: number, c: number) => {
-                                        v1.fromBufferAttribute(pos, a).applyMatrix4(tempMatrix);
-                                        v2.fromBufferAttribute(pos, b).applyMatrix4(tempMatrix);
-                                        v3.fromBufferAttribute(pos, c).applyMatrix4(tempMatrix);
+                                        // Re-impl Slicer for Instance
+                                        const geometry = mesh.geometry;
+                                        const index = geometry.index;
+                                        const pos = geometry.attributes.position;
+                                        const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+                                        const checkTriInst = (a: number, b: number, c: number) => {
+                                            v1.fromBufferAttribute(pos, a).applyMatrix4(tempMatrix);
+                                            v2.fromBufferAttribute(pos, b).applyMatrix4(tempMatrix);
+                                            v3.fromBufferAttribute(pos, c).applyMatrix4(tempMatrix);
 
-                                        const d1 = v1.y - cutY;
-                                        const d2 = v2.y - cutY;
-                                        const d3 = v3.y - cutY;
+                                            const d1 = v1.y - cutY;
+                                            const d2 = v2.y - cutY;
+                                            const d3 = v3.y - cutY;
 
-                                        const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
-                                        if (posCount === 0 || posCount === 3) return;
+                                            const posCount = (d1 > 0 ? 1 : 0) + (d2 > 0 ? 1 : 0) + (d3 > 0 ? 1 : 0);
+                                            if (posCount === 0 || posCount === 3) return;
 
-                                        const points = [];
-                                        if ((d1 > 0) !== (d2 > 0)) points.push(new THREE.Vector3().lerpVectors(v1, v2, d1 / (d1 - d2)));
-                                        if ((d2 > 0) !== (d3 > 0)) points.push(new THREE.Vector3().lerpVectors(v2, v3, d2 / (d2 - d3)));
-                                        if ((d3 > 0) !== (d1 > 0)) points.push(new THREE.Vector3().lerpVectors(v3, v1, d3 / (d3 - d1)));
+                                            const points = [];
+                                            if ((d1 > 0) !== (d2 > 0)) points.push(new THREE.Vector3().lerpVectors(v1, v2, d1 / (d1 - d2)));
+                                            if ((d2 > 0) !== (d3 > 0)) points.push(new THREE.Vector3().lerpVectors(v2, v3, d2 / (d2 - d3)));
+                                            if ((d3 > 0) !== (d1 > 0)) points.push(new THREE.Vector3().lerpVectors(v3, v1, d3 / (d3 - d1)));
 
-                                        if (points.length >= 2) {
-                                            generatedLines.push({
-                                                id: `${fid}-${i}`, type: type!, subtype: 'segment',
-                                                p1: { x: points[0].x, y: points[0].z },
-                                                p2: { x: points[1].x, y: points[1].z },
-                                                unitScale: unitScale // Pass scale to renderer
-                                            });
+                                            if (points.length >= 2) {
+                                                generatedLines.push({
+                                                    id: `${fid}-${i}`, type: type!, subtype: 'segment',
+                                                    p1: { x: points[0].x, y: points[0].z },
+                                                    p2: { x: points[1].x, y: points[1].z },
+                                                    unitScale: unitScale // Pass scale to renderer
+                                                });
+                                            }
+                                        };
+
+                                        if (index) {
+                                            for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
+                                        } else {
+                                            for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
                                         }
-                                    };
-
-                                    if (index) {
-                                        for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
-                                    } else {
-                                        for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
                                     }
+                                } else {
+                                    sliceMesh(mesh, cutY, type, fid);
                                 }
-                            } else {
-                                sliceMesh(mesh, cutY, type, fid);
                             }
                         }
                     }
                 }
-            }
 
-            if (shouldExtract && generatedLines.length === 0) {
-                console.warn("⚠️ Slicer returned 0 lines. Falling back to Bounding Box method.");
-                // FALLBACK: Bounding Box Logic
-                if (model.items) {
-                    for (const frag of model.items) {
-                        const mesh = frag.mesh;
-                        const fid = frag.id;
+                if (shouldExtract && generatedLines.length === 0) {
+                    console.warn("⚠️ Slicer returned 0 lines. Falling back to Bounding Box method.");
+                    // FALLBACK: Bounding Box Logic
+                    if (model.items) {
+                        for (const frag of model.items) {
+                            const mesh = frag.mesh;
+                            const fid = frag.id;
 
-                        let type = null;
-                        if (walls && walls[fid]) type = 'wall';
-                        else if (doors && doors[fid]) type = 'door';
-                        else if (windows && windows[fid]) type = 'window';
-                        else if (proxies && proxies[fid]) type = 'structure';
+                            let type = null;
+                            if (walls && walls[fid]) type = 'wall';
+                            else if (doors && doors[fid]) type = 'door';
+                            else if (windows && windows[fid]) type = 'window';
+                            else if (proxies && proxies[fid]) type = 'structure';
 
-                        if (type) {
-                            if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-                            const baseBox = mesh.geometry.boundingBox!;
+                            if (type) {
+                                if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+                                const baseBox = mesh.geometry.boundingBox!;
 
-                            if (mesh instanceof THREE.InstancedMesh) {
-                                const count = mesh.count;
-                                for (let i = 0; i < count; i++) {
-                                    mesh.getMatrixAt(i, tempMatrix);
+                                if (mesh instanceof THREE.InstancedMesh) {
+                                    const count = mesh.count;
+                                    for (let i = 0; i < count; i++) {
+                                        mesh.getMatrixAt(i, tempMatrix);
+                                        const box = baseBox.clone();
+                                        box.applyMatrix4(tempMatrix);
+                                        box.applyMatrix4(mesh.matrixWorld);
+
+                                        generatedLines.push({
+                                            id: `${fid}-${i}`, type: type, subtype: 'bbox',
+                                            x: box.min.x, y: box.min.z,
+                                            w: box.max.x - box.min.x, h: box.max.z - box.min.z,
+                                            unitScale: unitScale
+                                        });
+                                    }
+                                } else {
                                     const box = baseBox.clone();
-                                    box.applyMatrix4(tempMatrix);
                                     box.applyMatrix4(mesh.matrixWorld);
-
                                     generatedLines.push({
-                                        id: `${fid}-${i}`, type: type, subtype: 'bbox',
+                                        id: fid, type: type, subtype: 'bbox',
                                         x: box.min.x, y: box.min.z,
                                         w: box.max.x - box.min.x, h: box.max.z - box.min.z,
                                         unitScale: unitScale
                                     });
                                 }
-                            } else {
-                                const box = baseBox.clone();
-                                box.applyMatrix4(mesh.matrixWorld);
-                                generatedLines.push({
-                                    id: fid, type: type, subtype: 'bbox',
-                                    x: box.min.x, y: box.min.z,
-                                    w: box.max.x - box.min.x, h: box.max.z - box.min.z,
-                                    unitScale: unitScale
+                            }
+                        }
+                    }
+                }
+
+                if (isActive && shouldExtract) {
+                    console.log(`✅ Extracted ${generatedLines.length} Plan Lines. UnitScale: ${unitScale}`);
+                    setExtractedLines(generatedLines);
+                    if (onGeometryParsed) onGeometryParsed(generatedLines);
+                }
+
+                // ============================================
+                // 5. PRE-COMPUTE DATA (Optimization)
+                // ============================================
+                step = "5. Pre-Computing";
+                setLoadingStatus("Linking Data...");
+
+                const raycastMeshes: THREE.Mesh[] = [];
+
+                if (model.items) {
+                    for (const frag of model.items) {
+                        const mesh = frag.mesh;
+                        const fid = frag.id;
+
+                        // 1. Get ID
+                        // Assumption: 1 fragment = 1 item (Standard for this loader config)
+                        const expressID = frag.getItemID(0);
+
+                        // 2. Get Props & KEYWORD OVERRIDE
+                        let pName = "Unnamed";
+                        let pType = "Element";
+
+                        if (model.properties && model.properties[expressID]) {
+                            const p = model.properties[expressID];
+                            if (p.Name && p.Name.value) pName = p.Name.value;
+                            if (p.type) pType = String(p.type);
+                        }
+
+                        const nLower = pName.toLowerCase();
+
+                        // KEYWORD OVERRIDE: Force Electrical Classification based on Name
+                        if (nLower.includes("socket") || nLower.includes("switch") || nLower.includes("power") || nLower.includes("gang") || nLower.includes("outlet") || nLower.includes("sensor")) {
+                            pType = "IFC Electrical (Keyword)";
+                            pName = pName || "Electrical Component";
+                            // Force Style Update
+                            mesh.material = styles.electrical;
+                            mesh.renderOrder = 10;
+                        }
+                        else if (nLower.includes("light") || nLower.includes("lamp")) {
+                            pType = "IFC Lighting (Keyword)";
+                            mesh.material = styles.electrical;
+                            mesh.renderOrder = 10;
+                        }
+                        // Force Floor Detection
+                        else if (nLower.includes("floor") || nLower.includes("slab")) {
+                            pType = "IFC Slab (Keyword)";
+                            pName = pName || "Floor Slab";
+                            mesh.material = styles.slab;
+                            // Ensure render order is normal for floors
+                            mesh.renderOrder = 0;
+                        }
+
+                        // 3. Fallback Classification
+                        if (pName === "Unnamed" || pType === "Element") {
+                            if (isItemInMap(doors, fid, expressID)) { pType = "IFC Door"; pName = "Door"; }
+                            else if (isItemInMap(windows, fid, expressID)) { pType = "IFC Window"; pName = "Window"; }
+                            else if (isItemInMap(walls, fid, expressID)) { pType = "IFC Wall"; pName = "Wall"; }
+                            else if (isItemInMap(slabs, fid, expressID)) { pType = "IFC Slab"; pName = "Slab"; }
+                            else if (isItemInMap(roofs, fid, expressID)) { pType = "IFC Roof"; pName = "Roof"; }
+                            else if (isItemInMap(furniture, fid, expressID)) { pType = "IFC Furniture"; pName = "Furniture"; }
+                            else if (isItemInMap(sanitary, fid, expressID)) { pType = "IFC Sanitary Terminal"; pName = "Sanitary"; }
+                            else if (isItemInMap(electrical, fid, expressID)) { pType = "IFC Electrical"; pName = "Electrical"; }
+                            else if (isItemInMap(proxies, fid, expressID)) { pType = "IFC Proxy/Misc"; pName = "Misc Object"; }
+                        }
+
+                        // 4. Store in UserData
+                        mesh.userData.api = {
+                            id: expressID,
+                            name: pName,
+                            type: pType,
+                            isSpace: pType.toUpperCase().includes("SPACE"),
+                            element: mesh // Ref to itself for labeling
+                        };
+
+                        // 5. Filter Raycast List
+                        // Dont raycast invisible spaces
+                        if (!mesh.userData.api.isSpace) {
+                            raycastMeshes.push(mesh);
+                            // ADD TO SHARED INTRACTABLES
+                            interactables.current.push(mesh);
+                        }
+                    }
+                }
+
+                // ============================================
+                // 6. QUANTITY SURVEYOR: Hover & Measure
+                // ============================================
+
+                let currentSelection: THREE.Mesh | null = null;
+                const originalMaterials = new Map<string, THREE.Material>();
+                // Removed local highlightMat definition to use global Cyan one
+
+                containerRef.current.addEventListener('mousemove', (event) => {
+                    const rect = containerRef.current!.getBoundingClientRect();
+                    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                    setTooltipPos({ x: event.clientX, y: event.clientY });
+
+                    const raycaster = comps.raycaster.get();
+                    raycaster.setFromCamera(new THREE.Vector2(x, y), comps.camera.get());
+
+                    // USE OPTIMIZED MESH LIST (Shared Ref)
+                    // In Label Mode, ONLY target Database Rooms to avoid clicking Walls
+                    let targetList = interactables.current;
+                    if (isLabelModeRef.current) {
+                        targetList = interactables.current.filter(m => m.userData.api.isDbRoom);
+                    }
+
+                    const intersects = raycaster.intersectObjects(targetList, false);
+
+                    if (intersects.length > 0) {
+                        const result = intersects[0];
+                        const mesh = result.object as THREE.Mesh;
+
+                        // HIGHLIGHT LOGIC
+                        if (currentSelection !== mesh) {
+                            if (currentSelection) {
+                                currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
+                                currentSelection.renderOrder = 0;
+                            }
+
+                            currentSelection = mesh;
+                            if (!originalMaterials.has(mesh.uuid)) {
+                                originalMaterials.set(mesh.uuid, mesh.material as THREE.Material);
+                            }
+                            mesh.material = highlightMat;
+                            mesh.renderOrder = 3;
+
+                            // DATA LOGIC - READ PRE-COMPUTED
+                            const data = mesh.userData.api || { name: 'Unknown', type: 'Geometry' };
+
+                            // Metrics (Real-time World Dimensions)
+                            let dimString = "Analyzing...";
+                            let areaString = "--";
+
+                            if (mesh.geometry) {
+                                // 1. Get Base Box
+                                if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+                                const box = mesh.geometry.boundingBox!.clone();
+
+                                // 2. Apply Instance Matrix if needed
+                                // This converts Local Geometry Box -> World Space Box (fixing rotation/scale)
+                                if (mesh instanceof THREE.InstancedMesh && result.instanceId !== undefined) {
+                                    const instMat = new THREE.Matrix4();
+                                    mesh.getMatrixAt(result.instanceId, instMat);
+                                    box.applyMatrix4(instMat);
+                                } else {
+                                    // Regular Mesh - apply world matrix
+                                    box.applyMatrix4(mesh.matrixWorld);
+                                }
+
+                                // 3. Measure World Axis-Aligned Size
+                                const size = new THREE.Vector3();
+                                box.getSize(size);
+
+                                // Standard: Y is Height in World Space
+                                const height = size.y;
+                                const widthX = size.x;
+                                const widthZ = size.z;
+
+                                // Logic: Vertical vs Horizontal Elements
+                                const isHorizontal = data.type.includes("Roof") || data.type.includes("Slab") || data.type.includes("Floor");
+
+                                if (isHorizontal) {
+                                    // For Roofs/Floors: Use X and Z (Footprint)
+                                    const len = Math.max(widthX, widthZ);
+                                    const wid = Math.min(widthX, widthZ);
+                                    dimString = `${len.toFixed(2)} m(L) x ${wid.toFixed(2)} m(W)`;
+                                    areaString = (len * wid).toFixed(2);
+                                } else {
+                                    // For Walls/Doors/Verticals: Use Y (Height) and Max(X,Z) (Length)
+                                    const len = Math.max(widthX, widthZ);
+                                    dimString = `${height.toFixed(2)} m(H) x ${len.toFixed(2)} m(W)`;
+                                    areaString = (height * len).toFixed(2);
+                                }
+                            }
+
+                            // FORCE UPDATE TOOLTIP
+                            setTooltipData({
+                                visible: true,
+                                name: `${data.name} #${data.id} `,
+                                type: data.type,
+                                dims: dimString,
+                                qty: `${areaString} m²`
+                            });
+                        }
+                    } else {
+                        // NO INTERSECTION
+                        if (currentSelection) {
+                            currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
+                            currentSelection.renderOrder = 0;
+                            currentSelection = null;
+                        }
+                        // Hide tooltip
+                        setTooltipData(prev => ({ ...prev, visible: false }));
+                    }
+                });
+
+                // 6. INTERACTIVE: Click (Optimized with Fallback)
+                containerRef.current.addEventListener('click', (event) => {
+                    // --- LABEL MODE INTERCEPT ---
+                    if (isLabelModeRef.current) {
+                        if (currentSelection && currentSelection.userData.api.isDbRoom) { // Extra check
+                            console.log("🖱️ Label Click on:", currentSelection.userData.api);
+                            setLabelMenu({
+                                x: event.clientX,
+                                y: event.clientY,
+                                item: currentSelection.userData.api
+                            });
+                        }
+                        return; // Stop standard click
+                    }
+
+                    // --- STANDARD CLICK ---
+                    if (onElementClick && currentSelection) {
+                        const found = comps.raycaster.castRay(model.items);
+                        if (found && found[0]) {
+                            const result = found[0];
+                            const mesh = result.object as THREE.Mesh;
+                            const frag = comps.fragments.list[mesh.uuid];
+                            if (frag) {
+                                const instID = result.instanceId ?? 0;
+                                const expressID = frag.getItemID(instID);
+
+                                let p = model.properties ? model.properties[expressID] : null;
+
+                                // Fallback Name
+                                let finalName = p?.Name?.value || "Unnamed";
+                                let finalType = p?.type ? String(p.type) : "Element";
+
+                                if (finalName === "Unnamed") {
+                                    if (isItemInMap(doors, frag.id, expressID)) finalName = "Detected Door";
+                                    else if (isItemInMap(windows, frag.id, expressID)) finalName = "Detected Window";
+                                    else if (isItemInMap(walls, frag.id, expressID)) finalName = "Detected Wall";
+                                }
+
+                                onElementClick({
+                                    id: expressID,
+                                    globalId: p?.GlobalId?.value || "N/A",
+                                    type: finalType,
+                                    name: finalName,
+                                    raw: p
                                 });
                             }
                         }
                     }
-                }
-            }
-
-            if (isActive && shouldExtract) {
-                console.log(`✅ Extracted ${generatedLines.length} Plan Lines. UnitScale: ${unitScale}`);
-                setExtractedLines(generatedLines);
-                if (onGeometryParsed) onGeometryParsed(generatedLines);
-            }
-
-            // ============================================
-            // 5. PRE-COMPUTE DATA (Optimization)
-            // ============================================
-            step = "5. Pre-Computing";
-            setLoadingStatus("Linking Data...");
-
-            const raycastMeshes: THREE.Mesh[] = [];
-
-            if (model.items) {
-                for (const frag of model.items) {
-                    const mesh = frag.mesh;
-                    const fid = frag.id;
-
-                    // 1. Get ID
-                    // Assumption: 1 fragment = 1 item (Standard for this loader config)
-                    const expressID = frag.getItemID(0);
-
-                    // 2. Get Props & KEYWORD OVERRIDE
-                    let pName = "Unnamed";
-                    let pType = "Element";
-
-                    if (model.properties && model.properties[expressID]) {
-                        const p = model.properties[expressID];
-                        if (p.Name && p.Name.value) pName = p.Name.value;
-                        if (p.type) pType = String(p.type);
-                    }
-
-                    const nLower = pName.toLowerCase();
-
-                    // KEYWORD OVERRIDE: Force Electrical Classification based on Name
-                    if (nLower.includes("socket") || nLower.includes("switch") || nLower.includes("power") || nLower.includes("gang") || nLower.includes("outlet") || nLower.includes("sensor")) {
-                        pType = "IFC Electrical (Keyword)";
-                        pName = pName || "Electrical Component";
-                        // Force Style Update
-                        mesh.material = styles.electrical;
-                        mesh.renderOrder = 10;
-                    }
-                    else if (nLower.includes("light") || nLower.includes("lamp")) {
-                        pType = "IFC Lighting (Keyword)";
-                        mesh.material = styles.electrical;
-                        mesh.renderOrder = 10;
-                    }
-                    // Force Floor Detection
-                    else if (nLower.includes("floor") || nLower.includes("slab")) {
-                        pType = "IFC Slab (Keyword)";
-                        pName = pName || "Floor Slab";
-                        mesh.material = styles.slab;
-                        // Ensure render order is normal for floors
-                        mesh.renderOrder = 0;
-                    }
-
-                    // 3. Fallback Classification
-                    if (pName === "Unnamed" || pType === "Element") {
-                        if (isItemInMap(doors, fid, expressID)) { pType = "IFC Door"; pName = "Door"; }
-                        else if (isItemInMap(windows, fid, expressID)) { pType = "IFC Window"; pName = "Window"; }
-                        else if (isItemInMap(walls, fid, expressID)) { pType = "IFC Wall"; pName = "Wall"; }
-                        else if (isItemInMap(slabs, fid, expressID)) { pType = "IFC Slab"; pName = "Slab"; }
-                        else if (isItemInMap(roofs, fid, expressID)) { pType = "IFC Roof"; pName = "Roof"; }
-                        else if (isItemInMap(furniture, fid, expressID)) { pType = "IFC Furniture"; pName = "Furniture"; }
-                        else if (isItemInMap(sanitary, fid, expressID)) { pType = "IFC Sanitary Terminal"; pName = "Sanitary"; }
-                        else if (isItemInMap(electrical, fid, expressID)) { pType = "IFC Electrical"; pName = "Electrical"; }
-                        else if (isItemInMap(proxies, fid, expressID)) { pType = "IFC Proxy/Misc"; pName = "Misc Object"; }
-                    }
-
-                    // 4. Store in UserData
-                    mesh.userData.api = {
-                        id: expressID,
-                        name: pName,
-                        type: pType,
-                        isSpace: pType.toUpperCase().includes("SPACE"),
-                        element: mesh // Ref to itself for labeling
-                    };
-
-                    // 5. Filter Raycast List
-                    // Dont raycast invisible spaces
-                    if (!mesh.userData.api.isSpace) {
-                        raycastMeshes.push(mesh);
-                        // ADD TO SHARED INTRACTABLES
-                        interactables.current.push(mesh);
-                    }
-                }
-            }
-
-            // ============================================
-            // 6. QUANTITY SURVEYOR: Hover & Measure
-            // ============================================
-
-            let currentSelection: THREE.Mesh | null = null;
-            const originalMaterials = new Map<string, THREE.Material>();
-            // Removed local highlightMat definition to use global Cyan one
-
-            containerRef.current.addEventListener('mousemove', (event) => {
-                const rect = containerRef.current!.getBoundingClientRect();
-                const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-                const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-                setTooltipPos({ x: event.clientX, y: event.clientY });
-
-                const raycaster = comps.raycaster.get();
-                raycaster.setFromCamera(new THREE.Vector2(x, y), comps.camera.get());
-
-                // USE OPTIMIZED MESH LIST (Shared Ref)
-                // In Label Mode, ONLY target Database Rooms to avoid clicking Walls
-                let targetList = interactables.current;
-                if (isLabelModeRef.current) {
-                    targetList = interactables.current.filter(m => m.userData.api.isDbRoom);
-                }
-
-                const intersects = raycaster.intersectObjects(targetList, false);
-
-                if (intersects.length > 0) {
-                    const result = intersects[0];
-                    const mesh = result.object as THREE.Mesh;
-
-                    // HIGHLIGHT LOGIC
-                    if (currentSelection !== mesh) {
-                        if (currentSelection) {
-                            currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
-                            currentSelection.renderOrder = 0;
-                        }
-
-                        currentSelection = mesh;
-                        if (!originalMaterials.has(mesh.uuid)) {
-                            originalMaterials.set(mesh.uuid, mesh.material as THREE.Material);
-                        }
-                        mesh.material = highlightMat;
-                        mesh.renderOrder = 3;
-
-                        // DATA LOGIC - READ PRE-COMPUTED
-                        const data = mesh.userData.api || { name: 'Unknown', type: 'Geometry' };
-
-                        // Metrics (Real-time World Dimensions)
-                        let dimString = "Analyzing...";
-                        let areaString = "--";
-
-                        if (mesh.geometry) {
-                            // 1. Get Base Box
-                            if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-                            const box = mesh.geometry.boundingBox!.clone();
-
-                            // 2. Apply Instance Matrix if needed
-                            // This converts Local Geometry Box -> World Space Box (fixing rotation/scale)
-                            if (mesh instanceof THREE.InstancedMesh && result.instanceId !== undefined) {
-                                const instMat = new THREE.Matrix4();
-                                mesh.getMatrixAt(result.instanceId, instMat);
-                                box.applyMatrix4(instMat);
-                            } else {
-                                // Regular Mesh - apply world matrix
-                                box.applyMatrix4(mesh.matrixWorld);
-                            }
-
-                            // 3. Measure World Axis-Aligned Size
-                            const size = new THREE.Vector3();
-                            box.getSize(size);
-
-                            // Standard: Y is Height in World Space
-                            const height = size.y;
-                            const widthX = size.x;
-                            const widthZ = size.z;
-
-                            // Logic: Vertical vs Horizontal Elements
-                            const isHorizontal = data.type.includes("Roof") || data.type.includes("Slab") || data.type.includes("Floor");
-
-                            if (isHorizontal) {
-                                // For Roofs/Floors: Use X and Z (Footprint)
-                                const len = Math.max(widthX, widthZ);
-                                const wid = Math.min(widthX, widthZ);
-                                dimString = `${len.toFixed(2)} m(L) x ${wid.toFixed(2)} m(W)`;
-                                areaString = (len * wid).toFixed(2);
-                            } else {
-                                // For Walls/Doors/Verticals: Use Y (Height) and Max(X,Z) (Length)
-                                const len = Math.max(widthX, widthZ);
-                                dimString = `${height.toFixed(2)} m(H) x ${len.toFixed(2)} m(W)`;
-                                areaString = (height * len).toFixed(2);
-                            }
-                        }
-
-                        // FORCE UPDATE TOOLTIP
-                        setTooltipData({
-                            visible: true,
-                            name: `${data.name} #${data.id} `,
-                            type: data.type,
-                            dims: dimString,
-                            qty: `${areaString} m²`
-                        });
-                    }
-                } else {
-                    // NO INTERSECTION
-                    if (currentSelection) {
-                        currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
-                        currentSelection.renderOrder = 0;
-                        currentSelection = null;
-                    }
-                    // Hide tooltip
-                    setTooltipData(prev => ({ ...prev, visible: false }));
-                }
-            });
-
-            // 6. INTERACTIVE: Click (Optimized with Fallback)
-            containerRef.current.addEventListener('click', (event) => {
-                // --- LABEL MODE INTERCEPT ---
-                if (isLabelModeRef.current) {
-                    if (currentSelection && currentSelection.userData.api.isDbRoom) { // Extra check
-                        console.log("🖱️ Label Click on:", currentSelection.userData.api);
-                        setLabelMenu({
-                            x: event.clientX,
-                            y: event.clientY,
-                            item: currentSelection.userData.api
-                        });
-                    }
-                    return; // Stop standard click
-                }
-
-                // --- STANDARD CLICK ---
-                if (onElementClick && currentSelection) {
-                    const found = comps.raycaster.castRay(model.items);
-                    if (found && found[0]) {
-                        const result = found[0];
-                        const mesh = result.object as THREE.Mesh;
-                        const frag = comps.fragments.list[mesh.uuid];
-                        if (frag) {
-                            const instID = result.instanceId ?? 0;
-                            const expressID = frag.getItemID(instID);
-
-                            let p = model.properties ? model.properties[expressID] : null;
-
-                            // Fallback Name
-                            let finalName = p?.Name?.value || "Unnamed";
-                            let finalType = p?.type ? String(p.type) : "Element";
-
-                            if (finalName === "Unnamed") {
-                                if (isItemInMap(doors, frag.id, expressID)) finalName = "Detected Door";
-                                else if (isItemInMap(windows, frag.id, expressID)) finalName = "Detected Window";
-                                else if (isItemInMap(walls, frag.id, expressID)) finalName = "Detected Wall";
-                            }
-
-                            onElementClick({
-                                id: expressID,
-                                globalId: p?.GlobalId?.value || "N/A",
-                                type: finalType,
-                                name: finalName,
-                                raw: p
-                            });
-                        }
-                    }
-                }
-            });
-
-            setComponents(comps);
-            setLoading(false);
-            addLog("✅ Init Complete");
-
-        } catch (err: any) {
-            console.error(err);
-            setError(`Failed at ${step}: ${err.message} `);
-            addLog(`❌ Error: ${err.message}`);
-            setLoading(false);
-        }
-    };
-
-    init();
-
-    return () => {
-        console.log("🛑 Cleanup/Dispose Run");
-        addLog("🛑 Cleanup Triggered");
-        isActive = false;
-        // if (components) components.dispose(); // Commented out to see if premature disposal is the cause? 
-        // NO, we must dispose to prevent memory leaks, but maybe delay it?
-        if (components) components.dispose();
-    };
-}, [id]); // Strictly ID dependent
-
-// Sync Ref
-useEffect(() => {
-    isLabelModeRef.current = isLabelMode;
-}, [isLabelMode]);
-
-
-
-// Toggle Roof Handlers
-const toggleRoof = () => {
-    if (!components) return;
-
-    const nextState = !showRoof;
-    setShowRoof(nextState);
-
-    console.log(`Toggling Roofs to: ${nextState} `);
-
-    // Traverse the OBC Scene (Safest)
-    const scene = components.scene.get();
-    // Fallback to traverse everything in scene if needed
-    scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.userData.api) {
-            const type = obj.userData.api.type || "";
-            if (type.includes("Roof")) {
-                obj.visible = nextState;
-            }
-        }
-    });
-};
-
-// --- TENDER GENERATION LOGIC ---
-const generateTenderReport = async () => {
-    if (!components) return;
-    setLoadingStatus("Scanning Rooms...");
-
-    const scene = components.scene.get();
-    const roomMap: Record<string, { walls: number, floor: number, elec: number, misc: number, items: string[] }> = {};
-
-    // 1. Find Rooms (Spaces)
-    // We need to find meshes that are "Spaces"
-    const roomBoxes: { name: string, box: THREE.Box3, element: THREE.Object3D }[] = [];
-
-    scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.userData.api) {
-            if (obj.userData.api.isSpace) {
-                // Calculate World Box for this space
-                if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
-                const box = obj.geometry.boundingBox!.clone();
-                box.applyMatrix4(obj.matrixWorld);
-
-                // Helper: Expand box slightly to catch wall-mounted items
-                box.expandByScalar(0.2);
-
-                roomBoxes.push({
-                    name: obj.userData.api.name || "Unnamed Room",
-                    box: box,
-                    element: obj
                 });
-            }
-        }
-    });
 
-    // FALLBACK: If no explicit IfcSpace found, try to use Floor Slabs as Room Proxies
-    if (roomBoxes.length === 0) {
-        // Debug Collection
-        const debugTypes: string[] = [];
+                setComponents(comps);
+                setLoading(false);
+                addLog("✅ Init Complete");
+
+            } catch (err: any) {
+                console.error(err);
+                setError(`Failed at ${step}: ${err.message} `);
+                addLog(`❌ Error: ${err.message}`);
+                setLoading(false);
+            }
+        };
+
+        init();
+
+        return () => {
+            console.log("🛑 Cleanup/Dispose Run");
+            addLog("🛑 Cleanup Triggered");
+            isActive = false;
+            // if (components) components.dispose(); // Commented out to see if premature disposal is the cause? 
+            // NO, we must dispose to prevent memory leaks, but maybe delay it?
+            if (components) components.dispose();
+        };
+    }, [id]); // Strictly ID dependent
+
+    // Sync Ref
+    useEffect(() => {
+        isLabelModeRef.current = isLabelMode;
+    }, [isLabelMode]);
+
+
+
+    // Toggle Roof Handlers
+    const toggleRoof = () => {
+        if (!components) return;
+
+        const nextState = !showRoof;
+        setShowRoof(nextState);
+
+        console.log(`Toggling Roofs to: ${nextState} `);
+
+        // Traverse the OBC Scene (Safest)
+        const scene = components.scene.get();
+        // Fallback to traverse everything in scene if needed
+        scene.traverse((obj) => {
+            if (obj instanceof THREE.Mesh && obj.userData.api) {
+                const type = obj.userData.api.type || "";
+                if (type.includes("Roof")) {
+                    obj.visible = nextState;
+                }
+            }
+        });
+    };
+
+    // --- TENDER GENERATION LOGIC ---
+    const generateTenderReport = async () => {
+        if (!components) return;
+        setLoadingStatus("Scanning Rooms...");
+
+        const scene = components.scene.get();
+        const roomMap: Record<string, { walls: number, floor: number, elec: number, misc: number, items: string[] }> = {};
+
+        // 1. Find Rooms (Spaces)
+        // We need to find meshes that are "Spaces"
+        const roomBoxes: { name: string, box: THREE.Box3, element: THREE.Object3D }[] = [];
 
         scene.traverse((obj) => {
             if (obj instanceof THREE.Mesh && obj.userData.api) {
-                const type = (obj.userData.api.type || "UNKNOWN").toUpperCase();
-                const name = (obj.userData.api.name || "Unnamed").toUpperCase();
+                if (obj.userData.api.isSpace) {
+                    // Calculate World Box for this space
+                    if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+                    const box = obj.geometry.boundingBox!.clone();
+                    box.applyMatrix4(obj.matrixWorld);
 
-                // Calc World Box & Size
-                if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
-                const box = obj.geometry.boundingBox!.clone();
-                box.applyMatrix4(obj.matrixWorld);
-
-                const size = new THREE.Vector3();
-                box.getSize(size);
-
-                // Debug string with Scale info (Critical for verifying Units)
-                const debugStr = `${type.toLowerCase()} [${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)}]`;
-                if (debugTypes.length < 15 && !debugTypes.includes(debugStr)) debugTypes.push(debugStr);
-
-                // 1. Explicit Floor Type
-                const isExplicitFloor = type === 'IFCSLAB' || type.includes("FLOOR") || name.includes("FLOOR");
-
-                // 2. Geometric Floor Check (Unit Agnostic via Aspect Ratio)
-                // If Width & Depth are significantly larger than Height, it's a flat plate (Floor/Slab)
-                // Ratio: Minimum Dimension (X or Z) / Height (Y)
-                const minWidth = Math.min(size.x, size.z);
-                const aspectRatio = size.y > 0 ? minWidth / size.y : 0;
-
-                // Logic A: Meters (Flat < 1m, Wide > 1.5m)
-                const isFlatMeters = size.y < 1.0 && minWidth > 1.5;
-
-                // Logic B: Millimeters (Flat < 1000mm, Wide > 1500mm)
-                const isFlatMM = size.y > 10 && size.y < 1000 && minWidth > 1500;
-
-                // Logic C: Aspect Ratio (Plate-like shape) - Width is at least 4x Thickness
-                const isPlateShape = aspectRatio > 4.0 && minWidth > (size.y * 2);
-
-                const isGeometricFloor = (isFlatMeters || isFlatMM || isPlateShape);
-
-                // Exclude Walls/Roofs
-                const isNotRoof = !type.includes("ROOF");
-                const isNotWall = !type.includes("WALL");
-                const isCandidateType = isExplicitFloor || type.includes("PROXY") || type.includes("MISC") || type.includes("PLATE");
-
-                if ((isExplicitFloor) || (isCandidateType && isGeometricFloor && isNotRoof && isNotWall)) {
-                    const roomBox = box.clone();
-                    // Extrude upwards (Relative to scale)
-                    // If units are mm (height > 100), extrude 3000. If meters, extrude 3.0
-                    const extrudeHeight = size.y > 100 ? 3000.0 : 3.0; // Simple heuristic
-
-                    roomBox.max.y += extrudeHeight;
-                    roomBox.expandByScalar(size.y > 100 ? 100 : 0.1);
+                    // Helper: Expand box slightly to catch wall-mounted items
+                    box.expandByScalar(0.2);
 
                     roomBoxes.push({
-                        name: obj.userData.api.name || `Detected Room(${type})`,
-                        box: roomBox,
+                        name: obj.userData.api.name || "Unnamed Room",
+                        box: box,
                         element: obj
                     });
                 }
             }
         });
 
+        // FALLBACK: If no explicit IfcSpace found, try to use Floor Slabs as Room Proxies
         if (roomBoxes.length === 0) {
-            console.warn("Still no rooms found. Types seen:", debugTypes);
-        }
-    }
+            // Debug Collection
+            const debugTypes: string[] = [];
 
-    // 2. Scan All Visible Items
-    // FALLBACK: If no rooms found, use a single "Whole Building" bucket
-    const useGlobalBucket = (roomBoxes.length === 0);
-    if (useGlobalBucket) {
-        roomMap["Whole Building (No Rooms Detected)"] = { walls: 0, floor: 0, elec: 0, misc: 0, items: [] };
-    }
+            scene.traverse((obj) => {
+                if (obj instanceof THREE.Mesh && obj.userData.api) {
+                    const type = (obj.userData.api.type || "UNKNOWN").toUpperCase();
+                    const name = (obj.userData.api.name || "Unnamed").toUpperCase();
 
-    // 3. Format Report: PRO TENDER BUDGET
-    // Rates Database (Placeholder)
-    const RATES = {
-        'WALL': { rate: 65.0, unit: 'm2' },
-        'ROOF': { rate: 120.0, unit: 'm2' },
-        'FLOOR': { rate: 85.0, unit: 'm2' },
-        'DOOR': { rate: 450.0, unit: 'no' },
-        'WINDOW': { rate: 600.0, unit: 'no' },
-        'ELECTRICAL': { rate: 55.0, unit: 'pt' },
-        'MISC': { rate: 1.0, unit: 'sum' }
-    };
+                    // Calc World Box & Size
+                    if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+                    const box = obj.geometry.boundingBox!.clone();
+                    box.applyMatrix4(obj.matrixWorld);
 
-    // Budget Aggregation
-    const budgetItems: Record<string, { qty: number, count: number }> = {
-        'WALL': { qty: 0, count: 0 },
-        'ROOF': { qty: 0, count: 0 },
-        'FLOOR': { qty: 0, count: 0 },
-        'DOOR': { qty: 0, count: 0 },
-        'WINDOW': { qty: 0, count: 0 },
-        'ELECTRICAL': { qty: 0, count: 0 },
-        'MISC': { qty: 0, count: 0 }
-    };
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
 
-    // Scan and Measure
-    scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.visible && obj.userData.api) {
-            const typeRaw = (obj.userData.api.type || "MISC").toUpperCase();
+                    // Debug string with Scale info (Critical for verifying Units)
+                    const debugStr = `${type.toLowerCase()} [${size.x.toFixed(1)}x${size.y.toFixed(1)}x${size.z.toFixed(1)}]`;
+                    if (debugTypes.length < 15 && !debugTypes.includes(debugStr)) debugTypes.push(debugStr);
 
-            // Determine Category
-            let cat = 'MISC';
-            if (typeRaw.includes("WALL")) cat = 'WALL';
-            else if (typeRaw.includes("ROOF")) cat = 'ROOF';
-            else if (typeRaw.includes("SLAB") || typeRaw.includes("FLOOR") || typeRaw.includes("FOOTING")) cat = 'FLOOR';
-            else if (typeRaw.includes("DOOR")) cat = 'DOOR';
-            else if (typeRaw.includes("WINDOW")) cat = 'WINDOW';
-            else if (typeRaw.includes("ELECTRICAL") || typeRaw.includes("FIXTURE")) cat = 'ELECTRICAL';
+                    // 1. Explicit Floor Type
+                    const isExplicitFloor = type === 'IFCSLAB' || type.includes("FLOOR") || name.includes("FLOOR");
 
-            // Measure Dimensions
-            if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
-            const box = obj.geometry.boundingBox!.clone();
-            box.applyMatrix4(obj.matrixWorld);
-            const s = new THREE.Vector3();
-            box.getSize(s);
+                    // 2. Geometric Floor Check (Unit Agnostic via Aspect Ratio)
+                    // If Width & Depth are significantly larger than Height, it's a flat plate (Floor/Slab)
+                    // Ratio: Minimum Dimension (X or Z) / Height (Y)
+                    const minWidth = Math.min(size.x, size.z);
+                    const aspectRatio = size.y > 0 ? minWidth / size.y : 0;
 
-            // Auto-Detect Units (if dim > 50, assume mm, convert to m)
-            const isMM = (s.x > 50 || s.y > 50 || s.z > 50);
-            const scale = isMM ? 0.001 : 1.0;
-            const sx = s.x * scale;
-            const sy = s.y * scale;
-            const sz = s.z * scale;
+                    // Logic A: Meters (Flat < 1m, Wide > 1.5m)
+                    const isFlatMeters = size.y < 1.0 && minWidth > 1.5;
 
-            // Calculate Quantity based on Category logic
-            let itemQty = 0;
-            if (cat === 'WALL') {
-                const dims = [sx, sy, sz].sort((a, b) => b - a);
-                itemQty = (sx > sz ? sx : sz) * sy;
-            } else if (cat === 'ROOF' || cat === 'FLOOR') {
-                itemQty = sx * sz;
-            } else {
-                itemQty = 1;
+                    // Logic B: Millimeters (Flat < 1000mm, Wide > 1500mm)
+                    const isFlatMM = size.y > 10 && size.y < 1000 && minWidth > 1500;
+
+                    // Logic C: Aspect Ratio (Plate-like shape) - Width is at least 4x Thickness
+                    const isPlateShape = aspectRatio > 4.0 && minWidth > (size.y * 2);
+
+                    const isGeometricFloor = (isFlatMeters || isFlatMM || isPlateShape);
+
+                    // Exclude Walls/Roofs
+                    const isNotRoof = !type.includes("ROOF");
+                    const isNotWall = !type.includes("WALL");
+                    const isCandidateType = isExplicitFloor || type.includes("PROXY") || type.includes("MISC") || type.includes("PLATE");
+
+                    if ((isExplicitFloor) || (isCandidateType && isGeometricFloor && isNotRoof && isNotWall)) {
+                        const roomBox = box.clone();
+                        // Extrude upwards (Relative to scale)
+                        // If units are mm (height > 100), extrude 3000. If meters, extrude 3.0
+                        const extrudeHeight = size.y > 100 ? 3000.0 : 3.0; // Simple heuristic
+
+                        roomBox.max.y += extrudeHeight;
+                        roomBox.expandByScalar(size.y > 100 ? 100 : 0.1);
+
+                        roomBoxes.push({
+                            name: obj.userData.api.name || `Detected Room(${type})`,
+                            box: roomBox,
+                            element: obj
+                        });
+                    }
+                }
+            });
+
+            if (roomBoxes.length === 0) {
+                console.warn("Still no rooms found. Types seen:", debugTypes);
             }
-
-            budgetItems[cat].qty += itemQty;
-            budgetItems[cat].count++;
         }
-    });
 
-    // 3. Format Report (Identification Phase)
-    let reportHtml = `< div class="p-2 space-y-4" > `;
+        // 2. Scan All Visible Items
+        // FALLBACK: If no rooms found, use a single "Whole Building" bucket
+        const useGlobalBucket = (roomBoxes.length === 0);
+        if (useGlobalBucket) {
+            roomMap["Whole Building (No Rooms Detected)"] = { walls: 0, floor: 0, elec: 0, misc: 0, items: [] };
+        }
 
-    let totalProjectCost = 0;
-    reportHtml += `
+        // 3. Format Report: PRO TENDER BUDGET
+        // Rates Database (Placeholder)
+        const RATES = {
+            'WALL': { rate: 65.0, unit: 'm2' },
+            'ROOF': { rate: 120.0, unit: 'm2' },
+            'FLOOR': { rate: 85.0, unit: 'm2' },
+            'DOOR': { rate: 450.0, unit: 'no' },
+            'WINDOW': { rate: 600.0, unit: 'no' },
+            'ELECTRICAL': { rate: 55.0, unit: 'pt' },
+            'MISC': { rate: 1.0, unit: 'sum' }
+        };
+
+        // Budget Aggregation
+        const budgetItems: Record<string, { qty: number, count: number }> = {
+            'WALL': { qty: 0, count: 0 },
+            'ROOF': { qty: 0, count: 0 },
+            'FLOOR': { qty: 0, count: 0 },
+            'DOOR': { qty: 0, count: 0 },
+            'WINDOW': { qty: 0, count: 0 },
+            'ELECTRICAL': { qty: 0, count: 0 },
+            'MISC': { qty: 0, count: 0 }
+        };
+
+        // Scan and Measure
+        scene.traverse((obj) => {
+            if (obj instanceof THREE.Mesh && obj.visible && obj.userData.api) {
+                const typeRaw = (obj.userData.api.type || "MISC").toUpperCase();
+
+                // Determine Category
+                let cat = 'MISC';
+                if (typeRaw.includes("WALL")) cat = 'WALL';
+                else if (typeRaw.includes("ROOF")) cat = 'ROOF';
+                else if (typeRaw.includes("SLAB") || typeRaw.includes("FLOOR") || typeRaw.includes("FOOTING")) cat = 'FLOOR';
+                else if (typeRaw.includes("DOOR")) cat = 'DOOR';
+                else if (typeRaw.includes("WINDOW")) cat = 'WINDOW';
+                else if (typeRaw.includes("ELECTRICAL") || typeRaw.includes("FIXTURE")) cat = 'ELECTRICAL';
+
+                // Measure Dimensions
+                if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+                const box = obj.geometry.boundingBox!.clone();
+                box.applyMatrix4(obj.matrixWorld);
+                const s = new THREE.Vector3();
+                box.getSize(s);
+
+                // Auto-Detect Units (if dim > 50, assume mm, convert to m)
+                const isMM = (s.x > 50 || s.y > 50 || s.z > 50);
+                const scale = isMM ? 0.001 : 1.0;
+                const sx = s.x * scale;
+                const sy = s.y * scale;
+                const sz = s.z * scale;
+
+                // Calculate Quantity based on Category logic
+                let itemQty = 0;
+                if (cat === 'WALL') {
+                    const dims = [sx, sy, sz].sort((a, b) => b - a);
+                    itemQty = (sx > sz ? sx : sz) * sy;
+                } else if (cat === 'ROOF' || cat === 'FLOOR') {
+                    itemQty = sx * sz;
+                } else {
+                    itemQty = 1;
+                }
+
+                budgetItems[cat].qty += itemQty;
+                budgetItems[cat].count++;
+            }
+        });
+
+        // 3. Format Report (Identification Phase)
+        let reportHtml = `< div class="p-2 space-y-4" > `;
+
+        let totalProjectCost = 0;
+        reportHtml += `
     < div class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider" > Tender Budget Estimate</div >
             <table class="w-full text-[10px] border-collapse">
                 <thead>
@@ -1359,16 +1358,16 @@ const generateTenderReport = async () => {
                 </thead>
                 <tbody>`;
 
-    // Generate Rows
-    for (const [cat, data] of Object.entries(budgetItems)) {
-        if (data.count === 0) continue;
+        // Generate Rows
+        for (const [cat, data] of Object.entries(budgetItems)) {
+            if (data.count === 0) continue;
 
-        const rateInfo = RATES[cat as keyof typeof RATES] || RATES['MISC'];
-        const quantity = (rateInfo.unit === 'no' || rateInfo.unit === 'pt') ? data.count : data.qty;
-        const lineTotal = quantity * rateInfo.rate;
-        totalProjectCost += lineTotal;
+            const rateInfo = RATES[cat as keyof typeof RATES] || RATES['MISC'];
+            const quantity = (rateInfo.unit === 'no' || rateInfo.unit === 'pt') ? data.count : data.qty;
+            const lineTotal = quantity * rateInfo.rate;
+            totalProjectCost += lineTotal;
 
-        reportHtml += `
+            reportHtml += `
                 <tr class="border-b border-gray-100 hover:bg-purple-50">
                     <td class="p-1 font-medium text-gray-700">${cat} <span class="text-[8px] text-gray-400">(${data.count} items)</span></td>
                     <td class="p-1 text-gray-600">${quantity.toFixed(1)}</td>
@@ -1377,9 +1376,9 @@ const generateTenderReport = async () => {
                     <td class="p-1 text-right font-bold text-gray-800">${lineTotal.toFixed(2)}</td>
                 </tr>
             `;
-    }
+        }
 
-    reportHtml += `
+        reportHtml += `
                 <tr class="bg-gray-50 border-t-2 border-gray-300">
                     <td class="p-1 font-bold text-gray-900" colspan="3">ESTIMATED TOTAL</td>
                     <td class="p-1 text-right font-bold text-gray-900" colspan="2">£${totalProjectCost.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -1393,233 +1392,233 @@ const generateTenderReport = async () => {
         </div > `;
 
 
-};
+    };
 
-// --- VIEW MODE SWITCHER IMPL ---
-// --- VIEW MODE SWITCHER IMPL ---
-useEffect(() => {
-    if (!components) return;
+    // --- VIEW MODE SWITCHER IMPL ---
+    // --- VIEW MODE SWITCHER IMPL ---
+    useEffect(() => {
+        if (!components) return;
 
-    // 1. CAMERA LOGIC (PRIORITY)
-    const cam = components.camera as OBC.OrthoPerspectiveCamera;
-    if (cam && cam.controls) {
-        if (viewMode === '2d') {
-            // Switch to Ortho
-            console.log("🟦 SWITCHING TO 2D MODE (DEBUG)");
-            // Switch to Ortho
-            try {
-                cam.setProjection('Orthographic');
-
-                // FORCE FAR PLANE UPDATE (Fix for MM models)
-                const activeCam = cam.get();
-                activeCam.far = 500000; // 500m
-                activeCam.updateProjectionMatrix();
-                console.log("🟦 2D Projection Set. Far:", activeCam.far);
-
-                const scene = components.scene.get();
-                scene.background = new THREE.Color(0xffffff); // White BG for 2D Plan
-
-            } catch (e) { console.warn("Proj Switch Error", e); }
-
-            // INSTANT VIEW SWITCH (Use Cached Bounds)
-            const bbox = modelBoundsRef.current; // Use Pre-Calculated Box
-            console.log("📦 2D Bounds:", bbox ? `Found` : "MISSING");
-
-
-
-            if (bbox && !bbox.isEmpty()) {
-                const sizeX = bbox.max.x - bbox.min.x;
-                const sizeY = bbox.max.y - bbox.min.y;
-                const sizeZ = bbox.max.z - bbox.min.z;
-                const cx = (bbox.min.x + bbox.max.x) / 2;
-                const cy = (bbox.min.y + bbox.max.y) / 2;
-                const cz = (bbox.min.z + bbox.max.z) / 2;
-
-                const maxDim = Math.max(sizeX, sizeY, sizeZ);
-
-                // AUTO-DETECT UP AXIS (Smallest dimension is usually height in a plan)
-                // If Y is Height (Standard Three.js)
-                if (sizeY < sizeX && sizeY < sizeZ) {
-                    console.log("📐 Auto-Detected Y-UP Axis (Standard)");
-                    cam.controls.camera.up.set(0, 0, -1); // Map Orientation
-                    cam.controls.setPosition(cx, bbox.max.y + maxDim * 2, cz, true);
-                    cam.controls.setTarget(cx, cy, cz, true);
-                }
-                // If Z is Height (Native IFC)
-                else {
-                    console.log("📐 Auto-Detected Z-UP Axis (Native)");
-                    cam.controls.camera.up.set(0, 1, 0); // Standard Up
-                    cam.controls.setPosition(cx, cy, bbox.max.z + maxDim * 2, true);
-                    cam.controls.setTarget(cx, cy, cz, true);
-                }
-
-                // Ensure Clipping
+        // 1. CAMERA LOGIC (PRIORITY)
+        const cam = components.camera as OBC.OrthoPerspectiveCamera;
+        if (cam && cam.controls) {
+            if (viewMode === '2d') {
+                // Switch to Ortho
+                console.log("🟦 SWITCHING TO 2D MODE (DEBUG)");
+                // Switch to Ortho
                 try {
+                    cam.setProjection('Orthographic');
+
+                    // FORCE FAR PLANE UPDATE (Fix for MM models)
                     const activeCam = cam.get();
-                    if (activeCam) {
-                        activeCam.near = -maxDim * 2;
-                        activeCam.far = maxDim * 10;
-                        activeCam.updateProjectionMatrix();
+                    activeCam.far = 500000; // 500m
+                    activeCam.updateProjectionMatrix();
+                    console.log("🟦 2D Projection Set. Far:", activeCam.far);
+
+                    const scene = components.scene.get();
+                    scene.background = new THREE.Color(0xffffff); // White BG for 2D Plan
+
+                } catch (e) { console.warn("Proj Switch Error", e); }
+
+                // INSTANT VIEW SWITCH (Use Cached Bounds)
+                const bbox = modelBoundsRef.current; // Use Pre-Calculated Box
+                console.log("📦 2D Bounds:", bbox ? `Found` : "MISSING");
+
+
+
+                if (bbox && !bbox.isEmpty()) {
+                    const sizeX = bbox.max.x - bbox.min.x;
+                    const sizeY = bbox.max.y - bbox.min.y;
+                    const sizeZ = bbox.max.z - bbox.min.z;
+                    const cx = (bbox.min.x + bbox.max.x) / 2;
+                    const cy = (bbox.min.y + bbox.max.y) / 2;
+                    const cz = (bbox.min.z + bbox.max.z) / 2;
+
+                    const maxDim = Math.max(sizeX, sizeY, sizeZ);
+
+                    // AUTO-DETECT UP AXIS (Smallest dimension is usually height in a plan)
+                    // If Y is Height (Standard Three.js)
+                    if (sizeY < sizeX && sizeY < sizeZ) {
+                        console.log("📐 Auto-Detected Y-UP Axis (Standard)");
+                        cam.controls.camera.up.set(0, 0, -1); // Map Orientation
+                        cam.controls.setPosition(cx, bbox.max.y + maxDim * 2, cz, true);
+                        cam.controls.setTarget(cx, cy, cz, true);
                     }
+                    // If Z is Height (Native IFC)
+                    else {
+                        console.log("📐 Auto-Detected Z-UP Axis (Native)");
+                        cam.controls.camera.up.set(0, 1, 0); // Standard Up
+                        cam.controls.setPosition(cx, cy, bbox.max.z + maxDim * 2, true);
+                        cam.controls.setTarget(cx, cy, cz, true);
+                    }
+
+                    // Ensure Clipping
+                    try {
+                        const activeCam = cam.get();
+                        if (activeCam) {
+                            activeCam.near = -maxDim * 2;
+                            activeCam.far = maxDim * 10;
+                            activeCam.updateProjectionMatrix();
+                        }
+                    } catch (e) { }
+
+                    setTimeout(() => {
+                        cam.controls.fitToBox(bbox, true);
+                        // FORCE UPDATE NEAR/FAR AGAIN
+                        const activeCam = cam.get();
+                        if (activeCam) {
+                            activeCam.zoom = activeCam.zoom * 0.8; // Zoom out slightly
+                            activeCam.updateProjectionMatrix();
+                        }
+                    }, 100);
+                } else {
+                    // Fallback
+                    cam.controls.setPosition(0, 50, 0, true);
+                    cam.controls.setTarget(0, 0, 0, true);
+                }
+
+                // Try to hide grid (Optional)
+                try {
+                    const grid = components.tools.get(OBC.SimpleGrid);
+                    if (grid) grid.visible = false;
                 } catch (e) { }
 
-                setTimeout(() => {
-                    cam.controls.fitToBox(bbox, true);
-                    // FORCE UPDATE NEAR/FAR AGAIN
-                    const activeCam = cam.get();
-                    if (activeCam) {
-                        activeCam.zoom = activeCam.zoom * 0.8; // Zoom out slightly
-                        activeCam.updateProjectionMatrix();
-                    }
-                }, 100);
+
+
             } else {
-                // Fallback
-                cam.controls.setPosition(0, 50, 0, true);
-                cam.controls.setTarget(0, 0, 0, true);
-            }
-
-            // Try to hide grid (Optional)
-            try {
-                const grid = components.tools.get(OBC.SimpleGrid);
-                if (grid) grid.visible = false;
-            } catch (e) { }
-
-
-
-        } else {
-            // 3D Mode
-            console.log("🧊 SWITCHING TO 3D MODE (DEBUG)");
-            // 3D Mode
-            try {
-                cam.setProjection('Perspective');
-
-                // FORCE FAR PLANE UPDATE (Fix for MM models)
-                const activeCam = cam.get();
-                activeCam.far = 500000; // 500m
-                activeCam.updateProjectionMatrix();
-
-                // Reset Orientation
-                cam.controls.camera.up.set(0, 1, 0);
-
-                const scene = components.scene.get();
-                scene.background = new THREE.Color(0xf0f2f5); // Restore
-            } catch (e) { console.warn("Proj Switch Error", e); }
-
-            // Restore Grid
-            try {
-                const grid = components.tools.get(OBC.SimpleGrid);
-                if (grid) grid.visible = true;
-            } catch (e) { }
-        }
-    }
-
-    // 2. CLIPPER LOGIC (SECONDARY)
-    let clipper: any;
-    try { clipper = components.tools.get(OBC.EdgesClipper); } catch (e) { }
-    if (!clipper) {
-        try { clipper = components.tools.get(OBC.SimpleClipper); } catch (e) { }
-    }
-    // Last resort try generic Clipper token
-    if (!clipper) {
-        try { clipper = components.tools.get(OBC.Clipper); } catch (e) { }
-    }
-
-    if (clipper) {
-        if (viewMode === '2d') {
-            clipper.enabled = true;
-            // Create Plane if not exists
-            if (!clipper.planes || clipper.planes.length === 0) {
+                // 3D Mode
+                console.log("🧊 SWITCHING TO 3D MODE (DEBUG)");
+                // 3D Mode
                 try {
-                    console.log("✂️ Creating 2D Slice Plane at Y=1500 (MM)...");
-                    // Use explicit normal and point for Standard cut
-                    // Try SimpleClipper method or generic
-                    if (clipper.createFromNormalAndCoplanarPoint) {
-                        clipper.createFromNormalAndCoplanarPoint(
-                            new THREE.Vector3(0, -1, 0), // Normal pointing DOWN
-                            new THREE.Vector3(0, 1500, 0) // Height 1.5m (1500mm)
-                        );
-                    } else if (clipper.create) {
-                        clipper.create(); // Fallback
-                    }
-                } catch (e) {
-                    console.warn("Clip Create Error", e);
-                    // Fallback: try create()
-                    try { clipper.create(); } catch (e2) { }
-                }
+                    cam.setProjection('Perspective');
+
+                    // FORCE FAR PLANE UPDATE (Fix for MM models)
+                    const activeCam = cam.get();
+                    activeCam.far = 500000; // 500m
+                    activeCam.updateProjectionMatrix();
+
+                    // Reset Orientation
+                    cam.controls.camera.up.set(0, 1, 0);
+
+                    const scene = components.scene.get();
+                    scene.background = new THREE.Color(0xf0f2f5); // Restore
+                } catch (e) { console.warn("Proj Switch Error", e); }
+
+                // Restore Grid
+                try {
+                    const grid = components.tools.get(OBC.SimpleGrid);
+                    if (grid) grid.visible = true;
+                } catch (e) { }
             }
-        } else {
-            clipper.enabled = false;
-            clipper.deleteAll();
-        }
-    }
-
-}, [viewMode, components]);
-
-const ROOM_NAMES = [
-    "Lounge", "Kitchen", "Dining Room", "Bedroom 1", "Bedroom 2", "Bedroom 3",
-    "Bathroom", "Ensuite", "Hallway", "Landing", "Garage", "Utility", "Study", "WC"
-];
-
-const handleRoomLabel = (name: string) => {
-    if (!labelMenu || !labelMenu.item) return;
-
-    // Update the item's custom name in UserData
-    const mesh = labelMenu.item.element as THREE.Mesh;
-    if (mesh && mesh.userData.api) {
-        mesh.userData.api.name = name; // Override name
-        console.log(`🏷️ Labelled Room[${labelMenu.item.id}]as: ${name} `);
-
-        // NEW: Persist to DB via Parent Prop
-        if (onRoomRename && mesh.userData.api.id) {
-            onRoomRename(mesh.userData.api.id, name);
         }
 
-        // Visual Update (Flash Green)
-        const oldMat = mesh.material;
-        mesh.material = new THREE.MeshBasicMaterial({ color: 0x00FF00, side: THREE.DoubleSide });
-        setTimeout(() => {
-            mesh.material = oldMat;
-        }, 500);
-    }
-    setLabelMenu(null);
-    setIsLabelMode(false);
-};
+        // 2. CLIPPER LOGIC (SECONDARY)
+        let clipper: any;
+        try { clipper = components.tools.get(OBC.EdgesClipper); } catch (e) { }
+        if (!clipper) {
+            try { clipper = components.tools.get(OBC.SimpleClipper); } catch (e) { }
+        }
+        // Last resort try generic Clipper token
+        if (!clipper) {
+            try { clipper = components.tools.get(OBC.Clipper); } catch (e) { }
+        }
 
-return (
-    <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
-        {/* DEBUG OVERLAY */}
-        <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
-            <div className="font-bold border-b border-white/20 mb-1 text-green-400">v2.9 - PERF SAFE MODE</div>
-            <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
-            <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
-            {debugLog.map((l, i) => <div key={i}>{l}</div>)}
+        if (clipper) {
+            if (viewMode === '2d') {
+                clipper.enabled = true;
+                // Create Plane if not exists
+                if (!clipper.planes || clipper.planes.length === 0) {
+                    try {
+                        console.log("✂️ Creating 2D Slice Plane at Y=1500 (MM)...");
+                        // Use explicit normal and point for Standard cut
+                        // Try SimpleClipper method or generic
+                        if (clipper.createFromNormalAndCoplanarPoint) {
+                            clipper.createFromNormalAndCoplanarPoint(
+                                new THREE.Vector3(0, -1, 0), // Normal pointing DOWN
+                                new THREE.Vector3(0, 1500, 0) // Height 1.5m (1500mm)
+                            );
+                        } else if (clipper.create) {
+                            clipper.create(); // Fallback
+                        }
+                    } catch (e) {
+                        console.warn("Clip Create Error", e);
+                        // Fallback: try create()
+                        try { clipper.create(); } catch (e2) { }
+                    }
+                }
+            } else {
+                clipper.enabled = false;
+                clipper.deleteAll();
+            }
+        }
+
+    }, [viewMode, components]);
+
+    const ROOM_NAMES = [
+        "Lounge", "Kitchen", "Dining Room", "Bedroom 1", "Bedroom 2", "Bedroom 3",
+        "Bathroom", "Ensuite", "Hallway", "Landing", "Garage", "Utility", "Study", "WC"
+    ];
+
+    const handleRoomLabel = (name: string) => {
+        if (!labelMenu || !labelMenu.item) return;
+
+        // Update the item's custom name in UserData
+        const mesh = labelMenu.item.element as THREE.Mesh;
+        if (mesh && mesh.userData.api) {
+            mesh.userData.api.name = name; // Override name
+            console.log(`🏷️ Labelled Room[${labelMenu.item.id}]as: ${name} `);
+
+            // NEW: Persist to DB via Parent Prop
+            if (onRoomRename && mesh.userData.api.id) {
+                onRoomRename(mesh.userData.api.id, name);
+            }
+
+            // Visual Update (Flash Green)
+            const oldMat = mesh.material;
+            mesh.material = new THREE.MeshBasicMaterial({ color: 0x00FF00, side: THREE.DoubleSide });
+            setTimeout(() => {
+                mesh.material = oldMat;
+            }, 500);
+        }
+        setLabelMenu(null);
+        setIsLabelMode(false);
+    };
+
+    return (
+        <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
+            {/* DEBUG OVERLAY */}
+            <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
+                <div className="font-bold border-b border-white/20 mb-1 text-green-400">v2.9 - PERF SAFE MODE</div>
+                <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
+                <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
+                {debugLog.map((l, i) => <div key={i}>{l}</div>)}
+            </div>
+
+            {/* ERROR UI */}
+            {error && (
+                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white p-8">
+                    <div className="text-red-500 font-bold mb-2">Error Loading 3D Engine</div>
+                    <div className="text-sm text-gray-600 mb-4 text-center">{error}</div>
+                    <Button onClick={() => window.location.reload()} variant="outline">Reload Page</Button>
+                </div>
+            )}
+
+            {/* CANVAS (3D Only) */}
+            <div
+                ref={containerRef}
+                className="w-full h-full absolute inset-0 bg-slate-50"
+                style={{ touchAction: 'none' }}
+            ></div>
+
+            {/* Loading Overlay */}
+            {loading && (
+                <div className="absolute inset-0 z-40 bg-white/80 flex flex-col items-center justify-center">
+                    <Loader2 className="h-8 w-8 text-amber-500 animate-spin mb-4" />
+                    <p className="text-slate-600 font-medium">{loadingStatus}</p>
+                </div>
+            )}
         </div>
-
-        {/* ERROR UI */}
-        {error && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white p-8">
-                <div className="text-red-500 font-bold mb-2">Error Loading 3D Engine</div>
-                <div className="text-sm text-gray-600 mb-4 text-center">{error}</div>
-                <Button onClick={() => window.location.reload()} variant="outline">Reload Page</Button>
-            </div>
-        )}
-
-        {/* CANVAS (3D Only) */}
-        <div
-            ref={containerRef}
-            className="w-full h-full absolute inset-0 bg-slate-50"
-            style={{ touchAction: 'none' }}
-        ></div>
-
-        {/* Loading Overlay */}
-        {loading && (
-            <div className="absolute inset-0 z-40 bg-white/80 flex flex-col items-center justify-center">
-                <Loader2 className="h-8 w-8 text-amber-500 animate-spin mb-4" />
-                <p className="text-slate-600 font-medium">{loadingStatus}</p>
-            </div>
-        )}
-    </div>
-);
+    );
 }); // Close Memo (Default Shallow Compare)
 
 
