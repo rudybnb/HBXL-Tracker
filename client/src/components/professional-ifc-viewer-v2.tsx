@@ -30,10 +30,38 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
     // LISTEN FOR FIT EVENT
     useEffect(() => {
-        const handleFit = () => {
+        const handleFit = async () => {
             if (components && modelBoundsRef.current && !modelBoundsRef.current.isEmpty()) {
-                console.log("Manually fitting camera...");
-                components.camera.controls.fitToBox(modelBoundsRef.current, true);
+                console.log("🖱️ Triggered Fit-to-Screen");
+                const bbox = modelBoundsRef.current!;
+                const controls = components.camera.controls;
+
+                // Get Center/Size
+                const center = new THREE.Vector3();
+                bbox.getCenter(center);
+                const size = new THREE.Vector3();
+                bbox.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                if (viewModeRef.current === '2d') {
+                    console.log("📐 Forcing Top-Down View (2D)");
+                    // TOP DOWN: High Y, Looking at Center
+                    // Ensure Up Vector matches Plan View (North Up = -Z)
+                    controls.camera.up.set(0, 0, -1);
+
+                    // Position: Center X, High Y, Center Z
+                    await controls.setPosition(center.x, center.y + (maxDim * 1.5), center.z, true);
+                    await controls.setTarget(center.x, center.y, center.z, true);
+
+                    // Zoom Extents logic for Ortho
+                    await controls.fitToBox(bbox, true);
+                } else {
+                    console.log("🧊 Fitting 3D View");
+                    controls.camera.up.set(0, 1, 0); // Restore Standard Up
+                    await controls.fitToBox(bbox, true);
+                }
+            } else {
+                addLog("⚠️ Cannot Fit: No Bounds");
             }
         };
         window.addEventListener('viewer-fit-camera', handleFit);
@@ -65,6 +93,12 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
     // Label Mode Ref for Event Listeners
     const isLabelModeRef = useRef(false);
+    const viewModeRef = useRef(viewMode); // Track View Mode
+
+    // Sync Ref
+    useEffect(() => {
+        viewModeRef.current = viewMode;
+    }, [viewMode]);
 
     // DEBUG INTERVAL
     useEffect(() => {
@@ -290,12 +324,13 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 (window as any).RENDERER = internalRenderer;
                 (window as any).SCENE = scene;
 
-                // DIAGNOSTIC CUBE (Red Box at Origin)
+                // DIAGNOSTIC CUBE (Solid Red)
                 const diagGeom = new THREE.BoxGeometry(1000, 1000, 1000);
-                const diagMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
+                const diagMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
                 const diagMesh = new THREE.Mesh(diagGeom, diagMat);
+                diagMesh.position.set(0, 500, 0); // Sit on floor
                 scene.add(diagMesh);
-                addLog("🟥 Added Debug Cube (1000x) at 0,0,0");
+                addLog("🟥 Added Solid Debug Cube (1000x) at 0,500,0");
 
                 // 2. Loader
 
