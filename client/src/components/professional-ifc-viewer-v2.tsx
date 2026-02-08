@@ -79,10 +79,9 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         const i = setInterval(() => {
             if ((window as any).COMPONENTS) {
                 const c = (window as any).COMPONENTS.camera.get();
-                // REDUCED UPDATE FREQUENCY
-                // Only update stats, don't force projection matrix every 500ms unless needed
+                // LIGHTWEIGHT CHECK
                 const p = c.position;
-                // setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom?.toFixed(3)} | Far:${c.far}`);
+                setCameraStats(`Cam: ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} | Z:${c.zoom?.toFixed(3)} | Far:${c.far}`);
             }
         }, 500);
         return () => clearInterval(i);
@@ -260,6 +259,17 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 if (!isActive) return;
                 // 1. Init
                 step = "1. Init Engine";
+
+                // PERFORMANCE: Yield to Main Thread Helper
+                const yieldToMain = () => new Promise(resolve => setTimeout(resolve, 0));
+                let lastYieldTime = performance.now();
+                const checkYield = async () => {
+                    if (performance.now() - lastYieldTime > 16) { // 16ms (60fps) budget
+                        await yieldToMain();
+                        lastYieldTime = performance.now();
+                    }
+                };
+
                 setLoadingStatus("Starting 3D Engine...");
                 const comps = new OBC.Components();
                 comps.scene = new OBC.SimpleScene(comps);
@@ -297,10 +307,10 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 internalRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
                 comps.camera = new OBC.OrthoPerspectiveCamera(comps);
-                // INCREASE CAMERA FAR PLANE FOR MM MODELS
+                // FORCE HUGE FAR PLANE FOR MM MODELS
                 const camObj = comps.camera.get();
-                camObj.far = 50000;
-                camObj.near = 0.1;
+                camObj.far = 500000;
+                camObj.near = 0.5;
                 camObj.updateProjectionMatrix();
 
                 comps.raycaster = new OBC.SimpleRaycaster(comps);
@@ -600,8 +610,8 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     console.log("🧠 Skipping 2D Extraction (Using Cache)");
                 }
 
-                // Helper: Geometry Slicer
-                const sliceMesh = (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
+                // Helper: Geometry Slicer (Async & Yielding)
+                const sliceMesh = async (mesh: THREE.Mesh, planeY: number, type: string, fid: string) => {
                     const geometry = mesh.geometry;
                     if (!geometry) return;
 
@@ -663,10 +673,12 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     if (index) {
                         for (let i = 0; i < index.count; i += 3) {
                             checkTri(index.getX(i), index.getX(i + 1), index.getX(i + 2));
+                            if (i % 3000 === 0) await checkYield();
                         }
                     } else {
                         for (let i = 0; i < pos.count; i += 3) {
                             checkTri(i, i + 1, i + 2);
+                            if (i % 3000 === 0) await checkYield();
                         }
                     }
                 };
@@ -795,15 +807,25 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                                         };
 
                                         if (index) {
-                                            for (let j = 0; j < index.count; j += 3) checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
+                                            for (let j = 0; j < index.count; j += 3) {
+                                                checkTriInst(index.getX(j), index.getX(j + 1), index.getX(j + 2));
+                                                // Check yield inside instance loop (less freq)
+                                                if (j % 9000 === 0) await checkYield();
+                                            }
                                         } else {
-                                            for (let j = 0; j < pos.count; j += 3) checkTriInst(j, j + 1, j + 2);
+                                            for (let j = 0; j < pos.count; j += 3) {
+                                                checkTriInst(j, j + 1, j + 2);
+                                                if (j % 9000 === 0) await checkYield();
+                                            }
                                         }
                                     }
                                 } else {
-                                    sliceMesh(mesh, cutY, type, fid);
+                                    await sliceMesh(mesh, cutY, type, fid);
                                 }
                             }
+
+                            // Check yield periodically in main fragment loop
+                            await checkYield();
                         }
                     }
                 }
@@ -945,170 +967,8 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     }
                 }
 
-                // ============================================
-                // 6. QUANTITY SURVEYOR: Hover & Measure
-                // ============================================
-
-                let currentSelection: THREE.Mesh | null = null;
-                const originalMaterials = new Map<string, THREE.Material>();
-                // Removed local highlightMat definition to use global Cyan one
-
-                containerRef.current.addEventListener('mousemove', (event) => {
-                    const rect = containerRef.current!.getBoundingClientRect();
-                    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-                    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-                    setTooltipPos({ x: event.clientX, y: event.clientY });
-
-                    const raycaster = comps.raycaster.get();
-                    raycaster.setFromCamera(new THREE.Vector2(x, y), comps.camera.get());
-
-                    // USE OPTIMIZED MESH LIST (Shared Ref)
-                    // In Label Mode, ONLY target Database Rooms to avoid clicking Walls
-                    let targetList = interactables.current;
-                    if (isLabelModeRef.current) {
-                        targetList = interactables.current.filter(m => m.userData.api.isDbRoom);
-                    }
-
-                    const intersects = raycaster.intersectObjects(targetList, false);
-
-                    if (intersects.length > 0) {
-                        const result = intersects[0];
-                        const mesh = result.object as THREE.Mesh;
-
-                        // HIGHLIGHT LOGIC
-                        if (currentSelection !== mesh) {
-                            if (currentSelection) {
-                                currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
-                                currentSelection.renderOrder = 0;
-                            }
-
-                            currentSelection = mesh;
-                            if (!originalMaterials.has(mesh.uuid)) {
-                                originalMaterials.set(mesh.uuid, mesh.material as THREE.Material);
-                            }
-                            mesh.material = highlightMat;
-                            mesh.renderOrder = 3;
-
-                            // DATA LOGIC - READ PRE-COMPUTED
-                            const data = mesh.userData.api || { name: 'Unknown', type: 'Geometry' };
-
-                            // Metrics (Real-time World Dimensions)
-                            let dimString = "Analyzing...";
-                            let areaString = "--";
-
-                            if (mesh.geometry) {
-                                // 1. Get Base Box
-                                if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-                                const box = mesh.geometry.boundingBox!.clone();
-
-                                // 2. Apply Instance Matrix if needed
-                                // This converts Local Geometry Box -> World Space Box (fixing rotation/scale)
-                                if (mesh instanceof THREE.InstancedMesh && result.instanceId !== undefined) {
-                                    const instMat = new THREE.Matrix4();
-                                    mesh.getMatrixAt(result.instanceId, instMat);
-                                    box.applyMatrix4(instMat);
-                                } else {
-                                    // Regular Mesh - apply world matrix
-                                    box.applyMatrix4(mesh.matrixWorld);
-                                }
-
-                                // 3. Measure World Axis-Aligned Size
-                                const size = new THREE.Vector3();
-                                box.getSize(size);
-
-                                // Standard: Y is Height in World Space
-                                const height = size.y;
-                                const widthX = size.x;
-                                const widthZ = size.z;
-
-                                // Logic: Vertical vs Horizontal Elements
-                                const isHorizontal = data.type.includes("Roof") || data.type.includes("Slab") || data.type.includes("Floor");
-
-                                if (isHorizontal) {
-                                    // For Roofs/Floors: Use X and Z (Footprint)
-                                    const len = Math.max(widthX, widthZ);
-                                    const wid = Math.min(widthX, widthZ);
-                                    dimString = `${len.toFixed(2)} m(L) x ${wid.toFixed(2)} m(W)`;
-                                    areaString = (len * wid).toFixed(2);
-                                } else {
-                                    // For Walls/Doors/Verticals: Use Y (Height) and Max(X,Z) (Length)
-                                    const len = Math.max(widthX, widthZ);
-                                    dimString = `${height.toFixed(2)} m(H) x ${len.toFixed(2)} m(W)`;
-                                    areaString = (height * len).toFixed(2);
-                                }
-                            }
-
-                            // FORCE UPDATE TOOLTIP
-                            setTooltipData({
-                                visible: true,
-                                name: `${data.name} #${data.id} `,
-                                type: data.type,
-                                dims: dimString,
-                                qty: `${areaString} m²`
-                            });
-                        }
-                    } else {
-                        // NO INTERSECTION
-                        if (currentSelection) {
-                            currentSelection.material = originalMaterials.get(currentSelection.uuid) || styles.wall;
-                            currentSelection.renderOrder = 0;
-                            currentSelection = null;
-                        }
-                        // Hide tooltip
-                        setTooltipData(prev => ({ ...prev, visible: false }));
-                    }
-                });
-
-                // 6. INTERACTIVE: Click (Optimized with Fallback)
-                containerRef.current.addEventListener('click', (event) => {
-                    // --- LABEL MODE INTERCEPT ---
-                    if (isLabelModeRef.current) {
-                        if (currentSelection && currentSelection.userData.api.isDbRoom) { // Extra check
-                            console.log("🖱️ Label Click on:", currentSelection.userData.api);
-                            setLabelMenu({
-                                x: event.clientX,
-                                y: event.clientY,
-                                item: currentSelection.userData.api
-                            });
-                        }
-                        return; // Stop standard click
-                    }
-
-                    // --- STANDARD CLICK ---
-                    if (onElementClick && currentSelection) {
-                        const found = comps.raycaster.castRay(model.items);
-                        if (found && found[0]) {
-                            const result = found[0];
-                            const mesh = result.object as THREE.Mesh;
-                            const frag = comps.fragments.list[mesh.uuid];
-                            if (frag) {
-                                const instID = result.instanceId ?? 0;
-                                const expressID = frag.getItemID(instID);
-
-                                let p = model.properties ? model.properties[expressID] : null;
-
-                                // Fallback Name
-                                let finalName = p?.Name?.value || "Unnamed";
-                                let finalType = p?.type ? String(p.type) : "Element";
-
-                                if (finalName === "Unnamed") {
-                                    if (isItemInMap(doors, frag.id, expressID)) finalName = "Detected Door";
-                                    else if (isItemInMap(windows, frag.id, expressID)) finalName = "Detected Window";
-                                    else if (isItemInMap(walls, frag.id, expressID)) finalName = "Detected Wall";
-                                }
-
-                                onElementClick({
-                                    id: expressID,
-                                    globalId: p?.GlobalId?.value || "N/A",
-                                    type: finalType,
-                                    name: finalName,
-                                    raw: p
-                                });
-                            }
-                        }
-                    }
-                });
+                // EVENTS MOVED TO SEPARATE USE_EFFECT TO PREVENT LEAKS
+                // The previous addEventListener calls here were causing memory leaks and piling up listeners.
 
                 setComponents(comps);
                 setLoading(false);
@@ -1583,11 +1443,147 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         setIsLabelMode(false);
     };
 
+    // --- INTERACTIVE EVENTS (SAFE & CLEANED UP) ---
+    useEffect(() => {
+        if (!components || !containerRef.current) return;
+        const container = containerRef.current;
+        const comps = components; // capture
+
+        let currentSelection: THREE.Mesh | null = null;
+        let originalMaterial: THREE.Material | null = null;
+        const highlightMat = new THREE.MeshBasicMaterial({
+            color: 0x00FFFF,
+            depthTest: false,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.5
+        });
+        const styles = {
+            wall: new THREE.MeshBasicMaterial({ color: 0x999999, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 1 }),
+        };
+
+        const handleMouseMove = (event: MouseEvent) => {
+            if (!containerRef.current) return;
+            const rect = containerRef.current.getBoundingClientRect();
+            const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            setTooltipPos({ x: event.clientX, y: event.clientY });
+
+            // Raycast
+            if (!comps.raycaster) return;
+            const raycaster = comps.raycaster.get();
+            raycaster.setFromCamera(new THREE.Vector2(x, y), comps.camera.get());
+
+            // Target List
+            let targetList = interactables.current;
+            if (isLabelModeRef.current) {
+                targetList = interactables.current.filter(m => m.userData.api.isDbRoom);
+            }
+
+            const intersects = raycaster.intersectObjects(targetList, false);
+
+            if (intersects.length > 0) {
+                const result = intersects[0];
+                const mesh = result.object as THREE.Mesh;
+
+                if (currentSelection !== mesh) {
+                    // Restore previous
+                    if (currentSelection && originalMaterial) {
+                        currentSelection.material = originalMaterial;
+                        currentSelection.renderOrder = 0;
+                    }
+
+                    // Select new
+                    currentSelection = mesh;
+                    // Store original material (handle Array material case poorly, assuming Single for simple ifc)
+                    originalMaterial = mesh.material as THREE.Material;
+
+                    mesh.material = highlightMat;
+                    mesh.renderOrder = 3;
+
+                    // TOOLTIP DATA
+                    const data = mesh.userData.api || { name: 'Unknown', type: 'Geometry' };
+                    let dimString = "Analyzing...";
+                    let areaString = "--";
+
+                    // Simple Calc for Tooltip
+                    if (mesh.geometry) {
+                        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+                        const box = mesh.geometry.boundingBox!.clone();
+                        if (mesh instanceof THREE.InstancedMesh && result.instanceId !== undefined) {
+                            const m = new THREE.Matrix4();
+                            mesh.getMatrixAt(result.instanceId, m);
+                            box.applyMatrix4(m);
+                        } else {
+                            box.applyMatrix4(mesh.matrixWorld);
+                        }
+                        const s = new THREE.Vector3();
+                        box.getSize(s);
+                        const isHorizontal = data.type.includes("Roof") || data.type.includes("Slab");
+                        const len = Math.max(s.x, s.z);
+                        if (isHorizontal) {
+                            dimString = `${len.toFixed(2)}x${Math.min(s.x, s.z).toFixed(2)}`;
+                            areaString = (s.x * s.z).toFixed(2);
+                        } else {
+                            dimString = `${s.y.toFixed(2)}m H`;
+                            areaString = (s.y * Math.max(s.x, s.z)).toFixed(2);
+                        }
+                    }
+
+                    setTooltipData({
+                        visible: true,
+                        name: `${data.name}`,
+                        type: data.type,
+                        dims: dimString,
+                        qty: `${areaString} m²`
+                    });
+                }
+            } else {
+                if (currentSelection && originalMaterial) {
+                    currentSelection.material = originalMaterial;
+                    currentSelection.renderOrder = 0;
+                    currentSelection = null;
+                    originalMaterial = null;
+                }
+                setTooltipData(prev => ({ ...prev, visible: false }));
+            }
+        };
+
+        const handleClick = (event: MouseEvent) => {
+            // Label Mode
+            if (isLabelModeRef.current) {
+                if (currentSelection && currentSelection.userData.api.isDbRoom) {
+                    setLabelMenu({ x: event.clientX, y: event.clientY, item: currentSelection.userData.api });
+                }
+                return;
+            }
+
+            // Normal Click
+            if (onElementClick && currentSelection) {
+                // Re-fetch clean data from fragment if possible, or just use userData
+                onElementClick(currentSelection.userData.api);
+            }
+        };
+
+        container.addEventListener('mousemove', handleMouseMove);
+        container.addEventListener('click', handleClick);
+
+        return () => {
+            container.removeEventListener('mousemove', handleMouseMove);
+            container.removeEventListener('click', handleClick);
+            // reset selection
+            if (currentSelection && originalMaterial) {
+                currentSelection.material = originalMaterial;
+            }
+        };
+    }, [components, id]); // Re-bind if components reset
+
     return (
         <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
             {/* DEBUG OVERLAY */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs">
-                <div className="font-bold border-b border-white/20 mb-1 text-green-400">v2.9 - PERF SAFE MODE</div>
+                <div className="font-bold border-b border-white/20 mb-1 text-cyan-400">v3.0 - STATS + FIX FAR</div>
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
                 <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
