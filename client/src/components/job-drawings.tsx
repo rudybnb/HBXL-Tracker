@@ -305,11 +305,17 @@ function SmartDrawingLoader({ file, jobId, onNavigateToElements }: { file: JobFi
 
     const queryClient = useQueryClient();
 
+    // Pass raw DB data for IFC plan viewer (server-extracted geometry)
+    const dbRooms = rooms?.rooms || rooms || [];
+    const dbElements = Array.isArray(elementsData) ? elementsData : [];
+
     return (
         <DrawingViewer
             file={file}
             jobId={jobId}
             smartElements={smartElements}
+            dbElements={dbElements}
+            dbRooms={dbRooms}
             onNavigateToElements={onNavigateToElements}
         />
     );

@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ContextualTooltip from "./contextual-tooltip";
 import ExtractedElementsPanel from "./extracted-elements-panel";
-import { ProfessionalIFCViewer } from "./professional-ifc-viewer-v2";
+import { IfcPlanViewer } from "./ifc-plan-viewer";
 
 interface JobFile {
     id: string;
@@ -25,6 +25,8 @@ interface DrawingViewerProps {
     file: JobFile;
     jobId: string;
     smartElements?: any[];
+    dbElements?: any[];
+    dbRooms?: any[];
     onNavigateToElements?: () => void;
 }
 
@@ -32,6 +34,8 @@ interface DrawingViewerComponentProps {
     fileUrl: string;
     fileType: string;
     smartElements?: any[];
+    dbElements?: any[];  // Raw extracted elements from server
+    dbRooms?: any[];     // Raw rooms from server (with geometry)
     onElementClick?: (element: any) => void;
     onRoomRename?: (id: string, name: string) => void;
     fileId?: string;
@@ -40,7 +44,7 @@ interface DrawingViewerComponentProps {
 
 // ...
 
-function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onElementClick, onRoomRename, fileId, onNavigateToElements }: DrawingViewerComponentProps) {
+function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbElements = [], dbRooms = [], onElementClick, onRoomRename, fileId, onNavigateToElements }: DrawingViewerComponentProps) {
     // ... (keep consts)
     const safeFileType = fileType || '';
     const safeFileUrl = fileUrl || '';
@@ -51,73 +55,62 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], onEleme
 
     const [selectedElement, setSelectedElement] = useState<string | null>(null);
 
-    // PROFESSIONAL VIEWER SWITCH
-    const rooms = smartElements
-        .filter(el => el.type === 'room' || el.elementType === 'room')
-        .map((r, i) => ({
-            ...r,
-            name: r.name || r.roomName || r.description || `Room ${i + 1}`,
-            area: r.quantity || r.area || "0"
-        }));
+    // IFC: Use lightweight SVG plan viewer with server-extracted data
+    // No WebGL, no Three.js, no browser freezing
+    if (isIFC) {
+        // Build room list from dbRooms (from rooms table, includes geometry polygons)
+        const viewerRooms = (dbRooms || []).map((r: any, i: number) => {
+            let geometry = r.geometry;
+            let bbox = r.bbox;
+            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch { geometry = null; }
+            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch { bbox = null; }
+            return {
+                id: r.id || `room-${i}`,
+                name: r.name || `Room ${i + 1}`,
+                area: r.area || r.totalValue || '0',
+                geometry,
+                bbox
+            };
+        });
 
-    const [show2D, setShow2D] = useState(true);
+        // Build elements from dbElements (from extractedElements table)
+        const viewerElements = (dbElements || []).map((el: any) => {
+            let bbox = el.bbox;
+            let geometry = el.geometry;
+            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch { bbox = null; }
+            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch { geometry = null; }
+            return {
+                ...el,
+                bbox,
+                geometry
+            };
+        });
 
-    // Logic check: Any valid file url can attempt to show 2D mode now
-    // const canShow2D = true;
-
-    if (isIFC) return (
-        <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
-            <div className="p-2 border-b bg-gray-50 flex justify-between items-center px-4 shrink-0 h-12">
-                <div className="flex flex-col">
-                    <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
-                    <span className="text-[10px] text-slate-500">Powered by That Open Engine</span>
+        return (
+            <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
+                <div className="p-2 border-b bg-gradient-to-r from-slate-50 to-slate-100 flex justify-between items-center px-4 shrink-0 h-12">
+                    <div className="flex flex-col">
+                        <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
+                        <span className="text-[10px] text-slate-500">Server-Side IFC Intelligence • SVG Renderer</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                            ✓ Extracted
+                        </span>
+                    </div>
                 </div>
 
-                {/* TOGGLE CONTROLS */}
-                <div className="flex bg-slate-200 rounded p-1 border border-slate-300 gap-1">
-                    <button
-                        onClick={() => {
-                            const e = new CustomEvent('viewer-fit-camera');
-                            window.dispatchEvent(e);
-                        }}
-                        className="px-3 py-1 text-xs font-bold rounded text-slate-600 hover:bg-slate-300 transition-all border-r border-slate-300 mr-1"
-                        title="Zoom Extents"
-                    >
-                        ⛶ FIT
-                    </button>
-                    <button
-                        onClick={() => setShow2D(false)}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-all ${!show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
-                    >
-                        3D VIEW
-                    </button>
-                    <button
-                        onClick={() => setShow2D(true)}
-                        className={`px-3 py-1 text-xs font-bold rounded transition-all ${show2D ? 'bg-black text-white shadow-md' : 'text-slate-500 hover:text-black'}`}
-                    >
-                        2D PLAN
-                    </button>
-                </div>
-            </div>
-
-            {/* TWIN LAYER CONTAINER */}
-            <div className="flex-1 relative overflow-hidden">
-
-                {/* MAIN VIEWER (Always Mounted, Mode Controlled via Prop) */}
-                <div className={`absolute inset-0 z-10`}>
-                    <ProfessionalIFCViewer
-                        fileUrl={safeFileUrl}
-                        id={fileId}
-                        rooms={rooms}
+                <div className="flex-1 relative overflow-hidden">
+                    <IfcPlanViewer
+                        elements={viewerElements}
+                        rooms={viewerRooms}
                         onElementClick={onElementClick}
                         onRoomRename={onRoomRename}
-                        viewMode={show2D ? '2d' : '3d'} // PASS MODE
                     />
                 </div>
-
             </div>
-        </div>
-    );
+        );
+    }
 
 
     // Filter elements by page (if applicable) - for IFC assume page 1
@@ -480,8 +473,9 @@ function BoxIcon(props: any) {
 }
 
 export default function DrawingViewer(props: DrawingViewerProps) {
-    const { file, jobId, smartElements, onNavigateToElements } = props;
+    const { file, jobId, smartElements, dbElements, dbRooms, onNavigateToElements } = props;
     const queryClient = useQueryClient();
+    const { toast } = useToast();
 
     const handleRoomClick = async (el: any) => {
         // Only handle rooms
@@ -562,6 +556,8 @@ export default function DrawingViewer(props: DrawingViewerProps) {
             fileUrl={file.fileUrl}
             fileType={file.fileType}
             smartElements={smartElements}
+            dbElements={dbElements}
+            dbRooms={dbRooms}
             onElementClick={handleRoomClick}
             onRoomRename={handleDirectRename}
             fileId={file.id}
