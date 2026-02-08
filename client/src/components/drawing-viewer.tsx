@@ -53,7 +53,9 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbEleme
     const isIFC = safeFileUrl.toLowerCase().endsWith('.ifc');
     const isSVG = safeFileUrl.toLowerCase().endsWith('.svg');
 
+    // ALL hooks must be called before any conditional returns (React rules of hooks)
     const [selectedElement, setSelectedElement] = useState<string | null>(null);
+    const [_show2D, _setShow2D] = useState(true); // Preserve hook count from previous version
 
     // IFC: Use lightweight SVG plan viewer with server-extracted data
     // No WebGL, no Three.js, no browser freezing
@@ -62,12 +64,12 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbEleme
         const viewerRooms = (dbRooms || []).map((r: any, i: number) => {
             let geometry = r.geometry;
             let bbox = r.bbox;
-            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch { geometry = null; }
-            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch { bbox = null; }
+            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
+            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
             return {
                 id: r.id || `room-${i}`,
                 name: r.name || `Room ${i + 1}`,
-                area: r.area || r.totalValue || '0',
+                area: r.area || String(r.totalValue || '0'),
                 geometry,
                 bbox
             };
@@ -77,8 +79,8 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbEleme
         const viewerElements = (dbElements || []).map((el: any) => {
             let bbox = el.bbox;
             let geometry = el.geometry;
-            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch { bbox = null; }
-            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch { geometry = null; }
+            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
+            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
             return {
                 ...el,
                 bbox,
