@@ -360,8 +360,19 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
     const smallFontSize = fontSize * 0.7;
     const elementSize = Math.max(bounds.w, bounds.h) * 0.012;
 
+    // Element counts per room (for summary) — MUST be before any conditional returns
+    const roomElementCounts = useMemo(() => {
+        const counts: Record<string, Record<string, number>> = {};
+        parsedElements.forEach(el => {
+            const room = el.room;
+            if (!counts[room]) counts[room] = {};
+            counts[room][el.type] = (counts[room][el.type] || 0) + 1;
+        });
+        return counts;
+    }, [parsedElements]);
+
     // ========================================================================
-    // EMPTY STATE
+    // EMPTY STATE (all hooks must be above this point!)
     // ========================================================================
     if (parsedWalls.length === 0 && parsedRooms.length === 0 && parsedElements.length === 0) {
         return (
@@ -376,7 +387,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
     }
 
     // ========================================================================
-    // RENDERING HELPERS
+    // RENDERING HELPERS (non-hooks, safe after early return)
     // ========================================================================
     const wallPath = (polygon: { x: number; y: number }[]) => {
         if (polygon.length < 2) return '';
@@ -384,17 +395,6 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
             `${i === 0 ? 'M' : 'L'} ${mapX(p.x)} ${mapY(p.y)}`
         ).join(' ') + ' Z';
     };
-
-    // Element counts per room (for summary)
-    const roomElementCounts = useMemo(() => {
-        const counts: Record<string, Record<string, number>> = {};
-        parsedElements.forEach(el => {
-            const room = el.room;
-            if (!counts[room]) counts[room] = {};
-            counts[room][el.type] = (counts[room][el.type] || 0) + 1;
-        });
-        return counts;
-    }, [parsedElements]);
 
     // ========================================================================
     // RENDER
