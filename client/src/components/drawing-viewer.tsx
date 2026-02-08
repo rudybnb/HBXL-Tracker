@@ -42,10 +42,68 @@ interface DrawingViewerComponentProps {
     onNavigateToElements?: () => void;
 }
 
-// ...
+// Separate IFC component — has its own hook scope, preventing hook count mismatches
+function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoomRename }: {
+    dbRooms: any[];
+    dbElements: any[];
+    onElementClick?: (element: any) => void;
+    onRoomRename?: (id: string, name: string) => void;
+}) {
+    // Build room list from dbRooms (from rooms table, includes geometry polygons)
+    const viewerRooms = (dbRooms || []).map((r: any, i: number) => {
+        let geometry = r.geometry;
+        let bbox = r.bbox;
+        try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
+        try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
+        return {
+            id: r.id || `room-${i}`,
+            name: r.name || `Room ${i + 1}`,
+            area: r.area || String(r.totalValue || '0'),
+            geometry,
+            bbox
+        };
+    });
+
+    // Build elements from dbElements (from extractedElements table)
+    const viewerElements = (dbElements || []).map((el: any) => {
+        let bbox = el.bbox;
+        let geometry = el.geometry;
+        try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
+        try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
+        return {
+            ...el,
+            bbox,
+            geometry
+        };
+    });
+
+    return (
+        <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
+            <div className="p-2 border-b bg-gradient-to-r from-slate-50 to-slate-100 flex justify-between items-center px-4 shrink-0 h-12">
+                <div className="flex flex-col">
+                    <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
+                    <span className="text-[10px] text-slate-500">Server-Side IFC Intelligence • SVG Renderer</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                        ✓ Extracted
+                    </span>
+                </div>
+            </div>
+
+            <div className="flex-1 relative overflow-hidden">
+                <IfcPlanViewer
+                    elements={viewerElements}
+                    rooms={viewerRooms}
+                    onElementClick={onElementClick}
+                    onRoomRename={onRoomRename}
+                />
+            </div>
+        </div>
+    );
+}
 
 function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbElements = [], dbRooms = [], onElementClick, onRoomRename, fileId, onNavigateToElements }: DrawingViewerComponentProps) {
-    // ... (keep consts)
     const safeFileType = fileType || '';
     const safeFileUrl = fileUrl || '';
     const isImage = safeFileType.startsWith('image/') || safeFileUrl.toLowerCase().endsWith('.svg');
@@ -53,66 +111,8 @@ function DrawingViewerComponent({ fileUrl, fileType, smartElements = [], dbEleme
     const isIFC = safeFileUrl.toLowerCase().endsWith('.ifc');
     const isSVG = safeFileUrl.toLowerCase().endsWith('.svg');
 
-    // ALL hooks must be called before any conditional returns (React rules of hooks)
+    // Hooks must always be called in the same order
     const [selectedElement, setSelectedElement] = useState<string | null>(null);
-    const [_show2D, _setShow2D] = useState(true); // Preserve hook count from previous version
-
-    // IFC: Use lightweight SVG plan viewer with server-extracted data
-    // No WebGL, no Three.js, no browser freezing
-    if (isIFC) {
-        // Build room list from dbRooms (from rooms table, includes geometry polygons)
-        const viewerRooms = (dbRooms || []).map((r: any, i: number) => {
-            let geometry = r.geometry;
-            let bbox = r.bbox;
-            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
-            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
-            return {
-                id: r.id || `room-${i}`,
-                name: r.name || `Room ${i + 1}`,
-                area: r.area || String(r.totalValue || '0'),
-                geometry,
-                bbox
-            };
-        });
-
-        // Build elements from dbElements (from extractedElements table)
-        const viewerElements = (dbElements || []).map((el: any) => {
-            let bbox = el.bbox;
-            let geometry = el.geometry;
-            try { if (typeof bbox === 'string') bbox = JSON.parse(bbox); } catch (e) { bbox = null; }
-            try { if (typeof geometry === 'string') geometry = JSON.parse(geometry); } catch (e) { geometry = null; }
-            return {
-                ...el,
-                bbox,
-                geometry
-            };
-        });
-
-        return (
-            <div className="flex-1 h-full min-h-[500px] flex flex-col bg-white border rounded-lg overflow-hidden shadow-sm">
-                <div className="p-2 border-b bg-gradient-to-r from-slate-50 to-slate-100 flex justify-between items-center px-4 shrink-0 h-12">
-                    <div className="flex flex-col">
-                        <span className="font-semibold text-sm text-slate-700">Architectural Plan View</span>
-                        <span className="text-[10px] text-slate-500">Server-Side IFC Intelligence • SVG Renderer</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
-                            ✓ Extracted
-                        </span>
-                    </div>
-                </div>
-
-                <div className="flex-1 relative overflow-hidden">
-                    <IfcPlanViewer
-                        elements={viewerElements}
-                        rooms={viewerRooms}
-                        onElementClick={onElementClick}
-                        onRoomRename={onRoomRename}
-                    />
-                </div>
-            </div>
-        );
-    }
 
 
     // Filter elements by page (if applicable) - for IFC assume page 1
@@ -553,6 +553,20 @@ export default function DrawingViewer(props: DrawingViewerProps) {
         }
     }
 
+    // IFC files: use the separate IfcViewerWrapper (own hook scope, no hook count issues)
+    const isIFC = file.fileUrl?.toLowerCase().endsWith('.ifc');
+    if (isIFC) {
+        return (
+            <IfcViewerWrapper
+                dbRooms={dbRooms}
+                dbElements={dbElements}
+                onElementClick={handleRoomClick}
+                onRoomRename={handleDirectRename}
+            />
+        );
+    }
+
+    // All other file types: use the standard viewer
     return (
         <DrawingViewerComponent
             fileUrl={file.fileUrl}
