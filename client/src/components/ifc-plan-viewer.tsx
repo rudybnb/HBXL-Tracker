@@ -448,7 +448,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                     className="absolute z-40 bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg pointer-events-none"
                     style={{ left: tooltipData.x + 15, top: tooltipData.y - 10 }}
                 >
-                    <div className="font-semibold">{tooltipData.text}</div>
+                    <div className="font-semibold" style={{ whiteSpace: 'pre-line' }}>{tooltipData.text}</div>
                     <div className="text-slate-300">{tooltipData.type}</div>
                 </div>
             )}
@@ -563,8 +563,26 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                         });
                         const wW = wMaxX - wMinX;
                         const wH = wMaxY - wMinY;
-                        const wallLength = Math.max(wW, wH) / unitScale;
-                        const wallThick = Math.min(wW, wH) / unitScale;
+                        const wallLengthMm = Math.max(wW, wH);
+                        const wallThickMm = Math.min(wW, wH);
+                        const wallLengthM = wallLengthMm / unitScale;
+                        const wallHeightM = 2.4; // Standard UK residential ceiling height
+
+                        // UK wall composition breakdown
+                        let composition = '';
+                        if (wall.isExternal) {
+                            // Standard UK cavity wall
+                            const totalThick = Math.round(wallThickMm / (unitScale / 1000));
+                            const cavityWidth = Math.max(50, totalThick - 202); // 102mm outer + 100mm inner = 202mm leaves
+                            composition = `102mm brick outer leaf · ${cavityWidth}mm cavity (insulated) · 100mm block inner leaf = ${totalThick}mm total`;
+                        } else {
+                            const totalThick = Math.round(wallThickMm / (unitScale / 1000));
+                            if (totalThick <= 100) {
+                                composition = `${totalThick}mm stud partition`;
+                            } else {
+                                composition = `${totalThick}mm blockwork partition`;
+                            }
+                        }
 
                         return (
                             <path
@@ -579,7 +597,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                                     setHoveredElement(wall.id);
                                     setTooltipData({
                                         x: e.clientX, y: e.clientY,
-                                        text: `${wall.name} — ${wallLength.toFixed(2)}m long × ${(wallThick * 1000).toFixed(0)}mm thick`,
+                                        text: `${wall.name} — ${wallLengthM.toFixed(2)}m long × ${wallHeightM}m high\n${composition}`,
                                         type: wall.isExternal ? 'External Wall' : 'Internal Partition'
                                     });
                                 }}
@@ -640,68 +658,76 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                             );
                         }
 
-                        // Doors: architectural door symbol (leaf + arc swing)
+                        // Doors: architectural door symbol (leaf + arc swing toward building center)
                         if (el.type === 'door') {
                             const x1 = mapX(el.bbox[0]);
                             const y1 = mapY(el.bbox[3]); // SVG top-left
-                            const leafLen = doorWidth; // Door leaf length (mm units)
+                            const leafLen = doorWidth * 0.9;
+
+                            // Building center in SVG coords for swing direction
+                            const bldgCx = (bounds.w / 2) + bounds.pad;
+                            const bldgCy = (bounds.h / 2) + bounds.pad;
+                            const widthMm = Math.round(doorWidth / (unitScale / 1000));
+
+                            // Determine which way to swing: toward room interior (building center)
+                            const doorSvgCx = x1 + bboxW / 2;
+                            const doorSvgCy = y1 + bboxH / 2;
+
+                            let doorEl: React.ReactNode = null;
+
+                            if (isHorizontal) {
+                                // Door in a horizontal wall: leaf swings up or down
+                                const swingDown = doorSvgCy < bldgCy; // swing toward center
+                                const hingeSide = doorSvgCx < bldgCx ? 'left' : 'right';
+                                const hx = hingeSide === 'left' ? x1 : x1 + bboxW;
+                                const leafEndX = hingeSide === 'left' ? x1 + leafLen : x1 + bboxW - leafLen;
+                                const arcEndY = swingDown ? doorSvgCy + leafLen : doorSvgCy - leafLen;
+                                const sweep = (hingeSide === 'left' && swingDown) || (hingeSide === 'right' && !swingDown) ? 1 : 0;
+
+                                doorEl = (
+                                    <>
+                                        <line x1={hx} y1={doorSvgCy} x2={leafEndX} y2={doorSvgCy}
+                                            stroke={isHovered ? '#b45309' : '#92400e'} strokeWidth={isHovered ? 3 : 2} />
+                                        <path
+                                            d={`M ${leafEndX} ${doorSvgCy} A ${leafLen} ${leafLen} 0 0 ${sweep} ${hx} ${arcEndY}`}
+                                            fill="none" stroke={isHovered ? '#b45309' : '#d97706'}
+                                            strokeWidth={isHovered ? 2 : 1} strokeDasharray="8,4" />
+                                    </>
+                                );
+                            } else {
+                                // Door in a vertical wall: leaf swings left or right
+                                const swingRight = doorSvgCx < bldgCx; // swing toward center
+                                const hingeSide = doorSvgCy < bldgCy ? 'top' : 'bottom';
+                                const hy = hingeSide === 'top' ? y1 : y1 + bboxH;
+                                const leafEndY = hingeSide === 'top' ? y1 + leafLen : y1 + bboxH - leafLen;
+                                const arcEndX = swingRight ? doorSvgCx + leafLen : doorSvgCx - leafLen;
+                                const sweep = (hingeSide === 'top' && swingRight) || (hingeSide === 'bottom' && !swingRight) ? 0 : 1;
+
+                                doorEl = (
+                                    <>
+                                        <line x1={doorSvgCx} y1={hy} x2={doorSvgCx} y2={leafEndY}
+                                            stroke={isHovered ? '#b45309' : '#92400e'} strokeWidth={isHovered ? 3 : 2} />
+                                        <path
+                                            d={`M ${doorSvgCx} ${leafEndY} A ${leafLen} ${leafLen} 0 0 ${sweep} ${arcEndX} ${hy}`}
+                                            fill="none" stroke={isHovered ? '#b45309' : '#d97706'}
+                                            strokeWidth={isHovered ? 2 : 1} strokeDasharray="8,4" />
+                                    </>
+                                );
+                            }
 
                             return (
                                 <g key={`el-${el.id}`}
                                     className="cursor-pointer"
                                     onMouseEnter={(e) => {
                                         setHoveredElement(el.id);
-                                        const widthM = (doorWidth / unitScale).toFixed(0);
-                                        setTooltipData({ x: e.clientX, y: e.clientY, text: `Door ${widthM}mm`, type: `${el.room}` });
+                                        setTooltipData({ x: e.clientX, y: e.clientY, text: `Door ${widthMm}mm wide`, type: `${el.room}` });
                                     }}
                                     onMouseLeave={() => { setHoveredElement(null); setTooltipData(null); }}
                                 >
-                                    {/* Door opening gap in wall (white rect to "cut" the wall) */}
-                                    <rect
-                                        x={x1 - 2} y={y1 - 2}
-                                        width={bboxW + 4} height={bboxH + 4}
-                                        fill="white" stroke="none"
-                                    />
-
-                                    {isHorizontal ? (
-                                        <>
-                                            {/* Horizontal door: hinge at left, swings down */}
-                                            {/* Door leaf line */}
-                                            <line
-                                                x1={x1} y1={y1 + bboxH / 2}
-                                                x2={x1 + leafLen} y2={y1 + bboxH / 2}
-                                                stroke={isHovered ? '#b45309' : '#92400e'}
-                                                strokeWidth={isHovered ? 3 : 2}
-                                            />
-                                            {/* Quarter arc */}
-                                            <path
-                                                d={`M ${x1 + leafLen} ${y1 + bboxH / 2} A ${leafLen} ${leafLen} 0 0 1 ${x1} ${y1 + bboxH / 2 + leafLen}`}
-                                                fill="none"
-                                                stroke={isHovered ? '#b45309' : '#d97706'}
-                                                strokeWidth={isHovered ? 2 : 1}
-                                                strokeDasharray="8,4"
-                                            />
-                                        </>
-                                    ) : (
-                                        <>
-                                            {/* Vertical door: hinge at top, swings right */}
-                                            {/* Door leaf line */}
-                                            <line
-                                                x1={x1 + bboxW / 2} y1={y1}
-                                                x2={x1 + bboxW / 2} y2={y1 + leafLen}
-                                                stroke={isHovered ? '#b45309' : '#92400e'}
-                                                strokeWidth={isHovered ? 3 : 2}
-                                            />
-                                            {/* Quarter arc */}
-                                            <path
-                                                d={`M ${x1 + bboxW / 2} ${y1 + leafLen} A ${leafLen} ${leafLen} 0 0 0 ${x1 + bboxW / 2 + leafLen} ${y1}`}
-                                                fill="none"
-                                                stroke={isHovered ? '#b45309' : '#d97706'}
-                                                strokeWidth={isHovered ? 2 : 1}
-                                                strokeDasharray="8,4"
-                                            />
-                                        </>
-                                    )}
+                                    {/* Door opening gap in wall */}
+                                    <rect x={x1 - 5} y={y1 - 5} width={bboxW + 10} height={bboxH + 10}
+                                        fill="white" stroke="none" />
+                                    {doorEl}
                                 </g>
                             );
                         }
