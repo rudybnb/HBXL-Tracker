@@ -777,9 +777,8 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                             .map(([t, c]) => `${ELEMENT_ICONS[t] || t} ${c}`)
                             .join('  ');
 
-                        const hasCost = room.totalValue && room.totalValue > 0;
-                        const costStr = hasCost ? `£${room.totalValue!.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
-                        const lines = 1 + 1 + (hasCost ? 1 : 0) + (countStr ? 1 : 0); // name + area + cost? + elements?
+                        // AGENTS_SPEC: Floor plan shows room names + area only. NO pricing.
+                        const lines = 1 + 1 + (countStr ? 1 : 0); // name + area + elements?
                         const labelHeight = fontSize * (lines * 1.1 + 0.3);
 
                         return (
@@ -811,21 +810,10 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                                     fill="#64748b"
                                     style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
                                 >{room.area} m²</text>
-                                {/* Cost */}
-                                {hasCost && (
-                                    <text
-                                        x={cx} y={cy + fontSize * 2.1}
-                                        textAnchor="middle" dominantBaseline="middle"
-                                        fontSize={smallFontSize}
-                                        fontWeight="600"
-                                        fill="#059669"
-                                        style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
-                                    >{costStr}</text>
-                                )}
-                                {/* Element Summary */}
+                                {/* Element Summary (scope reference, not commercial) */}
                                 {countStr && (
                                     <text
-                                        x={cx} y={cy + fontSize * (hasCost ? 3.0 : 2.0)}
+                                        x={cx} y={cy + fontSize * 2.0}
                                         textAnchor="middle" dominantBaseline="middle"
                                         fontSize={smallFontSize * 0.85}
                                         fill="#94a3b8"

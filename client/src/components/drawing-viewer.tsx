@@ -58,9 +58,8 @@ function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoo
         return {
             id: r.id || `room-${i}`,
             name: r.name || `Room ${i + 1}`,
-            area: r.area || String(r.totalValue || '0'),
-            totalValue: r.totalValue || 0, // Cost in £ from room-mapper
-            elements: r.elements || [], // Room elements with cost breakdowns
+            area: r.area || '0',
+            // AGENTS_SPEC: Floor plan shows scope, not cost. No pricing passed to viewer.
             geometry,
             bbox
         };
