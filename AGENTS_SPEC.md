@@ -342,3 +342,115 @@ Room 3 plastering cost = £5,000 × 40% = £2,000
 ```
 
 Each room cost is traceable and auditable.
+
+---
+
+## 🔒 FLOOR PLAN & DIGITAL TENDER FORM RULES (AUTHORITATIVE)
+
+### CORE PRINCIPLE
+
+The tender pack is a **DIGITAL FORM**, not a PDF.
+Contractors complete it online and submit it back through the system.
+**There are no downloadable pricing documents for contractors.**
+
+### FLOOR PLAN (CONTRACTOR VIEW)
+
+**Purpose:** Help contractors understand room layout and scope location only.
+
+The floor plan **MUST**:
+- Show room names
+- Optionally show room area (e.g. Bathroom – 8.2 m²)
+- Be read-only
+- Be used only for orientation and understanding
+
+The floor plan **MUST NOT**:
+- ❌ Show prices (£)
+- ❌ Show rates
+- ❌ Show totals
+- ❌ Show internal budgets
+- ❌ Show QS benchmark values
+
+**Reason:** The floor plan is a scope reference, not a commercial document.
+
+### DIGITAL ROOM WORK PACKAGES (THIS IS THE TENDER)
+
+> 👉 The digital tender form IS the work package. There is no separate document.
+
+### ROOM WORK PACKAGE STRUCTURE (CONTRACTOR VIEW)
+
+Each room is presented as a digital section in the tender form.
+
+Each Room **MUST** show:
+- Room name
+- Two grouped sections:
+  - **First Fix** (informational only)
+  - **Second Fix** (informational only)
+
+### ITEMS INSIDE EACH ROOM
+
+Each item shown **MUST** include:
+- ✅ Item description
+- ✅ Unit (nr / sqm / lm / point)
+- ✅ Quantity (locked)
+- ✅ Input field for contractor labour rate
+
+Each item **MUST NOT** include:
+- ❌ Internal rates
+- ❌ Internal totals
+- ❌ Budget values
+- ❌ QS benchmarks
+
+### CONTRACTOR ACTION (DIGITAL WORKFLOW)
+
+The contractor:
+1. Opens a secure digital tender link
+2. Views: Floor plan (room names only) + Room work packages
+3. Enters their own labour rates per item
+4. Submits the tender digitally
+
+The contractor:
+- Cannot edit quantities
+- Cannot edit item descriptions
+- Cannot see internal pricing
+- Cannot upload alternative pricing formats
+
+### SYSTEM FLOW (LOCKED)
+
+```
+QS / System
+   ↓
+Floor Plan (rooms only, no pricing)
+   ↓
+Digital Room Work Packages
+(First Fix / Second Fix items, no rates)
+   ↓
+Contractor enters labour rates
+   ↓
+Digital tender submission
+   ↓
+QS comparison & award
+```
+
+### INTERNAL PRICING (QS / ADMIN ONLY)
+
+Internal pricing must exist. Used for:
+- Cost planning
+- Benchmark comparison
+- Tender evaluation
+
+**Never visible to contractors. Stored in a separate internal view.**
+
+### DESIGN DECISIONS (FINAL & LOCKED)
+
+| Area | Rule |
+|------|------|
+| Floor plan content | ✅ Room names, ✅ Optional area, ❌ No pricing |
+| Tender format | ❌ No PDFs, ❌ No email attachments, ✅ Digital form only |
+| Contractor delivery | ✅ Secure link to digital tender page |
+| Admin export | ⬜ Optional read-only export for record keeping (admin only) |
+
+### ONE-LINE AGENT RULE (USE THIS VERBATIM)
+
+> The contractor fills in a digital tender form.
+> The floor plan shows scope, not cost.
+> Pricing is entered per item and submitted digitally.
