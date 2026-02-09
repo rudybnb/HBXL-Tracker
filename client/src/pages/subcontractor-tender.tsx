@@ -69,10 +69,20 @@ export default function SubcontractorTenderView() {
             const roomItems: TenderItem[] = [];
             room.elements?.forEach((el: any) => {
                 el.items?.forEach((item: any) => {
+                    const desc = item.description.toLowerCase();
+
+                    // Explicitly skip known materials (legacy data fix)
+                    if (desc.includes('cable') || desc.includes('box') || desc.includes('clip') || desc.includes('screw') || desc.includes('plug') || desc.includes('plate') || desc.includes('socket') || desc.includes('switch')) {
+                        return;
+                    }
+
                     const isLabour = item.itemType === 'LABOUR' ||
-                        item.description.toLowerCase().includes('labour') ||
-                        item.description.toLowerCase().includes('fix') ||
-                        item.description.toLowerCase().includes('install');
+                        desc.includes('labour') ||
+                        desc.includes('electrician') ||
+                        desc.includes('plumber') ||
+                        desc.includes('carpenter') ||
+                        desc.includes('mate') ||
+                        desc.includes('install');
 
                     if (isLabour) {
                         roomItems.push({

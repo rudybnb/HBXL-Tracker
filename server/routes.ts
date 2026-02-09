@@ -840,9 +840,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           unitLower.includes('day') ||
           unitLower.includes('week') ||
           descLower.includes('labour') ||
-          descLower.includes('work') ||
-          descLower.includes('clean') ||
-          descLower.includes('fix')) {
+          descLower.includes('electrician') ||
+          descLower.includes('plumber')) {
 
           // Refine Plant vs Labour
           if (descLower.includes('hire') || descLower.includes('plant') || descLower.includes('digger') || descLower.includes('skip')) {
@@ -854,6 +853,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cat = "PLANT";
         }
 
+        // Safety override for common materials
+        if (descLower.includes('cable') || descLower.includes('clip') || descLower.includes('box') || descLower.includes('screw') || descLower.includes('plug') || descLower.includes('plate') || descLower.includes('socket') || descLower.includes('switch')) {
+          cat = "MATERIAL";
+        }
         if (!phaseTaskData[line.Phase]) phaseTaskData[line.Phase] = [];
 
         const costPence = Math.round(line.Total * 100);
@@ -1036,12 +1039,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (unitCheck.includes('hour') || unitCheck.includes('day') || unitCheck.includes('week')) {
             type = "LABOUR";
-          } else if (textCheck.includes('labour') || textCheck.includes('labor') || textCheck.includes('electrician') || textCheck.includes('plumber') || textCheck.includes('carpenter') || textCheck.includes('bricklayer') || textCheck.includes('gang') || textCheck.includes('mate') || textCheck.includes('installation')) {
+          } else if (textCheck.includes('labour') || textCheck.includes('labor') || textCheck.includes('electrician') || textCheck.includes('plumber') || textCheck.includes('carpenter') || textCheck.includes('bricklayer') || textCheck.includes('gang') || textCheck.includes('mate')) {
             type = "LABOUR";
           } else if (textCheck.includes('plant') || textCheck.includes('hire') || textCheck.includes('excavator') || textCheck.includes('digger') || textCheck.includes('skip')) {
             type = "PLANT";
           } else {
+            // Default to MATERIAL
             type = "MATERIAL";
+
+            // Safety override for common materials that might trigger false positives
+            if (textCheck.includes('cable') || textCheck.includes('clip') || textCheck.includes('box') || textCheck.includes('screw') || textCheck.includes('plug') || textCheck.includes('plate') || textCheck.includes('socket') || textCheck.includes('switch')) {
+              type = "MATERIAL";
+            }
           }
         }
 

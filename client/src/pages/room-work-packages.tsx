@@ -165,11 +165,21 @@ export default function RoomWorkPackages() {
         const filteredElements = room.elements.map(el => {
             const visibleItems = el.items.filter(item => {
                 if (viewMode === 'ALL') return true;
+
+                const desc = item.description.toLowerCase();
+
+                // Explicitly HIDE known materials even if marked as Labour (legacy data fix)
+                if (desc.includes('cable') || desc.includes('box') || desc.includes('clip') || desc.includes('screw') || desc.includes('plug') || desc.includes('plate') || desc.includes('socket') || desc.includes('switch')) {
+                    return false;
+                }
+
                 // Labour Only Filter
                 return item.itemType === 'LABOUR' ||
-                    item.description.toLowerCase().includes('labour') ||
-                    item.description.toLowerCase().includes('fix') ||
-                    item.description.toLowerCase().includes('install');
+                    desc.includes('labour') ||
+                    desc.includes('electrician') ||
+                    desc.includes('plumber') ||
+                    desc.includes('carpenter') ||
+                    desc.includes('mate');
             });
 
             return {
@@ -293,8 +303,8 @@ export default function RoomWorkPackages() {
                         <button
                             onClick={() => setViewMode('ALL')}
                             className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'ALL'
-                                    ? 'bg-slate-600 text-white shadow-sm'
-                                    : 'text-slate-400 hover:text-slate-200'
+                                ? 'bg-slate-600 text-white shadow-sm'
+                                : 'text-slate-400 hover:text-slate-200'
                                 }`}
                         >
                             All Items
@@ -302,8 +312,8 @@ export default function RoomWorkPackages() {
                         <button
                             onClick={() => setViewMode('LABOUR')}
                             className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'LABOUR'
-                                    ? 'bg-amber-600 text-white shadow-sm'
-                                    : 'text-slate-400 hover:text-slate-200'
+                                ? 'bg-amber-600 text-white shadow-sm'
+                                : 'text-slate-400 hover:text-slate-200'
                                 }`}
                         >
                             Labour Only
