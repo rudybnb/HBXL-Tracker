@@ -206,6 +206,50 @@ export default function RoomWorkPackages() {
         sum + room.elements.reduce((eSum, el) =>
             eSum + el.items.filter(item => item.status === 'complete').length, 0), 0);
 
+    // Calculate Strict Totals (ignoring backend misclassification)
+    let strictLabourTotal = 0;
+    let strictMaterialTotal = 0;
+    let strictPlantTotal = 0;
+
+    data.rooms.forEach(room => {
+        room.elements.forEach(el => {
+            el.items.forEach(item => {
+                const desc = item.description.toLowerCase();
+                const total = item.total || 0;
+
+                // 1. Force Material for known items
+                if (desc.includes('cable') || desc.includes('box') || desc.includes('clip') || desc.includes('screw') || desc.includes('plug') || desc.includes('plate') || desc.includes('socket') || desc.includes('switch')) {
+                    strictMaterialTotal += total;
+                    return;
+                }
+
+                // 2. Classify Labour
+                if (item.itemType === 'LABOUR' || desc.includes('labour') || desc.includes('electrician') || desc.includes('plumber') || desc.includes('carpenter') || desc.includes('mate')) {
+                    strictLabourTotal += total;
+                    return;
+                }
+
+                // 3. Classify Plant
+                if (item.itemType === 'PLANT' || desc.includes('plant') || desc.includes('hire') || desc.includes('digger') || desc.includes('skip')) {
+                    strictPlantTotal += total;
+                    return;
+                }
+
+                // Default remaining to Material
+                strictMaterialTotal += total;
+            });
+        });
+    });
+
+    const displayLabourTotal = viewMode === 'LABOUR' ? grandTotal : strictLabourTotal;
+    const displayMaterialTotal = strictMaterialTotal;
+    const displayPlantTotal = strictPlantTotal;
+    // When in ALL mode, grandTotal might differ if our strict rules differ from backend. But we should trust strict rules for breakdown.
+    // However, grandTotal (processedRooms) is used for the Total Card in 'ALL' mode currently.
+    // processedRooms in 'ALL' mode basically sums everything.
+    // So displayGrandTotal should be strictLabour + strictMaterial + strictPlant.
+    const displayGrandTotal = strictLabourTotal + strictMaterialTotal + strictPlantTotal;
+
     return (
         <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
             {/* Header */}
@@ -327,69 +371,69 @@ export default function RoomWorkPackages() {
                 </div>
 
                 {/* Summary Cards - Dynamic based on View */}
-                {data.costBreakdown && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                        {/* Labour - Always Show */}
-                        <div className={`border rounded-xl p-4 ${viewMode === 'LABOUR' ? 'bg-amber-900/20 border-amber-500/50 ring-1 ring-amber-500/30' : 'bg-gradient-to-br from-blue-900/50 to-blue-800/30 border-blue-700/50'}`}>
+                {/* Summary Cards - Dynamic based on View */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    {/* Labour - Always Show */}
+                    <div className={`border rounded-xl p-4 ${viewMode === 'LABOUR' ? 'bg-amber-900/20 border-amber-500/50 ring-1 ring-amber-500/30' : 'bg-gradient-to-br from-blue-900/50 to-blue-800/30 border-blue-700/50'}`}>
+                        <div className="flex items-center justify-between mb-2">
+                            <span className={`text-sm font-medium ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`}>Labour Total</span>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${viewMode === 'LABOUR' ? 'bg-amber-500/20' : 'bg-blue-600/30'}`}>
+                                <User className={`h-4 w-4 ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`} />
+                            </div>
+                        </div>
+                        <p className="text-xl font-bold text-white">
+                            £{displayLabourTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                        </p>
+                        {viewMode === 'LABOUR' ? (
+                            <p className="text-xs text-amber-500/70 mt-1">Total Labour Scope</p>
+                        ) : (
+                            <p className="text-xs text-blue-300/70 mt-1">Strict Labour Only</p>
+                        )}
+                    </div>
+
+                    {/* Material - Hide if Labour Only */}
+                    {viewMode === 'ALL' && (
+                        <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
                             <div className="flex items-center justify-between mb-2">
-                                <span className={`text-sm font-medium ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`}>Labour Total</span>
-                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${viewMode === 'LABOUR' ? 'bg-amber-500/20' : 'bg-blue-600/30'}`}>
-                                    <User className={`h-4 w-4 ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`} />
+                                <span className="text-emerald-400 text-sm font-medium">Material</span>
+                                <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
+                                    <Home className="h-4 w-4 text-emerald-400" />
                                 </div>
                             </div>
                             <p className="text-xl font-bold text-white">
-                                {viewMode === 'LABOUR'
-                                    ? `£${grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`
-                                    : `£${data.costBreakdown.labour.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`
-                                }
+                                £{displayMaterialTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                             </p>
-                            {viewMode === 'LABOUR' && <p className="text-xs text-amber-500/70 mt-1">Total Labour Scope</p>}
                         </div>
+                    )}
 
-                        {/* Material - Hide if Labour Only */}
-                        {viewMode === 'ALL' && (
-                            <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-emerald-400 text-sm font-medium">Material</span>
-                                    <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
-                                        <Home className="h-4 w-4 text-emerald-400" />
-                                    </div>
-                                </div>
-                                <p className="text-xl font-bold text-white">
-                                    £{data.costBreakdown.material.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Plant - Hide if Labour Only */}
-                        {viewMode === 'ALL' && (
-                            <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-orange-400 text-sm font-medium">Plant</span>
-                                    <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
-                                        <Clock className="h-4 w-4 text-orange-400" />
-                                    </div>
-                                </div>
-                                <p className="text-xl font-bold text-white">
-                                    £{data.costBreakdown.plant.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Total - Context Aware */}
-                        <div className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border border-amber-700/50 rounded-xl p-4">
+                    {/* Plant - Hide if Labour Only */}
+                    {viewMode === 'ALL' && (
+                        <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-amber-400 text-sm font-medium">{viewMode === 'LABOUR' ? 'Visible Total' : 'Total Project Cost'}</span>
-                                <div className="w-8 h-8 bg-amber-600/30 rounded-lg flex items-center justify-center">
-                                    <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                                <span className="text-orange-400 text-sm font-medium">Plant</span>
+                                <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
+                                    <Clock className="h-4 w-4 text-orange-400" />
                                 </div>
                             </div>
-                            <p className="text-xl font-bold text-amber-400">
-                                £{grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                            <p className="text-xl font-bold text-white">
+                                £{displayPlantTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
+                    )}
+
+                    {/* Total - Context Aware */}
+                    <div className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border border-amber-700/50 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-amber-400 text-sm font-medium">{viewMode === 'LABOUR' ? 'Visible Total' : 'Total Project Cost'}</span>
+                            <div className="w-8 h-8 bg-amber-600/30 rounded-lg flex items-center justify-center">
+                                <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                            </div>
+                        </div>
+                        <p className="text-xl font-bold text-amber-400">
+                            £{displayGrandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                        </p>
                     </div>
-                )}
+                </div>
             </div>
 
             {/* Room Cards */}
