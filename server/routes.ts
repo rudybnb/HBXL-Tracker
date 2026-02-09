@@ -966,20 +966,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Let's rely on the "Material Used" format we just tested if it matches
         // Col 0: Phase
         // Col 2: Desc
-        const col0 = clean(cols[0]);
+        const col0 = clean(cols[0]); // Phase
         const col2 = clean(cols[2]); // Description in Material Used
         const col7 = clean(cols[7]); // Description in Freddy Jackson
 
-        if (col0 && col2 && !col7) {
+        // "Materials Used" Format Detection (HBXL Report)
+        // Col 0: Phase, Col 2: Desc, Col 8: Unit, Col 9: Qty (Ex Waste), Col 12: Cost (Ex Waste)
+        if (col0 && col2 && !col7 && (cols.length >= 13)) {
           // Likely Material Used Format
           phase = col0;
           desc = col2;
           unit = clean(cols[8]);
-          qty = parseFloat(clean(cols[11] || "0").replace(/[^0-9.-]/g, ""));
+          // Col 9 is Qty (Excluding Wastage). Col 11 is Qty (Inc Wastage). Use Net for Tender.
+          qty = parseFloat(clean(cols[9] || "0").replace(/[^0-9.-]/g, ""));
           price = parseFloat(clean(cols[5] || "0").replace(/[^0-9.-]/g, ""));
-          total = parseFloat(clean(cols[14] || "0").replace(/[^0-9.-]/g, ""));
+          // Col 12 is Cost (Excluding Wastage). Col 14 is Cost (Inc Wastage).
+          total = parseFloat(clean(cols[12] || "0").replace(/[^0-9.-]/g, ""));
         } else {
-          // Likely Freddy Jackson Format
+          // Likely Freddy Jackson / Standard Format
           phase = clean(cols[2]);
           desc = col7;
           unit = clean(cols[8]);
