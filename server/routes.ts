@@ -830,10 +830,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       for (const line of hbxLines) {
         // Categorize
-        // Simple keyword logic for now, or default to Material
-        let cat = "MATERIAL";
-        if (line.Unit.toLowerCase().includes("hour") || line.Description.toLowerCase().includes("labour")) cat = "LABOUR";
-        else if (line.Description.toLowerCase().includes("plant") || line.Description.toLowerCase().includes("hire")) cat = "PLANT";
+        let cat = "MATERIAL"; // Default to MATERIAL
+
+        const unitLower = line.Unit.toLowerCase();
+        const descLower = line.Description.toLowerCase();
+
+        // Type Detection (Labour vs Material)
+        if (unitLower.includes('hour') ||
+          unitLower.includes('day') ||
+          unitLower.includes('week') ||
+          descLower.includes('labour') ||
+          descLower.includes('work') ||
+          descLower.includes('clean') ||
+          descLower.includes('fix')) {
+
+          // Refine Plant vs Labour
+          if (descLower.includes('hire') || descLower.includes('plant') || descLower.includes('digger') || descLower.includes('skip')) {
+            cat = 'PLANT';
+          } else {
+            cat = 'LABOUR';
+          }
+        } else if (descLower.includes("plant") || descLower.includes("hire")) {
+          cat = "PLANT";
+        }
 
         if (!phaseTaskData[line.Phase]) phaseTaskData[line.Phase] = [];
 

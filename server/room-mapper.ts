@@ -793,7 +793,9 @@ export class RoomMapper {
                         rate: parseFloat(item.rate) / 100, // Convert from pence
                         total: parseFloat(item.total) / 100, // Convert from pence
                         status: item.status,
-                        assignedContractorName: item.assignedContractorName || undefined
+                        status: item.status,
+                        assignedContractorName: item.assignedContractorName || undefined,
+                        itemType: item.itemType || "MATERIAL"
                     }))
                 });
             }
@@ -849,6 +851,7 @@ export interface PayableItemData {
     total: number;
     status: string;
     assignedContractorName?: string;
+    itemType?: string;
 }
 
 export const roomMapper = new RoomMapper();

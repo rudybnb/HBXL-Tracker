@@ -21,7 +21,9 @@ interface TenderItem {
     elementId: string;
     elementName: string;
     roomId: string;
+    roomId: string;
     roomName: string;
+    itemType?: string;
 }
 
 // Items grouped by fix stage within a room
@@ -83,7 +85,10 @@ export default function SubcontractorTenderView() {
                             elementId: el.id,
                             elementName: el.name,
                             roomId: room.id,
-                            roomName: room.name
+                            elementName: el.name,
+                            roomId: room.id,
+                            roomName: room.name,
+                            itemType: item.itemType
                         });
                     }
                 });
@@ -242,12 +247,77 @@ export default function SubcontractorTenderView() {
                     </div>
                 </div>
 
-                {/* 2. ROOMS WITH FIRST FIX / SECOND FIX SECTIONS */}
-                <div className="mb-8">
-                    <h2 className="text-lg font-semibold text-white mb-4">Scope of Works ({labourRooms.length} Rooms, {totalLabourItems} Items)</h2>
+                {/* 2. GLOBAL ELEMENTS SECTION */}
+                {(() => {
+                    const globalRoom = labourRooms.find(r => r.name === 'Building / Global');
+                    if (!globalRoom) return null;
 
-                    <Accordion type="multiple" defaultValue={[labourRooms[0]?.id]} className="space-y-4">
-                        {labourRooms.map((room, index) => (
+                    return (
+                        <div className="mb-10">
+                            <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-2">3. Global Elements (Foundations → Roof)</h2>
+                            <div className="space-y-6">
+                                {globalRoom.fixStages.map((stage, idx) => (
+                                    <div key={stage.name} className="bg-slate-900 border border-slate-700/50 rounded-lg overflow-hidden">
+                                        <div className="px-6 py-4 bg-slate-800/50 border-b border-slate-700/50 flex justify-between items-center">
+                                            <div>
+                                                <div className="text-xs font-bold text-amber-500 uppercase tracking-widest mb-1">Section 3.{idx + 1}</div>
+                                                <h3 className="text-lg font-semibold text-white">{stage.name}</h3>
+                                            </div>
+                                            <div className="text-xs text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-700">
+                                                Labour Only · {stage.items.length} Items
+                                            </div>
+                                        </div>
+
+                                        <div className="p-0">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="text-xs text-slate-500 uppercase bg-slate-950/30 border-b border-slate-800/50">
+                                                    <tr>
+                                                        <th className="py-3 pl-6 pr-4 font-medium w-1/2">Item Description</th>
+                                                        <th className="py-3 px-2 font-medium w-24">Unit</th>
+                                                        <th className="py-3 px-2 font-medium w-24 text-center">Qty</th>
+                                                        <th className="py-3 px-2 font-medium w-32">Rate (£)</th>
+                                                        <th className="py-3 pr-6 font-medium w-32 text-right">Total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-800/30">
+                                                    {stage.items.map((item) => (
+                                                        <tr key={item.id} className="group hover:bg-slate-800/20 transition-colors">
+                                                            <td className="py-3 pl-6 pr-4 text-slate-300 font-medium">
+                                                                {item.description}
+                                                            </td>
+                                                            <td className="py-3 px-2 text-slate-500 text-xs uppercase">{item.unit}</td>
+                                                            <td className="py-3 px-2 text-center text-slate-300 bg-slate-950/20">{parseFloat(item.quantity).toFixed(2)}</td>
+                                                            <td className="py-3 px-2">
+                                                                <Input
+                                                                    type="number"
+                                                                    placeholder="0.00"
+                                                                    className="bg-slate-950 border-slate-700 text-white h-9 text-sm focus:border-amber-500 text-right font-mono"
+                                                                    value={rates[item.id] || ""}
+                                                                    onChange={(e) => handleRateChange(item.id, e.target.value)}
+                                                                />
+                                                            </td>
+                                                            <td className="py-3 pr-6 text-right text-amber-500 font-mono">
+                                                                £{((parseFloat(rates[item.id] || "0") * parseFloat(item.quantity)) || 0).toFixed(2)}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                {/* 3. ROOM WORK PACKAGES */}
+                <div className="mb-12">
+                    <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-2">4. Rooms (Room Work Packages)</h2>
+                    <p className="text-slate-400 mb-6 text-sm">Enter labour rates for items within each room.</p>
+
+                    <Accordion type="multiple" defaultValue={labourRooms.filter(r => r.name !== 'Building / Global').map(r => r.id)} className="space-y-4">
+                        {labourRooms.filter(r => r.name !== 'Building / Global').map((room, index) => (
                             <AccordionItem key={room.id} value={room.id} className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden px-0">
                                 <AccordionTrigger className="px-6 py-4 hover:bg-slate-800/50 transition-colors">
                                     <div className="flex items-center gap-4 text-left">
@@ -277,10 +347,10 @@ export default function SubcontractorTenderView() {
                                             <div key={stage.name} className="rounded-lg border border-slate-800/60 overflow-hidden">
                                                 {/* Fix Stage Header */}
                                                 <div className={`flex items-center gap-3 px-4 py-3 ${stage.isFirstFix
-                                                        ? 'bg-blue-950/30 border-b border-blue-900/30'
-                                                        : stage.isSecondFix
-                                                            ? 'bg-emerald-950/20 border-b border-emerald-900/30'
-                                                            : 'bg-slate-900/50 border-b border-slate-800/50'
+                                                    ? 'bg-blue-950/30 border-b border-blue-900/30'
+                                                    : stage.isSecondFix
+                                                        ? 'bg-emerald-950/20 border-b border-emerald-900/30'
+                                                        : 'bg-slate-900/50 border-b border-slate-800/50'
                                                     }`}>
                                                     {stage.isFirstFix ? (
                                                         <Wrench className="h-4 w-4 text-blue-400" />
@@ -291,10 +361,10 @@ export default function SubcontractorTenderView() {
                                                     )}
                                                     <div className="flex-1">
                                                         <span className={`text-sm font-semibold ${stage.isFirstFix
-                                                                ? 'text-blue-300'
-                                                                : stage.isSecondFix
-                                                                    ? 'text-emerald-300'
-                                                                    : 'text-slate-300'
+                                                            ? 'text-blue-300'
+                                                            : stage.isSecondFix
+                                                                ? 'text-emerald-300'
+                                                                : 'text-slate-300'
                                                             }`}>
                                                             {stage.name}
                                                         </span>
