@@ -56,7 +56,9 @@ interface PayableItemData {
     rate: number;
     total: number;
     status: "not_started" | "in_progress" | "complete";
+    status: "not_started" | "in_progress" | "complete";
     assignedContractorName?: string;
+    itemType?: string;
 }
 
 interface ElementData {
@@ -100,6 +102,7 @@ export default function RoomWorkPackages() {
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [newRoomName, setNewRoomName] = useState("");
     const [newRoomFloor, setNewRoomFloor] = useState("");
+    const [viewMode, setViewMode] = useState<'ALL' | 'LABOUR'>('ALL');
 
     const { data, isLoading, error } = useQuery<RoomWorkPackagesResponse>({
         queryKey: [`/api/jobs/${id}/rooms`],
@@ -158,10 +161,33 @@ export default function RoomWorkPackages() {
     // Calculate totals
     // Calculate totals dynamically from items (ignoring potentially stale room totals)
     const processedRooms = data.rooms.map(room => {
-        const calculatedTotal = room.elements.reduce((rSum, el) =>
-            rSum + el.items.reduce((iSum, item) => iSum + (item.total || 0), 0), 0);
-        return { ...room, totalValue: calculatedTotal };
-    });
+        // Filter elements and items based on viewMode
+        const filteredElements = room.elements.map(el => {
+            const visibleItems = el.items.filter(item => {
+                if (viewMode === 'ALL') return true;
+                // Labour Only Filter
+                return item.itemType === 'LABOUR' ||
+                    item.description.toLowerCase().includes('labour') ||
+                    item.description.toLowerCase().includes('fix') ||
+                    item.description.toLowerCase().includes('install');
+            });
+
+            return {
+                ...el,
+                items: visibleItems,
+                // Recalculate element subtotal from visible items
+                subtotal: visibleItems.reduce((sum, item) => sum + (item.total || 0), 0)
+            };
+        }).filter(el => el.items.length > 0); // Only keep elements with visible items
+
+        const calculatedTotal = filteredElements.reduce((rSum, el) => rSum + el.subtotal, 0);
+
+        return {
+            ...room,
+            elements: filteredElements,
+            totalValue: calculatedTotal
+        };
+    }).filter(room => room.elements.length > 0 || room.name === 'Building / Global'); // Keep rooms with content (or Global)
 
     const grandTotal = processedRooms.reduce((sum, room) => sum + room.totalValue, 0);
     const totalItems = processedRooms.reduce((sum, room) =>
@@ -260,64 +286,101 @@ export default function RoomWorkPackages() {
                 </div>
             </div>
 
-            {/* Cost Breakdown Summary Cards */}
-            {data.costBreakdown && data.costBreakdown.total > 0 && (
-                <div className="max-w-7xl mx-auto pt-6 px-4 sm:px-6 lg:px-8">
+            {/* Filter Toggle & Cost Breakdown Summary */}
+            <div className="max-w-7xl mx-auto pt-6 px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between items-center mb-6">
+                    <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
+                        <button
+                            onClick={() => setViewMode('ALL')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'ALL'
+                                    ? 'bg-slate-600 text-white shadow-sm'
+                                    : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                        >
+                            All Items
+                        </button>
+                        <button
+                            onClick={() => setViewMode('LABOUR')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'LABOUR'
+                                    ? 'bg-amber-600 text-white shadow-sm'
+                                    : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                        >
+                            Labour Only
+                        </button>
+                    </div>
+                    {viewMode === 'LABOUR' && (
+                        <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/50 px-3 py-1">
+                            Viewing Labour Tender Scope
+                        </Badge>
+                    )}
+                </div>
+
+                {/* Summary Cards - Dynamic based on View */}
+                {data.costBreakdown && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                        {/* Labour */}
-                        <div className="bg-gradient-to-br from-blue-900/50 to-blue-800/30 border border-blue-700/50 rounded-xl p-4">
+                        {/* Labour - Always Show */}
+                        <div className={`border rounded-xl p-4 ${viewMode === 'LABOUR' ? 'bg-amber-900/20 border-amber-500/50 ring-1 ring-amber-500/30' : 'bg-gradient-to-br from-blue-900/50 to-blue-800/30 border-blue-700/50'}`}>
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-blue-400 text-sm font-medium">Labour</span>
-                                <div className="w-8 h-8 bg-blue-600/30 rounded-lg flex items-center justify-center">
-                                    <User className="h-4 w-4 text-blue-400" />
+                                <span className={`text-sm font-medium ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`}>Labour Total</span>
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${viewMode === 'LABOUR' ? 'bg-amber-500/20' : 'bg-blue-600/30'}`}>
+                                    <User className={`h-4 w-4 ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`} />
                                 </div>
                             </div>
                             <p className="text-xl font-bold text-white">
-                                £{data.costBreakdown.labour.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                                {viewMode === 'LABOUR'
+                                    ? `£${grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`
+                                    : `£${data.costBreakdown.labour.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`
+                                }
                             </p>
+                            {viewMode === 'LABOUR' && <p className="text-xs text-amber-500/70 mt-1">Total Labour Scope</p>}
                         </div>
 
-                        {/* Material */}
-                        <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-emerald-400 text-sm font-medium">Material</span>
-                                <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
-                                    <Home className="h-4 w-4 text-emerald-400" />
+                        {/* Material - Hide if Labour Only */}
+                        {viewMode === 'ALL' && (
+                            <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-emerald-400 text-sm font-medium">Material</span>
+                                    <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
+                                        <Home className="h-4 w-4 text-emerald-400" />
+                                    </div>
                                 </div>
+                                <p className="text-xl font-bold text-white">
+                                    £{data.costBreakdown.material.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                                </p>
                             </div>
-                            <p className="text-xl font-bold text-white">
-                                £{data.costBreakdown.material.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </p>
-                        </div>
+                        )}
 
-                        {/* Plant */}
-                        <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-orange-400 text-sm font-medium">Plant</span>
-                                <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
-                                    <Clock className="h-4 w-4 text-orange-400" />
+                        {/* Plant - Hide if Labour Only */}
+                        {viewMode === 'ALL' && (
+                            <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-orange-400 text-sm font-medium">Plant</span>
+                                    <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
+                                        <Clock className="h-4 w-4 text-orange-400" />
+                                    </div>
                                 </div>
+                                <p className="text-xl font-bold text-white">
+                                    £{data.costBreakdown.plant.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                                </p>
                             </div>
-                            <p className="text-xl font-bold text-white">
-                                £{data.costBreakdown.plant.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </p>
-                        </div>
+                        )}
 
-                        {/* Total */}
+                        {/* Total - Context Aware */}
                         <div className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border border-amber-700/50 rounded-xl p-4">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-amber-400 text-sm font-medium">Total Cost</span>
+                                <span className="text-amber-400 text-sm font-medium">{viewMode === 'LABOUR' ? 'Visible Total' : 'Total Project Cost'}</span>
                                 <div className="w-8 h-8 bg-amber-600/30 rounded-lg flex items-center justify-center">
                                     <CheckCircle2 className="h-4 w-4 text-amber-400" />
                                 </div>
                             </div>
                             <p className="text-xl font-bold text-amber-400">
-                                £{data.costBreakdown.total.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                                £{grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* Room Cards */}
             <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
