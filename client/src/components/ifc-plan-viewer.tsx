@@ -37,6 +37,8 @@ interface Room {
     id: string;
     name: string;
     area?: string;
+    totalValue?: number; // Cost in £ (from room-mapper allocation)
+    elements?: any[]; // Room elements with cost breakdowns
     geometry?: any;
     bbox?: number[] | string;
 }
@@ -255,6 +257,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                     id: room.id,
                     name: room.name,
                     area: room.area || (area > 1000 ? (area / 1e6).toFixed(1) : area.toFixed(1)),
+                    totalValue: room.totalValue || 0,
                     polygon: geom,
                     center
                 });
@@ -268,6 +271,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                     id: room.id,
                     name: room.name,
                     area: room.area || (w * h > 1000 ? (w * h / 1e6).toFixed(1) : (w * h).toFixed(1)),
+                    totalValue: room.totalValue || 0,
                     polygon: [
                         { x: bbox[0], y: bbox[1] },
                         { x: bbox[2], y: bbox[1] },
@@ -772,14 +776,19 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                             .map(([t, c]) => `${ELEMENT_ICONS[t] || t} ${c}`)
                             .join('  ');
 
+                        const hasCost = room.totalValue && room.totalValue > 0;
+                        const costStr = hasCost ? `£${room.totalValue!.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+                        const lines = 1 + 1 + (hasCost ? 1 : 0) + (countStr ? 1 : 0); // name + area + cost? + elements?
+                        const labelHeight = fontSize * (lines * 1.1 + 0.3);
+
                         return (
                             <g key={`label-${room.id}`} style={{ pointerEvents: 'none' }}>
                                 {/* Background for readability */}
                                 <rect
-                                    x={cx - fontSize * 3}
+                                    x={cx - fontSize * 3.5}
                                     y={cy - fontSize * 1}
-                                    width={fontSize * 6}
-                                    height={fontSize * (countStr ? 3.2 : 2.4)}
+                                    width={fontSize * 7}
+                                    height={labelHeight}
                                     rx={fontSize * 0.3}
                                     fill="white"
                                     fillOpacity={0.85}
@@ -801,10 +810,21 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                                     fill="#64748b"
                                     style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
                                 >{room.area} m²</text>
+                                {/* Cost */}
+                                {hasCost && (
+                                    <text
+                                        x={cx} y={cy + fontSize * 2.1}
+                                        textAnchor="middle" dominantBaseline="middle"
+                                        fontSize={smallFontSize}
+                                        fontWeight="600"
+                                        fill="#059669"
+                                        style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
+                                    >{costStr}</text>
+                                )}
                                 {/* Element Summary */}
                                 {countStr && (
                                     <text
-                                        x={cx} y={cy + fontSize * 2}
+                                        x={cx} y={cy + fontSize * (hasCost ? 3.0 : 2.0)}
                                         textAnchor="middle" dominantBaseline="middle"
                                         fontSize={smallFontSize * 0.85}
                                         fill="#94a3b8"

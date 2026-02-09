@@ -59,6 +59,8 @@ function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoo
             id: r.id || `room-${i}`,
             name: r.name || `Room ${i + 1}`,
             area: r.area || String(r.totalValue || '0'),
+            totalValue: r.totalValue || 0, // Cost in £ from room-mapper
+            elements: r.elements || [], // Room elements with cost breakdowns
             geometry,
             bbox
         };
