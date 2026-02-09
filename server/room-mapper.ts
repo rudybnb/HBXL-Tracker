@@ -17,7 +17,7 @@
  */
 
 import { db } from './db';
-import { rooms, roomElements, payableItems, InsertRoom, InsertRoomElement, InsertPayableItem } from '@shared/schema';
+import { rooms, roomElements, payableItems, extractedElements, InsertRoom, InsertRoomElement, InsertPayableItem } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 
 // =============================================================================
@@ -244,9 +244,17 @@ export class RoomMapper {
     /**
      * Allocates HBXL phase data to EXISTING rooms from drawing extraction
      * 
-     * CRITICAL: This does NOT create rooms - rooms come from drawing extraction only!
-     * EXCEPTION: "Building / Global" is auto-created for building-wide items (AGENTS.md Section 17)
+     * AGENTS_SPEC.md COMPLIANT - Measurement-Based Cost Allocation
      * 
+     * HOW IT WORKS:
+     * 1. GLOBAL phases (Foundations, Roof, etc.) → Building / Global
+     * 2. ROOM-SPECIFIC items (bathroom fixtures, kitchen units) → Direct to matched room
+     * 3. DISTRIBUTABLE phases (Plastering, Decoration, Electrical, etc.) → Split proportionally
+     *    by IFC-extracted measurement: floor area, wall perimeter, or element count
+     * 
+     * This is the QS-approved approach: Drawing tells us WHAT + HOW MUCH,
+     * CSV tells us the RATE, Total = Room's share of quantity × rate
+     *
      * @param jobId - The job ID 
      * @param phaseTaskData - The parsed HBXL phase data from CSV import
      */
@@ -256,9 +264,6 @@ export class RoomMapper {
     ): Promise<void> {
         // Get existing rooms from drawing extraction
         let existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
-
-        // Proceed to auto-creation even if no rooms exist
-        // if (existingRooms.length === 0) { ... } REMOVED
 
         console.log(`🏠 Allocating HBXL costs to ${existingRooms.length} rooms from drawing`);
 
@@ -278,96 +283,269 @@ export class RoomMapper {
             existingRooms = [...existingRooms, globalRoom];
         }
 
-        // AUTO-CREATE ROOMS FROM CSV DATA (Fallback for incomplete drawings)
-        // If CSV explicitly mentions "Lounge Sockets", we should create "Lounge" if missing
-        console.log('🔍 Scanning CSV data for missing rooms...');
-        const potentialRoomNames = new Set<string>();
+        // =====================================================================
+        // STEP 1: Compute IFC-extracted quantities per room
+        // These measurements drive the proportional allocation
+        // =====================================================================
+        const physicalRooms = existingRooms.filter(r => r.name !== 'Building / Global');
 
-        for (const items of Object.values(phaseTaskData)) {
-            for (const item of items) {
-                const desc = (item.description || '').toLowerCase();
-                // Check against known room types
-                for (const [roomType, keywords] of Object.entries(ROOM_KEYWORDS)) {
-                    // Check strict room name presence or strong keywords
-                    if (desc.includes(roomType.toLowerCase())) {
-                        potentialRoomNames.add(roomType);
+        // Get extracted elements for this job to count per-room items
+        const allElements = await db.select().from(extractedElements).where(eq(extractedElements.jobId, jobId));
+
+        interface RoomMeasurements {
+            id: string;
+            name: string;
+            floorArea: number;      // m² from IFC/room polygon
+            wallPerimeter: number;  // lm from room polygon perimeter
+            wallArea: number;       // m² (perimeter × 2.4m ceiling height)
+            ceilingArea: number;    // m² (same as floor area)
+            doorCount: number;      // nr of doors in/adjacent to room
+            windowCount: number;    // nr of windows in/adjacent to room
+            socketCount: number;    // nr of sockets
+            lightCount: number;     // nr of lights
+            switchCount: number;    // nr of switches
+            sanitaryCount: number;  // nr of sanitary items
+            radiatorCount: number;  // nr of radiators/plumbing items
+        }
+
+        const roomMeasurements: RoomMeasurements[] = physicalRooms.map(room => {
+            const area = parseFloat(room.area || '0');
+
+            // Calculate perimeter from geometry if available
+            let perimeter = 0;
+            if (room.geometry) {
+                try {
+                    const geom = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
+                    if (Array.isArray(geom) && geom.length >= 3) {
+                        for (let i = 0; i < geom.length; i++) {
+                            const j = (i + 1) % geom.length;
+                            const dx = geom[j].x - geom[i].x;
+                            const dy = geom[j].y - geom[i].y;
+                            perimeter += Math.sqrt(dx * dx + dy * dy);
+                        }
+                        // Normalize: if coords in mm, convert to m
+                        if (perimeter > 200) perimeter /= 1000;
                     }
-                    // Also check specific keywords that strongly imply a room (e.g. "Bedroom 1")
-                }
+                } catch (e) { /* ignore */ }
             }
-        }
+            // Fallback: estimate perimeter from area (assume square room)
+            if (perimeter === 0 && area > 0) {
+                perimeter = 4 * Math.sqrt(area);
+            }
 
-        for (const roomName of potentialRoomNames) {
-            const exists = existingRooms.some(r => r.name.toLowerCase().includes(roomName.toLowerCase()));
-            if (!exists) {
-                console.log(`✨ Auto-creating missing room from CSV context: "${roomName}"`);
-                const [newRoom] = await db.insert(rooms).values({
-                    jobId,
-                    name: roomName,
-                    floor: 'Ground', // Default, user can change
-                    status: 'not_started',
-                    totalValue: '0',
-                    notes: 'Auto-created from CSV context'
-                }).returning();
-                existingRooms = [...existingRooms, newRoom];
-            }
-        }
+            // Count elements assigned to this room
+            const roomElements = allElements.filter(el => el.roomName === room.name);
+            const doorCount = roomElements.filter(el => el.elementType === 'door').length;
+            const windowCount = roomElements.filter(el => el.elementType === 'window').length;
+            const socketCount = roomElements.filter(el => el.elementType === 'socket' || el.elementType === 'outlet').length;
+            const lightCount = roomElements.filter(el => el.elementType === 'light').length;
+            const switchCount = roomElements.filter(el => el.elementType === 'switch').length;
+            const sanitaryCount = roomElements.filter(el => el.elementType === 'sanitary').length;
+            const radiatorCount = roomElements.filter(el => el.elementType === 'plumbing' || el.elementType === 'radiator').length;
+
+            const CEILING_HEIGHT = 2.4; // Standard UK residential
+
+            return {
+                id: room.id,
+                name: room.name,
+                floorArea: area,
+                wallPerimeter: perimeter,
+                wallArea: perimeter * CEILING_HEIGHT,
+                ceilingArea: area,
+                doorCount,
+                windowCount,
+                socketCount,
+                lightCount,
+                switchCount,
+                sanitaryCount,
+                radiatorCount
+            };
+        });
+
+        // Compute totals for proportional split
+        const totals = {
+            floorArea: roomMeasurements.reduce((s, r) => s + r.floorArea, 0),
+            wallArea: roomMeasurements.reduce((s, r) => s + r.wallArea, 0),
+            wallPerimeter: roomMeasurements.reduce((s, r) => s + r.wallPerimeter, 0),
+            ceilingArea: roomMeasurements.reduce((s, r) => s + r.ceilingArea, 0),
+            doorCount: roomMeasurements.reduce((s, r) => s + r.doorCount, 0),
+            windowCount: roomMeasurements.reduce((s, r) => s + r.windowCount, 0),
+            socketCount: roomMeasurements.reduce((s, r) => s + r.socketCount, 0),
+            lightCount: roomMeasurements.reduce((s, r) => s + r.lightCount, 0),
+            switchCount: roomMeasurements.reduce((s, r) => s + r.switchCount, 0),
+            sanitaryCount: roomMeasurements.reduce((s, r) => s + r.sanitaryCount, 0),
+            radiatorCount: roomMeasurements.reduce((s, r) => s + r.radiatorCount, 0),
+        };
+
+        console.log('📐 Room Measurements for allocation:');
+        roomMeasurements.forEach(r => {
+            console.log(`   ${r.name}: ${r.floorArea.toFixed(1)}m² floor, ${r.wallPerimeter.toFixed(1)}lm perimeter, ${r.doorCount}D ${r.windowCount}W ${r.socketCount}S ${r.lightCount}L`);
+        });
+
+        // =====================================================================
+        // STEP 2: Define which measurement drives each phase's allocation
+        // =====================================================================
+        type MeasurementBasis = 'floorArea' | 'wallArea' | 'wallPerimeter' | 'ceilingArea' |
+            'doorCount' | 'windowCount' | 'socketCount' | 'lightCount' |
+            'switchCount' | 'sanitaryCount' | 'radiatorCount';
+
+        const PHASE_MEASUREMENT_BASIS: Record<string, MeasurementBasis> = {
+            // Area-based phases
+            'Plastering': 'wallArea',
+            'Internal Decoration': 'wallArea',
+            'Internal Fitting Out': 'floorArea',
+
+            // Perimeter-based phases (skirting, dado, picture rails)
+            'Joinery 2nd Fix': 'wallPerimeter',
+
+            // Element count phases
+            'Structural Openings': 'doorCount',     // Lintels over openings
+            'Joinery 1st Fix': 'doorCount',          // Door linings, frames
+            'Electrical 1st Fix': 'socketCount',     // Cabling to sockets
+            'Electrical 2nd Fix': 'socketCount',     // Socket/switch faceplates
+            'Plumbing 1st Fix': 'sanitaryCount',     // Pipe runs
+            'Plumbing 2nd Fix': 'sanitaryCount',     // Sanitary fittings
+        };
 
         // Track allocation stats
         let globalItems = 0;
-        let roomItems = 0;
-        let aiMatchedItems = 0;
+        let roomSpecificItems = 0;
+        let distributedItems = 0;
 
-        // Get room names for AI matching (excluding Building/Global)
-        const roomNamesForAI = existingRooms
-            .filter(r => r.name !== 'Building / Global')
-            .map(r => r.name);
-
-        // Group items by which room they belong to
+        // =====================================================================
+        // STEP 3: Allocate each phase
+        // =====================================================================
         for (const [phase, items] of Object.entries(phaseTaskData)) {
             const elementName = ELEMENT_MAPPINGS[phase] || phase;
             const isGlobalPhase = GLOBAL_PHASES.some(gp =>
                 phase.toLowerCase().includes(gp.toLowerCase())
             );
 
-            for (const item of items) {
-                // Priority 1: Check if item matches a specific room via keywords
-                const targetRoom = this.matchItemToRoom(item, existingRooms.filter(r => r.name !== 'Building / Global'));
+            // RULE 1: Global phases → Building / Global
+            if (isGlobalPhase) {
+                for (const item of items) {
+                    await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
+                    globalItems++;
+                }
+                console.log(`📦 ${phase}: ${items.length} items → Building / Global`);
+                continue;
+            }
 
+            // RULE 2: Check each item for room-specific keywords first
+            const measurementBasis = PHASE_MEASUREMENT_BASIS[phase];
+            const unmatched: any[] = [];
+
+            for (const item of items) {
+                // Check for global element keywords
+                if (this.isGlobalElement(item, phase)) {
+                    await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
+                    globalItems++;
+                    continue;
+                }
+
+                // Check for room-specific keywords (e.g., "bathroom basin", "kitchen sink")
+                const targetRoom = this.matchItemToRoom(item, physicalRooms);
                 if (targetRoom) {
                     await this.addItemToRoom(targetRoom.id, elementName, item, phase);
-                    roomItems++;
+                    roomSpecificItems++;
+                    continue;
                 }
-                // Priority 2: Check if it's a global/building-wide item
-                else if (isGlobalPhase || this.isGlobalElement(item, phase)) {
-                    await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
-                    globalItems++;
-                }
-                // Priority 3: Use AI to intelligently match ambiguous items
-                else {
-                    // Try AI matching for items that don't have clear keywords
-                    const aiResult = await aiMatchItemToRoom(
-                        { description: item.description || '', phase },
-                        roomNamesForAI
-                    );
 
-                    if (aiResult.room && aiResult.confidence > 0.6) {
-                        // Find the room by name
-                        const matchedRoom = existingRooms.find(
-                            r => r.name.toLowerCase() === aiResult.room!.toLowerCase()
-                        );
-                        if (matchedRoom) {
-                            await this.addItemToRoom(matchedRoom.id, elementName, item, phase);
-                            roomItems++;
-                            aiMatchedItems++;
-                            console.log(`🤖 AI assigned "${item.description}" to ${aiResult.room} (${(aiResult.confidence * 100).toFixed(0)}%)`);
-                            continue;
+                // No keyword match — collect for proportional distribution
+                unmatched.push(item);
+            }
+
+            // RULE 3: Distribute unmatched items proportionally by measurement
+            if (unmatched.length > 0 && measurementBasis && physicalRooms.length > 0) {
+                // Get the total measurement for the relevant basis
+                const totalMeasurement = totals[measurementBasis];
+
+                if (totalMeasurement > 0) {
+                    console.log(`📐 ${phase}: Distributing ${unmatched.length} items by ${measurementBasis} (total: ${totalMeasurement.toFixed(1)})`);
+
+                    for (const item of unmatched) {
+                        const itemTotal = item.total || item.totalCost || 0;
+                        const itemRate = item.rate || item.unitPrice || 0;
+
+                        // Split this item across rooms proportionally
+                        for (const rm of roomMeasurements) {
+                            const roomMeasure = rm[measurementBasis];
+                            if (roomMeasure <= 0) continue;
+
+                            const proportion = roomMeasure / totalMeasurement;
+                            const roomTotal = itemTotal * proportion;
+                            const roomQty = (item.quantity || 1) * proportion;
+
+                            // Create a proportional copy of the item
+                            const proportionalItem = {
+                                ...item,
+                                quantity: parseFloat(roomQty.toFixed(2)),
+                                total: parseFloat(roomTotal.toFixed(2)),
+                                rate: itemRate, // Rate stays the same
+                                description: `${item.description || 'Item'} (${(proportion * 100).toFixed(0)}% of total)`
+                            };
+
+                            await this.addItemToRoom(rm.id, elementName, proportionalItem, phase);
                         }
+                        distributedItems++;
                     }
+                } else {
+                    // No measurement data — fall back to equal split
+                    console.log(`⚖️ ${phase}: Equal split for ${unmatched.length} items (no ${measurementBasis} data)`);
+                    const proportion = 1 / physicalRooms.length;
 
-                    // AI said Global or couldn't determine - route to Building/Global
-                    await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
-                    globalItems++;
+                    for (const item of unmatched) {
+                        const itemTotal = item.total || item.totalCost || 0;
+
+                        for (const room of physicalRooms) {
+                            const roomTotal = itemTotal * proportion;
+                            const roomQty = (item.quantity || 1) * proportion;
+
+                            const proportionalItem = {
+                                ...item,
+                                quantity: parseFloat(roomQty.toFixed(2)),
+                                total: parseFloat(roomTotal.toFixed(2)),
+                                description: `${item.description || 'Item'} (equal split ${physicalRooms.length} rooms)`
+                            };
+
+                            await this.addItemToRoom(room.id, elementName, proportionalItem, phase);
+                        }
+                        distributedItems++;
+                    }
+                }
+            } else if (unmatched.length > 0) {
+                // No measurement basis defined for this phase — distribute by floor area (safest default)
+                const totalArea = totals.floorArea;
+
+                if (totalArea > 0 && physicalRooms.length > 0) {
+                    console.log(`📐 ${phase}: Distributing ${unmatched.length} items by floor area (default)`);
+
+                    for (const item of unmatched) {
+                        const itemTotal = item.total || item.totalCost || 0;
+
+                        for (const rm of roomMeasurements) {
+                            if (rm.floorArea <= 0) continue;
+                            const proportion = rm.floorArea / totalArea;
+                            const roomTotal = itemTotal * proportion;
+                            const roomQty = (item.quantity || 1) * proportion;
+
+                            const proportionalItem = {
+                                ...item,
+                                quantity: parseFloat(roomQty.toFixed(2)),
+                                total: parseFloat(roomTotal.toFixed(2)),
+                                description: `${item.description || 'Item'} (${(proportion * 100).toFixed(0)}% by area)`
+                            };
+
+                            await this.addItemToRoom(rm.id, elementName, proportionalItem, phase);
+                        }
+                        distributedItems++;
+                    }
+                } else {
+                    // Absolute fallback: no rooms or no areas — everything to global
+                    for (const item of unmatched) {
+                        await this.addItemToRoom(globalRoom!.id, elementName, item, phase);
+                        globalItems++;
+                    }
                 }
             }
         }
@@ -375,9 +553,10 @@ export class RoomMapper {
         // Recalculate room totals including global room
         await this.recalculateRoomTotals(existingRooms);
 
-        console.log(`✅ HBXL costs allocated:`);
+        console.log(`✅ AGENTS_SPEC.md Measurement-Based Allocation Complete:`);
         console.log(`   📦 Building / Global: ${globalItems} items`);
-        console.log(`   🏠 Specific Rooms: ${roomItems} items (${aiMatchedItems} via AI)`);
+        console.log(`   🏷️ Room-Specific (keyword): ${roomSpecificItems} items`);
+        console.log(`   📐 Distributed by measurement: ${distributedItems} items across ${physicalRooms.length} rooms`);
     }
 
     /**
