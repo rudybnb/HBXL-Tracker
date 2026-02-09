@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
-import { Loader2, ArrowRight, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, CheckCircle2, Wrench, Settings2, Info } from "lucide-react";
 import { useState } from "react";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -16,7 +16,7 @@ interface TenderItem {
     description: string;
     quantity: string;
     unit: string;
-    rate: string; // The rate suggested (hidden or explicitly 0 for blind tender)
+    rate: string;
     total: string;
     elementId: string;
     elementName: string;
@@ -24,18 +24,27 @@ interface TenderItem {
     roomName: string;
 }
 
+// Items grouped by fix stage within a room
+interface FixStageGroup {
+    name: string;           // e.g. "Electrical – First Fix"
+    isFirstFix: boolean;
+    isSecondFix: boolean;
+    items: TenderItem[];
+}
+
 interface TenderRoom {
     id: string;
     name: string;
     items: TenderItem[];
+    fixStages: FixStageGroup[];
 }
 
 export default function SubcontractorTenderView() {
-    const { id } = useParams<{ id: string }>(); // This is the Job ID
+    const { id } = useParams<{ id: string }>();
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const [submitted, setSubmitted] = useState(false);
-    const [rates, setRates] = useState<Record<string, string>>({}); // itemId -> rate (pence)
+    const [rates, setRates] = useState<Record<string, string>>({});
 
     // Fetch Job Details
     const { data: job, isLoading: jobLoading } = useQuery({
@@ -47,23 +56,17 @@ export default function SubcontractorTenderView() {
         queryKey: [`/api/jobs/${id}/rooms`],
     });
 
-    // Filter for LABOUR Items Only
+    // Filter for LABOUR Items Only, group by room then by fix stage
     const labourRooms: TenderRoom[] = [];
     let totalLabourItems = 0;
 
-    if (roomsData?.data) { // Assuming response structure
-        // Need to flatten the room -> element -> item hierarchy
-        // Actually the API returns RoomData[] structure.
-        // Let's assume standard room structure:
+    if (roomsData?.data) {
         const rooms = roomsData.data || (Array.isArray(roomsData) ? roomsData : []);
 
         rooms.forEach((room: any) => {
             const roomItems: TenderItem[] = [];
             room.elements?.forEach((el: any) => {
                 el.items?.forEach((item: any) => {
-                    // FILTER: Only show items tagged as labour or implied
-                    // Since we just added itemType, we use that if available.
-                    // Fallback to text matching if itemType missing in older data
                     const isLabour = item.itemType === 'LABOUR' ||
                         item.description.toLowerCase().includes('labour') ||
                         item.description.toLowerCase().includes('fix') ||
@@ -87,10 +90,35 @@ export default function SubcontractorTenderView() {
             });
 
             if (roomItems.length > 0) {
+                // Group items by element name (which includes fix stage label)
+                const groupMap = new Map<string, TenderItem[]>();
+                roomItems.forEach(item => {
+                    const key = item.elementName;
+                    if (!groupMap.has(key)) groupMap.set(key, []);
+                    groupMap.get(key)!.push(item);
+                });
+
+                // Sort: First Fix groups first, then Second Fix, then others
+                const fixStages: FixStageGroup[] = Array.from(groupMap.entries())
+                    .map(([name, items]) => ({
+                        name,
+                        isFirstFix: name.toLowerCase().includes('first fix') || name.toLowerCase().includes('1st fix'),
+                        isSecondFix: name.toLowerCase().includes('second fix') || name.toLowerCase().includes('2nd fix'),
+                        items
+                    }))
+                    .sort((a, b) => {
+                        if (a.isFirstFix && !b.isFirstFix) return -1;
+                        if (!a.isFirstFix && b.isFirstFix) return 1;
+                        if (a.isSecondFix && !b.isSecondFix) return 1;
+                        if (!a.isSecondFix && b.isSecondFix) return -1;
+                        return a.name.localeCompare(b.name);
+                    });
+
                 labourRooms.push({
                     id: room.id,
                     name: room.name,
-                    items: roomItems
+                    items: roomItems,
+                    fixStages
                 });
                 totalLabourItems += roomItems.length;
             }
@@ -141,7 +169,7 @@ export default function SubcontractorTenderView() {
     const handleSubmit = () => {
         submitTenderMutation.mutate({
             jobId: id,
-            contractorName: "Guest Contractor", // TODO: Auth or Input
+            contractorName: "Guest Contractor",
             rates: rates,
             totalPrice: calculateTotal()
         });
@@ -156,7 +184,7 @@ export default function SubcontractorTenderView() {
             <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center p-4">
                 <CheckCircle2 className="h-20 w-20 text-green-500 mb-6" />
                 <h1 className="text-3xl font-bold mb-2">Tender Submitted</h1>
-                <p className="text-slate-400 mb-8 max-w-md text-center">Your submisson for {job?.title} has been received. Reference: TND-{id?.substring(0, 6).toUpperCase()}</p>
+                <p className="text-slate-400 mb-8 max-w-md text-center">Your submission for {job?.title} has been received. Reference: TND-{id?.substring(0, 6).toUpperCase()}</p>
                 <Link href="/">
                     <Button variant="outline" className="border-slate-700 hover:bg-slate-800 text-white">Return to Home</Button>
                 </Link>
@@ -186,7 +214,7 @@ export default function SubcontractorTenderView() {
             <div className="max-w-4xl mx-auto px-4 py-8">
 
                 {/* INSTRUCTION PANEL */}
-                <div className="bg-blue-950/30 border border-blue-900/50 rounded-lg p-6 mb-8">
+                <div className="bg-blue-950/30 border border-blue-900/50 rounded-lg p-6 mb-6">
                     <h3 className="text-blue-400 font-semibold mb-3 flex items-center">
                         <span className="bg-blue-500/10 p-1 rounded mr-2">ℹ</span>
                         IMPORTANT INSTRUCTIONS
@@ -199,9 +227,24 @@ export default function SubcontractorTenderView() {
                     </ul>
                 </div>
 
-                {/* 2. TENDER OVERVIEW */}
+                {/* GOLDEN RULE BANNER */}
+                <div className="bg-amber-950/20 border border-amber-800/40 rounded-lg px-5 py-4 mb-8">
+                    <div className="flex items-start gap-3">
+                        <Info className="h-5 w-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <div className="text-sm font-semibold text-amber-400 mb-1">First Fix &amp; Second Fix — Clarification</div>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                                First fix and second fix are shown for <strong className="text-slate-300">clarity only</strong>.
+                                All pricing and payments are made per <strong className="text-slate-300">individual labour item</strong> within each room.
+                                No phase-based or percentage payments apply.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 2. ROOMS WITH FIRST FIX / SECOND FIX SECTIONS */}
                 <div className="mb-8">
-                    <h2 className="text-lg font-semibold text-white mb-4">Scope of Works ({labourRooms.length} Rooms)</h2>
+                    <h2 className="text-lg font-semibold text-white mb-4">Scope of Works ({labourRooms.length} Rooms, {totalLabourItems} Items)</h2>
 
                     <Accordion type="multiple" defaultValue={[labourRooms[0]?.id]} className="space-y-4">
                         {labourRooms.map((room, index) => (
@@ -213,7 +256,9 @@ export default function SubcontractorTenderView() {
                                         </div>
                                         <div>
                                             <div className="font-semibold text-white">{room.name}</div>
-                                            <div className="text-xs text-slate-500">{room.items.length} items to price</div>
+                                            <div className="text-xs text-slate-500">
+                                                {room.fixStages.length} section{room.fixStages.length !== 1 ? 's' : ''} · {room.items.length} items to price
+                                            </div>
                                         </div>
                                     </div>
                                     {/* Subtotal for room */}
@@ -226,45 +271,81 @@ export default function SubcontractorTenderView() {
                                 </AccordionTrigger>
 
                                 <AccordionContent className="border-t border-slate-800 bg-slate-950/30">
-                                    <div className="px-4 py-2 md:px-6">
-                                        {/* 4. PAYABLE ITEM TABLE */}
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-sm text-left">
-                                                <thead className="text-xs text-slate-500 uppercase bg-slate-900/0 border-b border-slate-800">
-                                                    <tr>
-                                                        <th className="py-3 pr-4 font-medium min-w-[200px]">Item Description</th>
-                                                        <th className="py-3 px-2 font-medium w-20">Unit</th>
-                                                        <th className="py-3 px-2 font-medium w-20 text-center">Qty</th>
-                                                        <th className="py-3 px-2 font-medium w-32">Rate (£)</th>
-                                                        <th className="py-3 pl-4 font-medium w-32 text-right">Total</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-800/50">
-                                                    {room.items.map((item) => (
-                                                        <tr key={item.id} className="group hover:bg-slate-900/40">
-                                                            <td className="py-3 pr-4 text-slate-300">
-                                                                <div className="font-medium">{item.description}</div>
-                                                                <div className="text-xs text-slate-600">{item.elementName}</div>
-                                                            </td>
-                                                            <td className="py-3 px-2 text-slate-500 text-xs uppercase">{item.unit}</td>
-                                                            <td className="py-3 px-2 text-center text-slate-300 font-medium bg-slate-900/30 rounded">{item.quantity}</td>
-                                                            <td className="py-3 px-2">
-                                                                <Input
-                                                                    type="number"
-                                                                    placeholder="0.00"
-                                                                    className="bg-slate-900 border-slate-700 text-white h-9 focus:border-amber-500 transition-colors text-right"
-                                                                    value={rates[item.id] || ""}
-                                                                    onChange={(e) => handleRateChange(item.id, e.target.value)}
-                                                                />
-                                                            </td>
-                                                            <td className="py-3 pl-4 text-right text-amber-500 font-mono">
-                                                                £{((parseFloat(rates[item.id] || "0") * parseFloat(item.quantity)) || 0).toFixed(2)}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                    <div className="px-4 py-4 md:px-6 space-y-4">
+                                        {/* Render each fix stage group */}
+                                        {room.fixStages.map((stage) => (
+                                            <div key={stage.name} className="rounded-lg border border-slate-800/60 overflow-hidden">
+                                                {/* Fix Stage Header */}
+                                                <div className={`flex items-center gap-3 px-4 py-3 ${stage.isFirstFix
+                                                        ? 'bg-blue-950/30 border-b border-blue-900/30'
+                                                        : stage.isSecondFix
+                                                            ? 'bg-emerald-950/20 border-b border-emerald-900/30'
+                                                            : 'bg-slate-900/50 border-b border-slate-800/50'
+                                                    }`}>
+                                                    {stage.isFirstFix ? (
+                                                        <Wrench className="h-4 w-4 text-blue-400" />
+                                                    ) : stage.isSecondFix ? (
+                                                        <Settings2 className="h-4 w-4 text-emerald-400" />
+                                                    ) : (
+                                                        <Wrench className="h-4 w-4 text-slate-500" />
+                                                    )}
+                                                    <div className="flex-1">
+                                                        <span className={`text-sm font-semibold ${stage.isFirstFix
+                                                                ? 'text-blue-300'
+                                                                : stage.isSecondFix
+                                                                    ? 'text-emerald-300'
+                                                                    : 'text-slate-300'
+                                                            }`}>
+                                                            {stage.name}
+                                                        </span>
+                                                        <span className="text-xs text-slate-600 ml-2">
+                                                            ({stage.items.length} item{stage.items.length !== 1 ? 's' : ''})
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[10px] uppercase tracking-wider text-slate-600 font-medium">
+                                                        Informational
+                                                    </span>
+                                                </div>
+
+                                                {/* Items Table */}
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm text-left">
+                                                        <thead className="text-xs text-slate-500 uppercase border-b border-slate-800/50">
+                                                            <tr>
+                                                                <th className="py-2.5 pl-4 pr-4 font-medium min-w-[200px]">Item Description</th>
+                                                                <th className="py-2.5 px-2 font-medium w-16">Unit</th>
+                                                                <th className="py-2.5 px-2 font-medium w-16 text-center">Qty</th>
+                                                                <th className="py-2.5 px-2 font-medium w-28">Rate (£)</th>
+                                                                <th className="py-2.5 pr-4 font-medium w-28 text-right">Total</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-800/30">
+                                                            {stage.items.map((item) => (
+                                                                <tr key={item.id} className="group hover:bg-slate-900/40 transition-colors">
+                                                                    <td className="py-3 pl-4 pr-4 text-slate-300">
+                                                                        <div className="font-medium text-sm">{item.description}</div>
+                                                                    </td>
+                                                                    <td className="py-3 px-2 text-slate-500 text-xs uppercase">{item.unit}</td>
+                                                                    <td className="py-3 px-2 text-center text-slate-300 font-medium bg-slate-900/30 rounded">{item.quantity}</td>
+                                                                    <td className="py-3 px-2">
+                                                                        <Input
+                                                                            type="number"
+                                                                            placeholder="0.00"
+                                                                            className="bg-slate-900 border-slate-700 text-white h-8 text-sm focus:border-amber-500 transition-colors text-right"
+                                                                            value={rates[item.id] || ""}
+                                                                            onChange={(e) => handleRateChange(item.id, e.target.value)}
+                                                                        />
+                                                                    </td>
+                                                                    <td className="py-3 pr-4 text-right text-amber-500 font-mono text-sm">
+                                                                        £{((parseFloat(rates[item.id] || "0") * parseFloat(item.quantity)) || 0).toFixed(2)}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </AccordionContent>
                             </AccordionItem>
@@ -281,7 +362,7 @@ export default function SubcontractorTenderView() {
                                 <label htmlFor="confirm" className="text-sm font-medium text-white cursor-pointer select-none">
                                     I confirm this price is for LABOUR ONLY
                                 </label>
-                                <p className="text-xs text-slate-500">I accept payment is per item complete and quantities are fixed.</p>
+                                <p className="text-xs text-slate-500">I accept payment is per item complete. First fix / second fix are informational labels only.</p>
                             </div>
                         </div>
 
