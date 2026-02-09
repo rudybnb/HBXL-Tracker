@@ -1361,6 +1361,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
 
               console.log(`✅ IFC Processing Complete. ${result.rooms.length} rooms, ${result.elements.length} elements.`);
+
+              // AUTO-ALLOCATE COSTS: If CSV data already exists, trigger measurement-based allocation
+              try {
+                const jobData = await storage.getJob(req.params.id);
+                if (jobData?.phaseTaskData) {
+                  console.log(`💰 CSV data found — auto-allocating costs to ${result.rooms.length} rooms...`);
+                  const { roomMapper } = await import('./room-mapper');
+                  // Clear any previous allocation first
+                  await roomMapper.clearRoomCosts(req.params.id);
+                  const phaseData = JSON.parse(jobData.phaseTaskData);
+                  const phases = phaseData.phases || phaseData;
+                  await roomMapper.allocateCostsToRooms(req.params.id, phases);
+                  console.log(`✅ Auto-allocation complete — room costs now visible on floor plan`);
+                } else {
+                  console.log(`ℹ️ No CSV data yet — upload HBXL CSV to see room costs on the floor plan`);
+                }
+              } catch (allocErr: any) {
+                console.error(`⚠️ Auto-allocation failed (non-blocking):`, allocErr.message);
+              }
             } else {
               console.error("❌ IFC Extraction Failed:", result.error);
               await db.update(jobFiles)
