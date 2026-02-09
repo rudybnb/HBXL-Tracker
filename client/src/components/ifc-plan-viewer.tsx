@@ -553,6 +553,19 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                         const d = wallPath(wall.polygon);
                         const isHovered = hoveredElement === wall.id;
 
+                        // Compute wall length and thickness from polygon bounds
+                        let wMinX = Infinity, wMinY = Infinity, wMaxX = -Infinity, wMaxY = -Infinity;
+                        wall.polygon.forEach(p => {
+                            if (p.x < wMinX) wMinX = p.x;
+                            if (p.y < wMinY) wMinY = p.y;
+                            if (p.x > wMaxX) wMaxX = p.x;
+                            if (p.y > wMaxY) wMaxY = p.y;
+                        });
+                        const wW = wMaxX - wMinX;
+                        const wH = wMaxY - wMinY;
+                        const wallLength = Math.max(wW, wH) / unitScale;
+                        const wallThick = Math.min(wW, wH) / unitScale;
+
                         return (
                             <path
                                 key={`wall-${wall.id}`}
@@ -566,7 +579,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                                     setHoveredElement(wall.id);
                                     setTooltipData({
                                         x: e.clientX, y: e.clientY,
-                                        text: wall.name,
+                                        text: `${wall.name} — ${wallLength.toFixed(2)}m long × ${(wallThick * 1000).toFixed(0)}mm thick`,
                                         type: wall.isExternal ? 'External Wall' : 'Internal Partition'
                                     });
                                 }}
@@ -584,58 +597,111 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                         const isHovered = hoveredElement === el.id;
                         const size = elementSize;
 
-                        // Windows: draw as blue rectangle
+                        // Compute bbox dimensions in SVG units
+                        const bboxW = Math.abs(el.bbox[2] - el.bbox[0]);
+                        const bboxH = Math.abs(el.bbox[3] - el.bbox[1]);
+                        const doorWidth = Math.max(bboxW, bboxH); // Door leaf length
+                        const wallThick = Math.min(bboxW, bboxH); // Wall thickness at opening
+                        const isHorizontal = bboxW > bboxH; // Door orientation
+
+                        // Windows: architectural double-line symbol
                         if (el.type === 'window') {
-                            const w = Math.abs(el.bbox[2] - el.bbox[0]);
-                            const h = Math.abs(el.bbox[3] - el.bbox[1]);
+                            const x1 = mapX(el.bbox[0]);
+                            const y1 = mapY(el.bbox[3]); // flip Y
                             return (
                                 <g key={`el-${el.id}`}>
+                                    {/* Window glass - filled rect */}
                                     <rect
-                                        x={mapX(el.bbox[0])}
-                                        y={mapY(el.bbox[3])}
-                                        width={w}
-                                        height={h}
+                                        x={x1}
+                                        y={y1}
+                                        width={bboxW}
+                                        height={bboxH}
                                         fill="#bae6fd"
                                         fillOpacity={isHovered ? 0.8 : 0.5}
                                         stroke="#0284c7"
-                                        strokeWidth={isHovered ? 2 : 1}
+                                        strokeWidth={isHovered ? 3 : 1.5}
                                         className="cursor-pointer"
                                         onMouseEnter={(e) => {
                                             setHoveredElement(el.id);
-                                            setTooltipData({ x: e.clientX, y: e.clientY, text: el.name, type: `Window • ${el.room}` });
+                                            const widthM = (doorWidth / unitScale).toFixed(2);
+                                            setTooltipData({ x: e.clientX, y: e.clientY, text: `Window ${widthM}m`, type: `${el.room}` });
                                         }}
                                         onMouseLeave={() => { setHoveredElement(null); setTooltipData(null); }}
                                     />
+                                    {/* Center glass line */}
+                                    {isHorizontal ? (
+                                        <line x1={x1} y1={y1 + bboxH / 2} x2={x1 + bboxW} y2={y1 + bboxH / 2}
+                                            stroke="#0284c7" strokeWidth={0.5} />
+                                    ) : (
+                                        <line x1={x1 + bboxW / 2} y1={y1} x2={x1 + bboxW / 2} y2={y1 + bboxH}
+                                            stroke="#0284c7" strokeWidth={0.5} />
+                                    )}
                                 </g>
                             );
                         }
 
-                        // Doors: draw as arc
+                        // Doors: architectural door symbol (leaf + arc swing)
                         if (el.type === 'door') {
-                            const w = Math.abs(el.bbox[2] - el.bbox[0]);
-                            const h = Math.abs(el.bbox[3] - el.bbox[1]);
-                            const r = Math.max(w, h) * 0.8;
+                            const x1 = mapX(el.bbox[0]);
+                            const y1 = mapY(el.bbox[3]); // SVG top-left
+                            const leafLen = doorWidth; // Door leaf length (mm units)
+
                             return (
-                                <g key={`el-${el.id}`}>
-                                    <path
-                                        d={`M ${cx - r / 2} ${cy} A ${r / 2} ${r / 2} 0 0 1 ${cx + r / 2} ${cy}`}
-                                        fill="none"
-                                        stroke={isHovered ? '#b45309' : '#d97706'}
-                                        strokeWidth={isHovered ? 2.5 : 1.5}
-                                        strokeDasharray="3,2"
-                                        className="cursor-pointer"
-                                        onMouseEnter={(e) => {
-                                            setHoveredElement(el.id);
-                                            setTooltipData({ x: e.clientX, y: e.clientY, text: el.name, type: `Door • ${el.room}` });
-                                        }}
-                                        onMouseLeave={() => { setHoveredElement(null); setTooltipData(null); }}
+                                <g key={`el-${el.id}`}
+                                    className="cursor-pointer"
+                                    onMouseEnter={(e) => {
+                                        setHoveredElement(el.id);
+                                        const widthM = (doorWidth / unitScale).toFixed(0);
+                                        setTooltipData({ x: e.clientX, y: e.clientY, text: `Door ${widthM}mm`, type: `${el.room}` });
+                                    }}
+                                    onMouseLeave={() => { setHoveredElement(null); setTooltipData(null); }}
+                                >
+                                    {/* Door opening gap in wall (white rect to "cut" the wall) */}
+                                    <rect
+                                        x={x1 - 2} y={y1 - 2}
+                                        width={bboxW + 4} height={bboxH + 4}
+                                        fill="white" stroke="none"
                                     />
-                                    <line
-                                        x1={cx - r / 2} y1={cy}
-                                        x2={cx - r / 2} y2={cy - r / 2}
-                                        stroke={isHovered ? '#b45309' : '#d97706'}
-                                        strokeWidth={isHovered ? 2 : 1}
-                                    />
+
+                                    {isHorizontal ? (
+                                        <>
+                                            {/* Horizontal door: hinge at left, swings down */}
+                                            {/* Door leaf line */}
+                                            <line
+                                                x1={x1} y1={y1 + bboxH / 2}
+                                                x2={x1 + leafLen} y2={y1 + bboxH / 2}
+                                                stroke={isHovered ? '#b45309' : '#92400e'}
+                                                strokeWidth={isHovered ? 3 : 2}
+                                            />
+                                            {/* Quarter arc */}
+                                            <path
+                                                d={`M ${x1 + leafLen} ${y1 + bboxH / 2} A ${leafLen} ${leafLen} 0 0 1 ${x1} ${y1 + bboxH / 2 + leafLen}`}
+                                                fill="none"
+                                                stroke={isHovered ? '#b45309' : '#d97706'}
+                                                strokeWidth={isHovered ? 2 : 1}
+                                                strokeDasharray="8,4"
+                                            />
+                                        </>
+                                    ) : (
+                                        <>
+                                            {/* Vertical door: hinge at top, swings right */}
+                                            {/* Door leaf line */}
+                                            <line
+                                                x1={x1 + bboxW / 2} y1={y1}
+                                                x2={x1 + bboxW / 2} y2={y1 + leafLen}
+                                                stroke={isHovered ? '#b45309' : '#92400e'}
+                                                strokeWidth={isHovered ? 3 : 2}
+                                            />
+                                            {/* Quarter arc */}
+                                            <path
+                                                d={`M ${x1 + bboxW / 2} ${y1 + leafLen} A ${leafLen} ${leafLen} 0 0 0 ${x1 + bboxW / 2 + leafLen} ${y1}`}
+                                                fill="none"
+                                                stroke={isHovered ? '#b45309' : '#d97706'}
+                                                strokeWidth={isHovered ? 2 : 1}
+                                                strokeDasharray="8,4"
+                                            />
+                                        </>
+                                    )}
                                 </g>
                             );
                         }
