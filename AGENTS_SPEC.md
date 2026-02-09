@@ -215,3 +215,112 @@ Qty: 45 sqm
 Architect Agent → QS Checklist Agent → Trade Agents → CSV Agent → Tender Agent
 
 Each agent may only operate within its role.
+
+---
+
+## 🔴 THE GOLDEN RULE (NON-NEGOTIABLE)
+
+**First Fix and Second Fix are LABELS, not payment stages.**
+
+They exist to:
+- Help subcontractors understand sequence
+- Help programme planning
+- Help trade coordination
+
+They **must NOT**:
+- Control payment
+- Allow percentage claims
+- Reintroduce phase-based arguments
+
+### Payment Logic (CRITICAL)
+```
+IF item.status = COMPLETE
+THEN item is payable
+```
+
+**NOT**: "First fix complete" / "50% of second fix" / "Stage 2 valuation"
+
+### Room-Based Structure (Correct Model)
+
+Example: **Bathroom**
+
+```
+ROOM: Bathroom
+
+🔧 First Fix (Informational Only)
+Item              | Unit  | Qty | Labour Rate
+Stud wall framing | sqm   | 12  | £___
+First fix plumbing| point | 3   | £___
+First fix electrics| point| 4   | £___
+
+🔩 Second Fix (Informational Only)
+Item              | Unit  | Qty | Labour Rate
+Door fitting      | nr    | 1   | £___
+Sanitaryware inst | set   | 1   | £___
+Light fitting     | nr    | 1   | £___
+Socket fitting    | nr    | 2   | £___
+Tiling – labour   | sqm   | 24  | £___
+```
+
+Each line:
+- Has its own price
+- Has its own completion
+- Has its own payment
+
+### Fix Stage Labels By Trade
+
+| Trade | First Fix | Second Fix |
+|-------|-----------|------------|
+| Electrical | Cabling, back boxes | Sockets, lights, switches |
+| Plumbing | Pipework | Sanitaryware |
+| Carpentry | Studwork | Doors, skirting |
+| Finishes | — | Mostly second fix only |
+
+### Subcontractor Explanation
+> First fix and second fix are shown for clarity only.
+> All pricing and payments are made per individual item within each room.
+> No percentage or stage-based payments apply.
+
+---
+
+## 📐 MEASUREMENT-BASED COST ALLOCATION
+
+### Principle
+Drawing tells us **WHAT exists + HOW MUCH** (quantities).
+CSV tells us the **RATE**.
+**Total = Room's share of quantity × rate.**
+
+### Allocation Rules
+
+| Category | Phase | Allocated To |
+|----------|-------|-------------|
+| **Global** | Foundations, Masonry Shell, Roof Structure, Roof Tiling, External Decoration | Building / Global (100%) |
+| **Room-Specific** | Items with room keywords ("bathroom basin", "kitchen sink") | Direct to named room |
+| **Distributable** | Phases without specific room keywords | Proportional split by measurement |
+
+### Measurement Basis Per Phase
+
+| Phase | Measurement | Unit |
+|-------|------------|------|
+| Plastering | Wall area | m² (perimeter × 2.4m) |
+| Internal Decoration | Wall area | m² |
+| Internal Fitting Out | Floor area | m² |
+| Joinery 2nd Fix | Wall perimeter | lm |
+| Structural Openings | Door count | nr |
+| Joinery 1st Fix | Door count | nr |
+| Electrical 1st/2nd Fix | Socket count | nr |
+| Plumbing 1st/2nd Fix | Sanitary count | nr |
+
+### How Proportional Split Works
+```
+Phase: Plastering = £5,000 total (from CSV)
+Room 1 wall area: 36.5 m² (33% of total)
+Room 2 wall area: 30.2 m² (27% of total)
+Room 3 wall area: 45.1 m² (40% of total)
+
+Room 1 plastering cost = £5,000 × 33% = £1,650
+Room 2 plastering cost = £5,000 × 27% = £1,350
+Room 3 plastering cost = £5,000 × 40% = £2,000
+```
+
+Each room cost is traceable and auditable.

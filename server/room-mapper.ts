@@ -121,7 +121,11 @@ const ROOM_KEYWORDS: Record<string, string[]> = {
 };
 
 // Element groupings from HBXL phases
+// GOLDEN RULE: First Fix / Second Fix are LABELS, not payment stages.
+// They help subcontractors understand sequence and help programme planning.
+// They must NOT control payment — payment is always per individual item.
 const ELEMENT_MAPPINGS: Record<string, string> = {
+    // Global phases
     'Footings': 'Foundations',
     'Foundations': 'Foundations',
     'Oversite and Slabbing': 'Floor Construction',
@@ -129,16 +133,25 @@ const ELEMENT_MAPPINGS: Record<string, string> = {
     'Structural Openings': 'Structural Works',
     'Roof Structure': 'Roof',
     'Roof Tiling': 'Roof',
-    'Joinery 1st Fix': 'Carpentry',
-    'Joinery 2nd Fix': 'Doors & Skirting',
-    'Plastering': 'Wall Finishes',
+
+    // Carpentry — First Fix / Second Fix labels preserved
+    'Joinery 1st Fix': 'Carpentry – First Fix',
+    'Joinery 2nd Fix': 'Carpentry – Second Fix',
+
+    // Finishes (mostly second fix only)
+    'Plastering': 'Plastering',
     'Internal Decoration': 'Decoration',
     'External Decoration': 'External Finishes',
     'Internal Fitting Out': 'Fixtures & Fittings',
-    'Electrical 1st Fix': 'Electrical',
-    'Electrical 2nd Fix': 'Electrical',
-    'Plumbing 1st Fix': 'Plumbing',
-    'Plumbing 2nd Fix': 'Plumbing',
+
+    // Electrical — First Fix / Second Fix labels preserved
+    'Electrical 1st Fix': 'Electrical – First Fix',
+    'Electrical 2nd Fix': 'Electrical – Second Fix',
+
+    // Plumbing — First Fix / Second Fix labels preserved
+    'Plumbing 1st Fix': 'Plumbing – First Fix',
+    'Plumbing 2nd Fix': 'Plumbing – Second Fix',
+
     'Completion': 'Snagging'
 };
 
