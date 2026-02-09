@@ -71,6 +71,7 @@ interface ParsedRoom {
     id: string;
     name: string;
     area: string;
+    totalValue?: number; // Cost in £ from room-mapper allocation
     polygon: { x: number; y: number }[];
     center: { x: number; y: number };
 }
