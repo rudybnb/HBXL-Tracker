@@ -754,8 +754,18 @@ export class RoomMapper {
      */
     async getRoomDataForJob(jobId: string): Promise<RoomData[]> {
         console.log(`🔍 getRoomDataForJob called for jobId: ${jobId}`);
-        const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
-        console.log(`📊 Found ${jobRooms.length} rooms for job ${jobId}`);
+        const allJobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+        console.log(`📊 Found ${allJobRooms.length} total rooms for job ${jobId}`);
+
+        // AGENTS_SPEC: Only show physical rooms (from IFC drawing) + Building / Global
+        // Phase-named rooms (Masonry Shell, Foundations, etc.) from old CSV imports are excluded
+        const jobRooms = allJobRooms.filter(r => {
+            const isGlobal = r.name === 'Building / Global';
+            const hasGeometry = r.geometry && r.geometry !== 'null' && r.geometry !== '[]';
+            return isGlobal || hasGeometry;
+        });
+
+        console.log(`🏠 Showing ${jobRooms.length} rooms (filtered from ${allJobRooms.length})`);
         if (jobRooms.length > 0) {
             console.log(`   Room names: ${jobRooms.map(r => r.name).join(', ')}`);
         }
