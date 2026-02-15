@@ -48,7 +48,9 @@ interface IfcPlanViewerProps {
     rooms: Room[];
     onElementClick?: (element: ExtractedElement) => void;
     onRoomClick?: (room: Room) => void;
+    onRoomClick?: (room: Room) => void;
     onRoomRename?: (id: string, name: string) => void;
+    onRoomDelete?: (id: string, name: string) => void;
 }
 
 interface ParsedWall {
@@ -56,6 +58,7 @@ interface ParsedWall {
     polygon: { x: number; y: number }[];
     isExternal: boolean;
     name: string;
+    thickness?: number;
 }
 
 interface ParsedElement {
@@ -65,6 +68,7 @@ interface ParsedElement {
     center: { x: number; y: number };
     bbox: number[];
     room: string;
+    dimensions?: string;
 }
 
 interface ParsedRoom {
@@ -189,7 +193,7 @@ function polygonCentroid(pts: { x: number; y: number }[]): { x: number; y: numbe
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, onRoomRename }: IfcPlanViewerProps) {
+export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, onRoomRename, onRoomDelete }: IfcPlanViewerProps) {
     // Transform state
     const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
     const [isDragging, setIsDragging] = useState(false);
@@ -221,14 +225,23 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
             if (el.elementType === 'room') continue; // Rooms handled separately
 
             if (el.elementType === 'wall' && geom && geom.length >= 3) {
-                geom.forEach(p => {
+                geom.forEach((p: any) => {
                     maxCoord = Math.max(maxCoord, Math.abs(p.x), Math.abs(p.y));
                 });
+
+                // Parse dimension string "102mm" -> 102
+                let thick = 0;
+                if (el.dimensions) {
+                    const match = el.dimensions.match(/(\d+)/);
+                    if (match) thick = parseInt(match[0], 10);
+                }
+
                 walls.push({
                     id: el.id,
                     polygon: geom,
                     isExternal: (el.description || '').toLowerCase().includes('external'),
-                    name: el.description || 'Wall'
+                    name: el.description || 'Wall',
+                    thickness: thick || undefined
                 });
             } else if (bbox) {
                 maxCoord = Math.max(maxCoord, Math.abs(bbox[0]), Math.abs(bbox[1]), Math.abs(bbox[2]), Math.abs(bbox[3]));
@@ -238,7 +251,8 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                     name: el.description || el.elementType,
                     center: { x: (bbox[0] + bbox[2]) / 2, y: (bbox[1] + bbox[3]) / 2 },
                     bbox,
-                    room: el.roomName || 'Global'
+                    room: el.roomName || 'Global',
+                    dimensions: el.dimensions
                 });
             }
         }
@@ -459,14 +473,15 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
             )}
 
             {/* RENAME DIALOG */}
+            {/* RENAME DIALOG */}
             {renameTarget && (
                 <div
                     className="absolute z-50 bg-white border-2 border-amber-500 rounded-lg shadow-xl p-3"
                     style={{ left: renameTarget.x, top: renameTarget.y }}
                 >
-                    <div className="text-xs text-slate-500 mb-1">Rename Room</div>
+                    <div className="text-xs text-slate-500 mb-1">Rename Room (Esc to cancel)</div>
                     <input
-                        className="border border-slate-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="border border-slate-300 rounded px-2 py-1 text-sm w-48 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
                         value={renameValue}
                         onChange={e => setRenameValue(e.target.value)}
                         autoFocus
@@ -478,20 +493,34 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                             if (e.key === 'Escape') setRenameTarget(null);
                         }}
                     />
-                    <div className="flex gap-1 mt-1.5">
-                        <button
-                            className="text-xs bg-amber-500 text-white px-2 py-0.5 rounded hover:bg-amber-600"
-                            onClick={() => {
-                                if (renameValue.trim()) {
-                                    onRoomRename?.(renameTarget.id, renameValue.trim());
-                                }
-                                setRenameTarget(null);
-                            }}
-                        >Save</button>
-                        <button
-                            className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded hover:bg-slate-300"
-                            onClick={() => setRenameTarget(null)}
-                        >Cancel</button>
+                    <div className="flex gap-1 mt-1.5 justify-between">
+                        <div className="flex gap-1">
+                            <button
+                                className="text-xs bg-amber-500 text-white px-2 py-0.5 rounded hover:bg-amber-600"
+                                onClick={() => {
+                                    if (renameValue.trim()) {
+                                        onRoomRename?.(renameTarget.id, renameValue.trim());
+                                    }
+                                    setRenameTarget(null);
+                                }}
+                            >Save</button>
+                            <button
+                                className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded hover:bg-slate-300"
+                                onClick={() => setRenameTarget(null)}
+                            >Cancel</button>
+                        </div>
+                        {onRoomDelete && (
+                            <button
+                                className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded hover:bg-red-200 ml-2"
+                                title="Delete this room"
+                                onClick={() => {
+                                    if (confirm(`Are you sure you want to delete room "${renameTarget.name}"?`)) {
+                                        onRoomDelete(renameTarget.id, renameTarget.name);
+                                        setRenameTarget(null);
+                                    }
+                                }}
+                            >Delete</button>
+                        )}
                     </div>
                 </div>
             )}
@@ -558,7 +587,7 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                         const d = wallPath(wall.polygon);
                         const isHovered = hoveredElement === wall.id;
 
-                        // Compute wall length and thickness from polygon bounds
+                        // Compute wall length from polygon bounds (reliable for length)
                         let wMinX = Infinity, wMinY = Infinity, wMaxX = -Infinity, wMaxY = -Infinity;
                         wall.polygon.forEach(p => {
                             if (p.x < wMinX) wMinX = p.x;
@@ -569,19 +598,21 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                         const wW = wMaxX - wMinX;
                         const wH = wMaxY - wMinY;
                         const wallLengthMm = Math.max(wW, wH);
-                        const wallThickMm = Math.min(wW, wH);
+
+                        // Use precise backend thickness if available, else derive (risk of error on rotation)
+                        const wallThickMm = wall.thickness || Math.min(wW, wH);
                         const wallLengthM = wallLengthMm / unitScale;
-                        const wallHeightM = 2.4; // Standard UK residential ceiling height
+                        const wallHeightM = 2.4;
 
                         // UK wall composition breakdown
                         let composition = '';
                         if (wall.isExternal) {
                             // Standard UK cavity wall
-                            const totalThick = Math.round(wallThickMm / (unitScale / 1000));
-                            const cavityWidth = Math.max(50, totalThick - 202); // 102mm outer + 100mm inner = 202mm leaves
+                            const totalThick = Math.round(wallThickMm / (unitScale === 1 ? 0.001 : 1)); // Normalize to mm
+                            const cavityWidth = Math.max(50, totalThick - 202);
                             composition = `102mm brick outer leaf · ${cavityWidth}mm cavity (insulated) · 100mm block inner leaf = ${totalThick}mm total`;
                         } else {
-                            const totalThick = Math.round(wallThickMm / (unitScale / 1000));
+                            const totalThick = Math.round(wallThickMm / (unitScale === 1 ? 0.001 : 1));
                             if (totalThick <= 100) {
                                 composition = `${totalThick}mm stud partition`;
                             } else {
@@ -729,9 +760,10 @@ export function IfcPlanViewer({ elements, rooms, onElementClick, onRoomClick, on
                                     }}
                                     onMouseLeave={() => { setHoveredElement(null); setTooltipData(null); }}
                                 >
-                                    {/* Door opening gap in wall */}
+                                    {/* Door opening gap in wall - Match Room Color to hide wall */}
                                     <rect x={x1 - 5} y={y1 - 5} width={bboxW + 10} height={bboxH + 10}
-                                        fill="white" stroke="none" />
+                                        fill={el.room && el.room !== 'Global' ? getRoomColor(el.room) : '#f8fafc'}
+                                        stroke="none" />
                                     {doorEl}
                                 </g>
                             );

@@ -55,7 +55,7 @@ function getStatusColor(status: string) {
 export default function UploadJob() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
+
   const { data: uploads = [] } = useQuery<CsvUpload[]>({
     queryKey: ['/api/csv-uploads'],
   });
@@ -101,7 +101,7 @@ export default function UploadJob() {
               <h1 className="text-2xl font-bold text-amber-400">Upload Job Files</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <button 
+              <button
                 onClick={() => window.location.href = '/'}
                 className="text-slate-300 hover:text-amber-400"
               >
@@ -122,7 +122,7 @@ export default function UploadJob() {
           {/* Upload History */}
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <h3 className="text-lg font-semibold text-amber-400 mb-4">Recent Uploads</h3>
-            
+
             {uploads.length === 0 ? (
               <div className="text-center py-8">
                 <FileText className="mx-auto h-12 w-12 text-slate-500 mb-4" />
@@ -148,11 +148,11 @@ export default function UploadJob() {
                           {upload.jobsCount} job(s) created
                         </div>
                         <div className="text-xs text-slate-500">
-                          {new Date(upload.createdAt).toLocaleString()}
+                          {new Date(upload.uploadedAt).toLocaleString()}
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center space-x-3">
                       <div className="flex items-center space-x-2">
                         {getStatusIcon(upload.status)}
@@ -190,21 +190,21 @@ export default function UploadJob() {
       {/* Bottom Navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700">
         <div className="grid grid-cols-4 text-center">
-          <button 
+          <button
             onClick={() => window.location.href = '/'}
             className="py-3 px-4 text-slate-400 hover:text-white"
           >
             <i className="fas fa-home block mb-1"></i>
             <span className="text-xs">Dashboard</span>
           </button>
-          <button 
+          <button
             onClick={() => window.location.href = '/job-assignments'}
             className="py-3 px-4 text-slate-400 hover:text-white"
           >
             <i className="fas fa-briefcase block mb-1"></i>
             <span className="text-xs">Jobs</span>
           </button>
-          <button 
+          <button
             onClick={() => window.location.href = '/admin-task-monitor'}
             className="py-3 px-4 text-slate-400 hover:text-white"
           >
@@ -217,7 +217,7 @@ export default function UploadJob() {
           </button>
         </div>
       </div>
-      
+
       {/* Add bottom padding to account for fixed navigation */}
       <div className="h-20"></div>
     </div>

@@ -113,7 +113,7 @@ export class QSCalculator {
                     sectionTotal += itemTotal;
 
                     sectionItems.push({
-                        element: item.category || 'MATERIAL',
+                        element: item.category || item.resourceType || 'MATERIAL',
                         description: item.description || 'Unknown',
                         quantity: item.quantity || 1,
                         unit: item.unit || 'Each',

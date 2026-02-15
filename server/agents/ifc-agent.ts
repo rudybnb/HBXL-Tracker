@@ -98,6 +98,25 @@ function isPointInPolygon(p: Point, poly: Point[]): boolean {
     return inside;
 }
 
+function pointToSegmentDistance(p: Point, v: Point, w: Point) {
+    const l2 = (v.x - w.x) * (v.x - w.x) + (v.y - w.y) * (v.y - w.y);
+    if (l2 === 0) return Math.sqrt((p.x - v.x) * (p.x - v.x) + (p.y - v.y) * (p.y - v.y));
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const x = v.x + t * (w.x - v.x);
+    const y = v.y + t * (w.y - v.y);
+    return Math.sqrt((p.x - x) * (p.x - x) + (p.y - y) * (p.y - y));
+}
+
+function distancePointToPolygon(p: Point, poly: Point[]): number {
+    let minD = Infinity;
+    for (let i = 0; i < poly.length; i++) {
+        const d = pointToSegmentDistance(p, poly[i], poly[(i + 1) % poly.length]);
+        if (d < minD) minD = d;
+    }
+    return minD;
+}
+
 export interface IfcExtractionResult {
     success: boolean;
     rooms: any[];
@@ -109,8 +128,28 @@ export class IfcAgent {
     private ifcApi: WebIFC.IfcAPI;
     constructor() {
         this.ifcApi = new WebIFC.IfcAPI();
-        // const wasmPath = path.join(process.cwd(), "node_modules", "web-ifc") + "/";
-        // this.ifcApi.SetWasmPath(wasmPath, true);
+
+        // ROBUST WASM PATH RESOLUTION (The "New Way" Fix)
+        // 1. Try node_modules in CWD (Dev)
+        let wasmPath = path.join(process.cwd(), "node_modules", "web-ifc");
+
+        // 2. Try adjacent to script (Prod/Bundled)
+        if (!fs.existsSync(wasmPath)) {
+            wasmPath = path.join(__dirname, "..", "node_modules", "web-ifc");
+        }
+
+        // 3. Try standard node resolution (Best practice)
+        if (!fs.existsSync(wasmPath)) {
+            try {
+                const pkgPath = require.resolve("web-ifc/package.json");
+                wasmPath = path.dirname(pkgPath);
+            } catch (e) {
+                console.warn("[ARCHITECT] Could not resolve web-ifc via require.resolve");
+            }
+        }
+
+        console.log(`[ARCHITECT] Setting WASM path to: ${wasmPath}`);
+        this.ifcApi.SetWasmPath(wasmPath + "/");
     }
 
     public async process(ifcPath: string): Promise<IfcExtractionResult> {
@@ -203,9 +242,9 @@ export class IfcAgent {
                     let geometry: any = null;
                     let bbox = idToBBox.get(id) || null;
 
-                    // FORCE Geometry Extraction for Walls (to handle rotation correctly)
-                    // WebIFC 'bbox' is Axis-Aligned, which makes rotated walls look fat/distorted.
-                    const forceGeometry = t.label === 'wall';
+                    // FORCE Geometry Extraction for Walls/Rooms/Doors/Windows
+                    // WebIFC 'bbox' is Axis-Aligned, which makes rotated items look fat/distorted.
+                    const forceGeometry = t.label === 'wall' || t.label === 'room' || t.label === 'door' || t.label === 'window';
 
                     // Fallback Placement Logic if no bbox OR if we identify it's a wall (needs precision)
                     if (!bbox || forceGeometry) {
@@ -240,22 +279,33 @@ export class IfcAgent {
                                     const width = maxX - minX;
                                     const height = maxY - minY;
 
-                                    // 2. FORCE Polygon Geometry for Walls
+                                    // 2. FORCE Polygon Geometry for Walls AND Rooms
                                     // We cannot rely on BBox for walls because any rotation (e.g. 45 deg)
                                     // makes the AABB (Axis Aligned Bounding Box) a giant square, ruining the drawing.
                                     // We must use the exact footprint polygon.
-                                    if (t.label === 'wall') {
-                                        geometry = this.getFootprint(localPoints);
+                                    // 2. FORCE Polygon Geometry for Walls AND Rooms AND Doors/Windows
+                                    // We cannot rely on BBox because rotation ruins it.
+                                    if (t.label === 'wall' || t.label === 'room' || t.label === 'door' || t.label === 'window') {
+                                        geometry = this.getFootprint(localPoints, true);
+                                        // Debug Log for Rooms
+                                        if (t.label === 'room') {
+                                            if (elements.length < 50) console.log(`[IFC] Room ${id} (${name}) geometry forced via footprint (${geometry.length} points)`);
+                                        }
                                     } else {
                                         // For other items, center point is often enough, or use footprint if needed
                                         geometry = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
                                     }
 
                                     (el as any).width = Math.max(width, height).toFixed(0) + 'mm';
+                                } else {
+                                    if (t.label === 'room') {
+                                        console.log(`[IFC] WARNING: Room ${id} (${name}) has NO local points found.`);
+                                    }
                                 }
                             }
                         } catch (e) { console.error('Fallback Geom Error', e); }
                     }
+
 
                     // If we still have no geometry but have a BBox (non-walls or failed extraction), use BBox
                     if (!geometry && bbox) {
@@ -298,25 +348,57 @@ export class IfcAgent {
                     // Fallback: If Wall Thickness > 220mm, assume External
                     // Note: This matches standard UK Cavity walls (102 brick + 100 block + cavity ~ 300mm)
                     // Internal partitions are mostly 75mm stud / 100mm block
-                    if (t.label === 'wall' && bbox) {
-                        const w = Math.abs(bbox[2] - bbox[0]);
-                        const h = Math.abs(bbox[3] - bbox[1]);
-                        const thickness = Math.min(w, h); // This assumes logic: shortest side is thickness
+                    if (t.label === 'wall') {
+                        let thickness = 0;
+
+                        // 1. Try to get accurate thickness from Geometry (Polygon)
+                        // BBox is unreliable for rotated walls (gives large W/H).
+                        if (geometry && Array.isArray(geometry) && geometry.length > 2) {
+                            // Calculate all edge lengths
+                            const edges: number[] = [];
+                            for (let i = 0; i < geometry.length; i++) {
+                                const p1 = geometry[i];
+                                const p2 = geometry[(i + 1) % geometry.length];
+                                const d = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+                                edges.push(d);
+                            }
+                            // Sort edges. The "Thickness" is usually the smallest dimension > 0.
+                            // Filter tiny edges (noise < 20mm) and take the minimum "structural" edge
+                            const validEdges = edges.filter(e => e > 20 && e < 2000); // Filter ends or very long walls
+                            if (validEdges.length > 0) {
+                                thickness = Math.min(...validEdges);
+                                // console.log(`[IFC] Wall ${id} Geom Thickness: ${thickness.toFixed(0)}mm`);
+                            }
+                        }
+
+                        // 2. Fallback to BBox if no geometry thickness found (e.g. rectangular aligned)
+                        if (thickness === 0 && bbox) {
+                            const w = Math.abs(bbox[2] - bbox[0]);
+                            const h = Math.abs(bbox[3] - bbox[1]);
+                            // Only use BBox min dim if we are sure it's not rotated?
+                            // Actually BBox is only safe if rotation is 0 or 90.
+                            // But we can't easily check rotation here without placement.
+                            // Assume BBox is dubious for thickness unless difference is massive.
+                            thickness = Math.min(w, h);
+                        }
 
                         // Debug log to file so we can see what's happening
-                        if (elements.length < 20) {
-                            log(`DEBUG WALL ${id}: External=${isExternal}, Thick=${thickness.toFixed(2)} (w=${w.toFixed(2)}, h=${h.toFixed(2)})`);
+                        if (elements.length < 20 || thickness > 500) {
+                            // log(`DEBUG WALL ${id}: External=${isExternal}, ApproxThick=${thickness.toFixed(0)}`);
                         }
 
                         if (!isExternal) {
-
                             // Check if units are likely mm (>100) or m (<1)
+                            // Threshold: 220mm (Standard 9 inch solid brick or cavity)
+                            // Internal: 75mm, 100mm, 140mm
                             if (thickness > 220) isExternal = true; // mm
                             else if (thickness > 0.22 && thickness < 2) isExternal = true; // meters
                         }
-                    }
-                    // Refine Label/Context
-                    if (t.label === 'wall') {
+
+                        // Store calculated thickness for frontend display
+                        (el as any).width = thickness.toFixed(0) + 'mm';
+
+                        // Refine Label
                         name = isExternal ? "External Wall" : "Internal Partition";
                     }
                     if (t.label === 'roof') isExternal = true;
@@ -324,7 +406,11 @@ export class IfcAgent {
 
                     // Determine center point for spatial queries
                     let center = null;
-                    if (bbox) {
+                    if (t.label === 'door' || t.label === 'window') {
+                        // Use Insertion Point (Hinge/Center) to avoid Swing skew causing mis-assignment
+                        const p = this.getPlacement(modelID, id);
+                        center = { x: p.x, y: p.y };
+                    } else if (bbox) {
                         center = { x: (bbox[0] + bbox[2]) / 2, y: (bbox[1] + bbox[3]) / 2 };
                     } else if (geometry && geometry.x) {
                         center = geometry;
@@ -336,6 +422,7 @@ export class IfcAgent {
                         id,
                         geometry,
                         bbox,
+                        dimensions: (el as any).width || null,
                         isGlobal: isExternal, // Start with explicit external flag
                         center,
                         roomName: "Unassigned" // Default
@@ -346,6 +433,24 @@ export class IfcAgent {
 
             // 1. Explicit IFCRoom extraction
             const rooms: any[] = [];
+
+            const explicitRooms = elements.filter(e => e.type === 'room');
+            if (explicitRooms.length > 0) {
+                log(`Found ${explicitRooms.length} explicit IfcSpace elements. Promoting to Rooms list.`);
+                explicitRooms.forEach(r => {
+                    // Filter out invalid rooms (no geometry)
+                    if (r.geometry || r.bbox) {
+                        rooms.push({
+                            name: r.name,
+                            id: r.id,
+                            bbox: r.bbox || null,
+                            area: "0", // Frontend will calculate
+                            geometry: r.geometry || null,
+                            properties: { composition: "IfcSpace" }
+                        });
+                    }
+                });
+            }
 
             // 2. Geometric Room Detection (Fallback/Enhancement)
             if (rooms.length === 0) {
@@ -450,19 +555,50 @@ export class IfcAgent {
 
                 if (el.center && rooms.length > 0) {
                     let assigned = false;
+
+                    // 1. Strict Containment Check
                     for (const room of rooms) {
                         if (isPointInPolygon(el.center, room.geometry)) {
                             el.roomName = room.name;
                             assigned = true;
+                            // Check for ambiguity? No, strict containment wins.
                             break;
                         }
                     }
+
+                    // 2. Proximity Check for Peripheral Items (Doors/Windows in Walls)
                     if (!assigned && !el.isGlobal) {
-                        // Check if it's "close enough" (e.g. door in a wall)
-                        // Or default to 'Global' if truly outside
-                        el.roomName = "Global"; // Default fallback
+                        // Find closest room
+                        let minDistance = Infinity;
+                        let closestRoom: any = null;
+
+                        for (const room of rooms) {
+                            if (!room.geometry) continue;
+                            const d = distancePointToPolygon(el.center, room.geometry);
+                            // Debug log for proximity
+                            if (el.type === 'door' || el.type === 'window') {
+                                console.log(`[Assign] ${el.type} ${el.id} (center: ${el.center.x.toFixed(0)},${el.center.y.toFixed(0)}) dist to ${room.name}: ${d.toFixed(2)}`);
+                            }
+                            if (d < minDistance) {
+                                minDistance = d;
+                                closestRoom = room;
+                            }
+                        }
+
+                        // Tolerance: 600mm (covering thick walls + offset)
+                        if (closestRoom && minDistance < 600) {
+                            el.roomName = closestRoom.name;
+                            assigned = true;
+                            console.log(`[Assign] Proximity Success: ${el.type} ${el.id} assigned to ${closestRoom.name} (dist=${minDistance.toFixed(0)})`);
+                        } else {
+                            if (el.type === 'door' || el.type === 'window') {
+                                console.log(`[Assign] FAILED: ${el.type} ${el.id} closest is ${closestRoom?.name} at ${minDistance.toFixed(0)}`);
+                            }
+                            el.roomName = "Global";
+                        }
                     }
                 } else {
+                    if (el.type === 'door') console.log(`[Assign] Door ${el.id} has NO CENTER!`);
                     el.roomName = "Global";
                 }
             }
@@ -667,12 +803,15 @@ export class IfcAgent {
                 }
 
                 // Crawl Children
-                // Defines paths for: Polyline, SurfaceModel, FaceSet, Face, PolyLoop, MappedItem
+                // Defines paths for: Polyline, SurfaceModel, FaceSet, Face, PolyLoop, MappedItem, ExtrudedAreaSolid, GeometricSet
                 const structFields = [
                     'Representation', 'Representations', 'Items',
                     'Outline', 'OuterCurve', 'Points', 'Polygon', 'Bounds', 'Bound',
                     'FbsmFaces', 'CfsFaces', 'Faces', // For FaceBasedSurfaceModel
-                    'MappingSource', 'MappedRepresentation' // For MappedItem
+                    'MappingSource', 'MappedRepresentation', // For MappedItem
+                    'SweptArea', // For IfcExtrudedAreaSolid (Walls/Spaces)
+                    'Curves', // For IfcGeometricCurveSet (2D Doors/Symbols)
+                    'Elements' // For IfcGeometricSet
                 ];
 
                 // Special handling for MappedItem which has a transform
@@ -707,36 +846,58 @@ export class IfcAgent {
         return points;
     }
 
-    // Helper to get 2D footprint from 3D points (filter lowest Z + sort CCW)
-    private getFootprint(points: Point3D[]): Point[] {
+    // Helper to get 2D footprint from 3D points (filter lowest Z + calculate best ordering)
+    private getFootprint(points: Point3D[], preserveOrder: boolean = false): Point[] {
         if (points.length < 3) return points.map(p => ({ x: p.x, y: p.y }));
 
         // 1. Filter for Lowest Z (Floor plan cut)
         const minZ = Math.min(...points.map(p => p.z));
-        // Tolerance of 100mm for "roughly same floor level"
         const floorPoints = points.filter(p => Math.abs(p.z - minZ) < 100);
 
         // 2. Remove duplicates
         const unique: Point[] = [];
         const seen = new Set<string>();
-        floorPoints.forEach(p => {
+        for (const p of floorPoints) {
             const k = `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
             if (!seen.has(k)) {
                 seen.add(k);
                 unique.push({ x: p.x, y: p.y });
             }
-        });
+        }
 
         if (unique.length < 3) return unique;
 
-        // 3. Sort Counter-Clockwise around Centroid
+        // 3. Compare Strategies: Ordered vs Sorted
+        // Minimize perimeter to avoid self-intersecting (crossed) polygons
+        const getPerimeter = (poly: Point[]) => {
+            let sum = 0;
+            for (let i = 0; i < poly.length; i++) {
+                const p1 = poly[i];
+                const p2 = poly[(i + 1) % poly.length];
+                sum += Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            }
+            return sum;
+        };
+
+        const ordered = [...unique];
+        const pOrdered = getPerimeter(ordered);
+
+        // Angular Sort
         const center = unique.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
         center.x /= unique.length;
         center.y /= unique.length;
 
-        return unique.sort((a, b) => {
+        const sorted = [...unique].sort((a, b) => {
             return Math.atan2(a.y - center.y, a.x - center.x) - Math.atan2(b.y - center.y, b.x - center.x);
         });
+        const pSorted = getPerimeter(sorted);
+
+        // Console log for debug details on geometry decisions
+        if (pOrdered !== pSorted) {
+            // console.log(`[Geom] Optimization: Ordered=${pOrdered.toFixed(1)}, Sorted=${pSorted.toFixed(1)}`);
+        }
+
+        return pSorted < pOrdered ? sorted : ordered;
     }
 
     // Update getPolylineGeometry to use applyTransform

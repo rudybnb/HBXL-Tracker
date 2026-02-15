@@ -9,8 +9,9 @@ import type {
   AdminInspection, InsertAdminInspection,
   TaskInspectionResult, InsertTaskInspectionResult,
   ContractorAssignment, InsertContractorAssignment,
+  ContractorAssignment, InsertContractorAssignment,
   JobCostItem, InsertJobCostItem, JobImportPayload, FinancialSummary,
-  JobFile, InsertJobFile
+  Room, InsertRoom, JobFile, InsertJobFile
 } from "@shared/schema";
 
 export interface JobAssignment {
@@ -32,12 +33,8 @@ export interface IStorage {
   getJob(id: string): Promise<JobWithContractor | undefined>;
   createJob(job: InsertJob): Promise<Job>;
   updateJob(id: string, job: Partial<Job>): Promise<Job | undefined>;
+  deleteJob(id: string): Promise<boolean>;
   createJobsFromCsv(jobs: InsertJob[], uploadId: string): Promise<Job[]>;
-
-  // Job Files (Drawings/Images)
-  getJobFiles(jobId: string): Promise<JobFile[]>;
-  createJobFile(file: InsertJobFile): Promise<JobFile>;
-  deleteJobFile(id: string): Promise<void>;
 
   // CSV Uploads
   getCsvUploads(): Promise<CsvUpload[]>;
@@ -109,6 +106,15 @@ export interface IStorage {
   // Manus-n8n Integration - Job Import
   importJobWithCostItems(payload: JobImportPayload): Promise<{ job: Job; costItems: JobCostItem[]; financialSummary: FinancialSummary }>;
   getJobFinancials(jobId: string): Promise<FinancialSummary | undefined>;
+
+  // Rooms & IFC
+  getRooms(jobId: string): Promise<Room[]>;
+  createRoom(room: InsertRoom): Promise<Room>;
+  updateRoom(id: string, room: Partial<Room>): Promise<Room | undefined>;
+  deleteRoom(id: string): Promise<boolean>;
+
+  createJobFile(file: InsertJobFile): Promise<JobFile>;
+  getJobFiles(jobId: string): Promise<JobFile[]>;
 }
 
 // Use the actual database storage implementation

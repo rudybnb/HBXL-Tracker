@@ -5,8 +5,6 @@ interface EnhancedResource {
   orderDate: string;
   requiredDate: string;
   buildPhase: string;
-  room?: string;
-  resourceType: string;
   resourceType: string;
   supplier: string;
   description: string;
@@ -33,21 +31,13 @@ interface EnhancedJobData {
     weeklyBreakdown: WeeklyBreakdown;
   };
   resources: EnhancedResource[];
-  metadata?: {
-    clientName?: string;
-    projectType?: string;
-    address?: string;
-    postcode?: string;
-  };
 }
 
 export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
-  const enhancedFormatIndex = lines.findIndex((line: string) =>
-    (line.includes('Order Date') || line.includes('Order')) &&
-    (line.includes('Build Phase') || line.includes('Phase') || line.includes('Room') || line.includes('Location')) &&
-    (line.includes('Resource Description') || line.includes('Type of Resource') || line.includes('Description'))
+  const enhancedFormatIndex = lines.findIndex(line => 
+    line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
   );
-
+  
   if (enhancedFormatIndex === -1) {
     return null; // Not enhanced format
   }
@@ -59,101 +49,33 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
   const weeklyBreakdown: WeeklyBreakdown = {};
   const phases: string[] = [];
 
-  // Metadata Extraction (Scan first 20 lines)
-  let clientName: string | undefined;
-  let projectType: string | undefined;
-  let address: string | undefined;
-  let postcode: string | undefined;
-
-  // Scan for metadata before the header line
-  for (let i = 0; i < Math.min(enhancedFormatIndex, 20); i++) {
-    const line = lines[i];
-    if (!line) continue;
-
-    // Robust Regex Matching for Metadata
-    if (!clientName && line.match(/^(name|client|customer)\s*[,:]/i)) {
-      clientName = line.replace(/^(name|client|customer)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-    }
-    else if (!projectType && line.match(/^(project type|job type|type)\s*[,:]/i)) {
-      projectType = line.replace(/^(project type|job type|type)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-    }
-    else if (!address && line.match(/^(address|site address|location)\s*[,:]/i)) {
-      address = line.replace(/^(address|site address|location)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-    }
-    else if (!postcode && line.match(/^(post\s*code|postcode|zip\s*code)\s*[,:]/i)) {
-      postcode = line.replace(/^(post\s*code|postcode|zip\s*code)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-    }
-  }
-
-  console.log('🎯 Enhanced parser metadata:', { clientName, projectType, address, postcode });
-
   console.log('🎯 Using ENHANCED CSV parsing for accounting format');
-
-  // Dynamic Column Detection
-  const headerLine = lines[enhancedFormatIndex];
-  const headers = headerLine.split(',').map(h => h.trim().toLowerCase());
-
-  const colMap = {
-    orderDate: headers.findIndex(h => h.includes('order date') || h === 'date'),
-    requiredDate: headers.findIndex(h => h.includes('required')),
-    phase: headers.findIndex(h => h.includes('build phase') || h === 'phase'),
-    room: headers.findIndex(h => h.includes('room') || h.includes('location') || h.includes('area')),
-    type: headers.findIndex(h => h.includes('resource type') || h.includes('type')),
-    supplier: headers.findIndex(h => h.includes('supplier') || h.includes('merchant')),
-    desc: headers.findIndex(h => h.includes('description') || h === 'desc'),
-    qty: headers.findIndex(h => h.includes('quantity') || h === 'qty'),
-    unitCost: headers.findIndex(h => h.includes('unit cost') || h.includes('rate') || h.includes('price')),
-    totalCost: headers.findIndex(h => h.includes('total') || h.includes('amount') || (h.includes('cost') && !h.includes('unit')))
-  };
-
-  console.log('🔍 Dynamic Column Mapping:', colMap);
 
   for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line || line.trim() === '') continue;
 
     const parts = line.split(',').map(p => p.trim());
-    if (parts.length < 3) continue;
+    if (parts.length < 8) continue;
 
-    // Use mapped columns or fallbacks for standard HBXL format
     const resource: EnhancedResource = {
-      orderDate: colMap.orderDate > -1 ? parts[colMap.orderDate] : (parts[0] || ''),
-      requiredDate: colMap.requiredDate > -1 ? parts[colMap.requiredDate] : (parts[1] || ''),
-      buildPhase: colMap.phase > -1 ? parts[colMap.phase] : (parts[2] || 'General'),
-      room: colMap.room > -1 ? parts[colMap.room] : undefined,
-      resourceType: colMap.type > -1 ? parts[colMap.type] : (parts[3] || ''),
-      supplier: colMap.supplier > -1 ? parts[colMap.supplier] : (parts[4] || ''),
-      description: colMap.desc > -1 ? parts[colMap.desc] : (parts[5] || ''),
-      quantity: colMap.qty > -1 ? parseInt(parts[colMap.qty]) : (parseInt(parts[7]) || 0)
+      orderDate: parts[0] || '',
+      requiredDate: parts[1] || '',
+      buildPhase: parts[2] || 'General',
+      resourceType: parts[3] || '',
+      supplier: parts[4] || '',
+      description: parts[5] || '',
+      quantity: parseInt(parts[7]) || 0
     };
 
-    // Extract price from column OR description
+    // Extract price using regex - MANDATORY RULE: authentic data only
     const priceMatch = resource.description.match(/£(\d+\.?\d*)/);
     const unitMatch = resource.description.match(/£\d+\.?\d*\/(\w+)/);
 
-    // Prioritize column data, fallback to regex extraction
-    if (colMap.unitCost > -1) {
-      const rawPrice = parts[colMap.unitCost].replace(/[£,]/g, '');
-      resource.unitPrice = parseFloat(rawPrice) || 0;
-    } else if (priceMatch) {
+    if (priceMatch && resource.quantity > 0) {
       resource.unitPrice = parseFloat(priceMatch[1]);
-    } else {
-      resource.unitPrice = 0;
-    }
-
-    // Determine unit
-    resource.unit = unitMatch ? unitMatch[1] : 'Each';
-
-    // Calculate total if not provided
-    if (colMap.totalCost > -1) {
-      const rawTotal = parts[colMap.totalCost].replace(/[£,]/g, '');
-      resource.totalCost = parseFloat(rawTotal) || (resource.unitPrice * resource.quantity);
-    } else {
+      resource.unit = unitMatch ? unitMatch[1] : 'Each';
       resource.totalCost = resource.unitPrice * resource.quantity;
-    }
-
-    // Valid if we have a cost OR it's a valid item with quantity
-    if ((resource.totalCost > 0 || resource.unitPrice > 0) && resource.quantity > 0) {
 
       // Track costs by type for accounting
       if (resource.resourceType.toLowerCase() === 'labour') {
@@ -162,15 +84,12 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
         totalMaterialCost += resource.totalCost;
       }
 
-      // Build phase / Room task structure
-      // PRIORITY: Use Room if available, otherwise Build Phase
-      const groupKey = resource.room && resource.room.trim() !== '' ? resource.room : resource.buildPhase;
-
-      if (groupKey && groupKey !== 'General' && groupKey.toLowerCase() !== 'material' && groupKey.toLowerCase() !== 'labour') {
-        if (!phaseTaskData[groupKey]) {
-          phaseTaskData[groupKey] = [];
+      // Build phase task structure for compatibility
+      if (resource.buildPhase && resource.buildPhase !== 'General' && resource.buildPhase.toLowerCase() !== 'material' && resource.buildPhase.toLowerCase() !== 'labour') {
+        if (!phaseTaskData[resource.buildPhase]) {
+          phaseTaskData[resource.buildPhase] = [];
         }
-        phaseTaskData[groupKey].push({
+        phaseTaskData[resource.buildPhase].push({
           task: `${resource.resourceType}: ${resource.description}`,
           description: `${resource.quantity} × £${resource.unitPrice} = £${resource.totalCost.toFixed(2)}`,
           quantity: resource.quantity,
@@ -178,13 +97,12 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
           totalCost: resource.totalCost,
           supplier: resource.supplier,
           orderDate: resource.orderDate,
-          resourceType: resource.resourceType,
-          originalPhase: resource.buildPhase // Keep track of original phase if needed
+          resourceType: resource.resourceType
         });
-
-        if (!phases.includes(groupKey)) {
-          phases.push(groupKey);
-          console.log('🎯 Enhanced parser found group (Room/Phase):', groupKey);
+        
+        if (!phases.includes(resource.buildPhase)) {
+          phases.push(resource.buildPhase);
+          console.log('🎯 Enhanced parser found phase:', resource.buildPhase);
         }
       }
 
@@ -221,12 +139,6 @@ export function parseEnhancedCSV(lines: string[]): EnhancedJobData | null {
       grandTotal: totalLabourCost + totalMaterialCost,
       weeklyBreakdown
     },
-    resources: resources.filter(r => r.unitPrice !== undefined),
-    metadata: {
-      clientName,
-      projectType,
-      address,
-      postcode
-    }
+    resources: resources.filter(r => r.unitPrice !== undefined)
   };
 }

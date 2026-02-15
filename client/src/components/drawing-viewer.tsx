@@ -43,11 +43,12 @@ interface DrawingViewerComponentProps {
 }
 
 // Separate IFC component — has its own hook scope, preventing hook count mismatches
-function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoomRename }: {
+function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoomRename, onRoomDelete }: {
     dbRooms: any[];
     dbElements: any[];
     onElementClick?: (element: any) => void;
     onRoomRename?: (id: string, name: string) => void;
+    onRoomDelete?: (id: string, name: string) => void;
 }) {
     // Build room list from dbRooms (from rooms table, includes geometry polygons)
     const viewerRooms = (dbRooms || []).map((r: any, i: number) => {
@@ -98,6 +99,7 @@ function IfcViewerWrapper({ dbRooms = [], dbElements = [], onElementClick, onRoo
                     rooms={viewerRooms}
                     onElementClick={onElementClick}
                     onRoomRename={onRoomRename}
+                    onRoomDelete={onRoomDelete}
                 />
             </div>
         </div>
@@ -554,6 +556,30 @@ export default function DrawingViewer(props: DrawingViewerProps) {
         }
     }
 
+    // NEW: Direct Delete
+    const handleDirectDelete = async (realId: string, name: string) => {
+        console.log(`Deleting Room ID: "${realId}" ("${name}")`);
+        const safeId = encodeURIComponent(realId);
+
+        try {
+            const res = await fetch(`/api/rooms/${safeId}`, {
+                method: 'DELETE',
+            });
+
+            if (res.ok) {
+                queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/rooms`] });
+                queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}/elements`] });
+                toast({ title: "Deleted", description: `Room "${name}" deleted.` });
+            } else {
+                const err = await res.json();
+                alert(`Failed to delete: ${err.error || res.statusText}`);
+            }
+        } catch (e: any) {
+            console.error("Critical error deleting room", e);
+            alert(`Error deleting room: ${e.message}`);
+        }
+    };
+
     // IFC files: use the separate IfcViewerWrapper (own hook scope, no hook count issues)
     const isIFC = file.fileUrl?.toLowerCase().endsWith('.ifc');
     if (isIFC) {
@@ -563,6 +589,7 @@ export default function DrawingViewer(props: DrawingViewerProps) {
                 dbElements={dbElements}
                 onElementClick={handleRoomClick}
                 onRoomRename={handleDirectRename}
+                onRoomDelete={handleDirectDelete}
             />
         );
     }
@@ -577,6 +604,7 @@ export default function DrawingViewer(props: DrawingViewerProps) {
             dbRooms={dbRooms}
             onElementClick={handleRoomClick}
             onRoomRename={handleDirectRename}
+            // onRoomDelete={handleDirectDelete} // TODO: Implement in DrawingViewerComponent
             fileId={file.id}
             onNavigateToElements={onNavigateToElements}
         />

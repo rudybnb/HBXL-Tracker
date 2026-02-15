@@ -43,6 +43,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [loadingStatus, setLoadingStatus] = useState("Initializing Engine...");
+    const [debugParams, setDebugParams] = useState<string>("");
     const [inventory, setInventory] = useState<string>("Scanning...");
 
     // LISTEN FOR FIT EVENT
@@ -114,6 +115,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
     // NEW: Extracted Plans from IFC Geometry
     const [extractedLines, setExtractedLines] = useState<any[]>([]);
+    const [isModelReady, setIsModelReady] = useState(true);
 
     // Label Mode Ref for Event Listeners
     const isLabelModeRef = useRef(false);
@@ -284,6 +286,8 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         const init = async () => {
             if (!isActive) return;
             console.log("🏁 Init Start: " + fileUrl);
+            // DEBUG PATCH: Define missing helper to prevent crash
+            const isItemInMap = (map: any, a: any, b: any) => false;
 
             // Clear Interactables on Init
             interactables.current = [];
@@ -391,7 +395,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
 
                 ifcLoader.settings.webIfc.COORDINATE_TO_ORIGIN = true;
                 ifcLoader.settings.webIfc.USE_FAST_BOOLS = false;
-                ifcLoader.settings.webIfc.USE_WORKER = true;
+                ifcLoader.settings.webIfc.USE_WORKER = false; // Disable worker for stability (missing worker file)
 
                 // Load
                 step = "3. Downloading Model";
@@ -417,12 +421,22 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                         if (!frag.mesh.geometry.boundingBox) frag.mesh.geometry.computeBoundingBox();
                         const box = frag.mesh.geometry.boundingBox!.clone();
                         box.applyMatrix4(frag.mesh.matrixWorld);
+
+                        // SANITY CHECK: Ignore infinite/NaN boxes
+                        if (
+                            !isFinite(box.min.x) || !isFinite(box.min.y) || !isFinite(box.min.z) ||
+                            !isFinite(box.max.x) || !isFinite(box.max.y) || !isFinite(box.max.z)
+                        ) {
+                            console.warn("⚠️ Skipping Invalid BBox for Fragment", frag.id);
+                            continue;
+                        }
+
                         bbox.union(box);
                     }
 
                     console.log("📦 Calculated BBox:", JSON.stringify(bbox));
 
-                    if (!bbox.isEmpty()) {
+                    if (!bbox.isEmpty() && isFinite(bbox.min.x)) {
                         modelBoundsRef.current = bbox.clone(); // CACHE FOR 2D FLIP
 
                         try {
@@ -433,27 +447,43 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                             bbox.getCenter(center);
                             const maxDim = Math.max(s.x, s.z);
 
-                            // 1. Force Ortho
-                            if (comps.camera && comps.camera.projection) {
-                                comps.camera.projection.set('Ortho');
+                            // Valid Check
+                            if (!isFinite(center.x) || !isFinite(center.y) || !isFinite(center.z) || !isFinite(maxDim)) {
+                                throw new Error("Computed Center/Dim is NaN");
                             }
 
-                            // 2. Position Top Down
+                            // 1. Force Ortho
+                            if (comps.camera && comps.camera.projection) {
+                                await comps.camera.projection.set('Ortho');
+                            }
+
+                            // 2. Position Top Down (Aggressive)
                             const controls = comps.camera.controls;
                             if (controls) {
-                                await controls.setPosition(center.x, center.y + maxDim * 2, center.z, true);
-                                await controls.setTarget(center.x, center.y, center.z, true);
-                                await controls.fitToBox(bbox, true);
+                                // Reset first - Instant
+                                await controls.setLookAt(center.x, center.y + 100, center.z, center.x, center.y, center.z, false);
+
+                                await controls.fitToBox(bbox, false); // Instant
 
                                 // 3. Force Zoom/Fit again after a delay to ensure ortho update
                                 setTimeout(async () => {
+                                    if (comps.camera.projection.current !== 'Ortho') await comps.camera.projection.set('Ortho');
                                     await controls.fitToBox(bbox, true);
-                                }, 100);
+                                }, 500); // Increased delay
                             }
 
                             console.log("📸 Forced 2D Top-Down View");
                         } catch (err) {
                             console.warn("⚠️ Camera Setup Error (Non-Critical):", err);
+                            // Fallback to origin if failed
+                            if (comps.camera.controls) {
+                                await comps.camera.controls.setLookAt(0, 100, 0, 0, 0, 0, false);
+                            }
+                        }
+                    } else {
+                        console.warn("⚠️ BBox is Empty or Invalid after calculation");
+                        if (comps.camera.controls) {
+                            await comps.camera.controls.setLookAt(0, 100, 0, 0, 0, 0, false);
                         }
                     }
                 }
@@ -485,6 +515,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                     lines: new THREE.LineBasicMaterial({ color: 0x000000, depthTest: false, linewidth: 2 }), // Black outlines
                 };
 
+                // MANUAL ROOF HIDING & MATERIAL APPLICATION
                 if (model.items) {
                     for (const fragment of model.items) {
                         const mesh = fragment.mesh;
@@ -494,24 +525,76 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                                 mesh.updateMatrixWorld(true);
                                 scene.add(mesh);
 
-                                // Default to WALL style
-                                let mat = styles.wall;
+                                // Get Properties
+                                const expressID = fragment.getItemID(0);
+                                let isRoof = false;
+                                let isSlab = false;
+                                let isWall = false;
+                                let isWindow = false;
+                                let isDoor = false;
+                                let isSpace = false;
 
-                                const fid = fragment.id;
+                                if (model.properties && model.properties[expressID]) {
+                                    const props = model.properties[expressID];
+                                    const typeName = (props.type && String(props.type)) || "";
+                                    const name = (props.Name && props.Name.value) ? props.Name.value.toUpperCase() : "";
 
-                                if (doors && doors[fid]) mat = styles.door;
-                                else if (windows && windows[fid]) mat = styles.window;
-                                else if (slabs && slabs[fid]) mat = styles.slab;
-                                else if (roofs && roofs[fid]) mat = styles.roof;
-                                else if (furniture && furniture[fid]) mat = styles.furniture;
-                                else if (sanitary && sanitary[fid]) mat = styles.sanitary;
-                                else if (electrical && electrical[fid]) mat = styles.electrical;
-                                else if (proxies && proxies[fid]) mat = styles.misc;
+                                    // DEBUG: Capture one of each type
+                                    if (debugParams.length < 500) {
+                                        if (name.includes("ROOF") || name.length > 0) {
+                                            // Append to debug
+                                            let s = `ID ${expressID}: Name=${name}, Type=${typeName}, ObjType=${props.ObjectType?.value}\n`;
+                                            setDebugParams(prev => (prev + s).slice(0, 500));
+                                        }
+                                    }
+
+                                    // Check for Roof
+                                    // IFCTYPE Ref: IfcRoof=393, IfcSlab=435, IfcWall=463 (Standard, but can vary by schema)
+                                    // Safer: String Check
+                                    if (name.includes("ROOF") || (props.ObjectType && props.ObjectType.value && props.ObjectType.value.toUpperCase().includes("ROOF"))) {
+                                        isRoof = true;
+                                        mesh.userData.isRoof = true; // Flag for toggling
+                                    }
+
+                                    // Also check raw type names if available in your loader (sometimes type is just a number)
+                                    // We'll rely on heuristic: Large flat items at top? No, properties are safer.
+
+                                    if (name.includes("FLOOR") || name.includes("SLAB")) isSlab = true;
+                                    if (name.includes("WALL")) isWall = true;
+
+                                    // Identify Windows/Doors for Plan View
+                                    if (name.includes("WINDOW") || name.includes("GLAZING") || props.ObjectType?.value?.toUpperCase().includes("WINDOW")) {
+                                        isWindow = true;
+                                        mesh.userData.isWindow = true;
+                                    }
+                                    if (name.includes("DOOR")) {
+                                        isDoor = true;
+                                        mesh.userData.isDoor = true;
+                                    }
+                                    if (name.includes("SPACE") || typeName.includes("IFCSPACE")) {
+                                        isSpace = true;
+                                        mesh.userData.isSpace = true;
+                                        mesh.userData.type = 'SPACE';
+                                    }
+                                    if (isWall) mesh.userData.isWall = true;
+                                    if (isSlab) mesh.userData.isSlab = true;
+                                }
+
+                                // Apply Materials
+                                let mat = styles.wall; // Default
+                                if (isRoof) {
+                                    mat = styles.roof;
+                                    mesh.visible = false; // HIDE ROOFS IN 2D
+                                } else if (isSlab) {
+                                    mat = styles.slab;
+                                } else if (isWall) {
+                                    mat = styles.wall;
+                                }
 
                                 mesh.material = mat;
 
-                                // Add Black Outlines for Walls/Slabs for 2D Clarity
-                                if (mat === styles.wall || mat === styles.slab) {
+                                // Add Black Outlines (Plan View)
+                                if (!isRoof && (isWall || isSlab || isWindow || isDoor)) {
                                     if (!(mesh instanceof THREE.InstancedMesh)) {
                                         mesh.children = mesh.children.filter(c => !(c instanceof THREE.LineSegments));
                                         const edges = new THREE.EdgesGeometry(mesh.geometry, 80);
@@ -888,7 +971,7 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 // ============================================
                 // 5. PRE-COMPUTE DATA (Optimization)
                 // ============================================
-                step = "5. Pre-Computing";
+                step = "6. Preparing Interaction";
                 setLoadingStatus("Linking Data...");
 
                 const raycastMeshes: THREE.Mesh[] = [];
@@ -1259,61 +1342,250 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
     useEffect(() => {
         if (!components) return;
 
-        // 1. CAMERA LOGIC (PRIORITY)
+        // 1. Common Refs
         const cam = components.camera as OBC.OrthoPerspectiveCamera;
+        const scene = components.scene.get();
+        const clipper = components.tools.get(OBC.EdgesClipper);
+        const controls = cam.controls;
 
-        if (cam && cam.controls) {
-            console.log(`🎥 View Mode Reinforce: 2D`);
-
-            // FORCE 2D CONFIGURATION ALWAYS
+        // --- ROBUST MODEL LOADER & ORIENTATION FIX ---
+        // useEffect(() => {
+        const i = setInterval(() => {
+            if (!components) return;
             try {
-                if (cam.projection.current !== 'Ortho') {
-                    cam.projection.set('Ortho');
-                }
-
-                // Force white background for plan
-                const scene = components.scene.get();
-                scene.background = new THREE.Color(0xffffff);
-
-                // Enable Clipper
-                const clipper = components.tools.get(OBC.EdgesClipper);
-                if (clipper) {
-                    try {
-                        clipper.enabled = true;
-
-                        // Robust Clear
-                        if (clipper.deleteAll) {
-                            clipper.deleteAll();
-                        } else if (clipper.planes && clipper.planes.length > 0) {
-                            const pCopy = [...clipper.planes];
-                            pCopy.forEach(p => clipper.delete(p));
+                const fragments = components.tools.get(OBC.FragmentManager);
+                if (fragments && fragments.groups.length > 0) {
+                    const model = fragments.groups[0];
+                    if (!model.userData.processed) {
+                        // Check Orientation
+                        const bbox = new THREE.Box3().setFromObject(model);
+                        const size = new THREE.Vector3(); bbox.getSize(size);
+                        // Z-Up Detection (Height > Depth/Width)
+                        if (size.z > size.y * 5) {
+                            model.rotation.x = -Math.PI / 2;
+                            model.updateMatrixWorld(true);
+                            model.userData.isRotated = true;
+                            if (modelBoundsRef.current) modelBoundsRef.current.setFromObject(model);
+                            console.log("🔄 Fixed Z-Up Orientation");
                         }
+                        model.userData.processed = true;
+                        setIsModelReady(true);
+                        clearInterval(i);
 
-                        // DETERMINE CUT PLANE
-                        let scale = 1;
-                        if (modelBoundsRef.current) {
-                            const s = new THREE.Vector3();
-                            modelBoundsRef.current.getSize(s);
-                            if (Math.max(s.x, s.y, s.z) > 50) scale = 1000;
-                        }
-
-                        // Calculate Absolute Cut Height
-                        const cutY = (modelBoundsRef.current?.min.y || 0) + (sliceOffset || 1.2) * scale;
-
-                        console.log(`✂️ Updating Clipper Y=${cutY.toFixed(2)}`);
-
-                        clipper.createFromNormalAndCoplanarPoint(
-                            new THREE.Vector3(0, -1, 0),
-                            new THREE.Vector3(0, cutY, 0)
-                        );
-
-                    } catch (err) {
-                        console.error("⚠️ Error managing Clipper:", err);
+                        // Force Fit & Slicer Update
+                        setTimeout(() => {
+                            if (components.camera) components.camera.controls.fitToBox(model, true);
+                            // Trigger Slicer by tweaking slice slightly? No, logic handles it.
+                        }, 500);
+                    } else {
+                        // Already processed
+                        setIsModelReady(true);
+                        clearInterval(i);
                     }
                 }
+            } catch (e) { console.error(e); }
+        }, 500);
+        // return () => clearInterval(i);
+        // }, [components, fileUrl]);
 
-            } catch (e) { console.error("2D Switch Error", e); }
-        }
+        const handleModeSwitch = async () => {
+            // Ensure camera is ready
+            if (!cam || !controls) return;
+
+            // RUNTIME DEBUG MOVED TO END
+
+
+            if (viewMode === '3d') {
+                console.log("🎥 Switch to 3D Orbit");
+                if (cam.projection.current !== 'Perspective') await cam.projection.set('Perspective');
+                if (clipper) clipper.enabled = false;
+                scene.background = new THREE.Color(0xf0f0f0); // Soft Grey
+
+                const bbox = modelBoundsRef.current;
+
+                scene.traverse((obj) => {
+                    if (obj instanceof THREE.Mesh) {
+                        // Restore Original Material
+                        if (obj.userData.originalMat) obj.material = obj.userData.originalMat;
+
+                        // Restore Visibility
+                        if (obj.userData.isRoof) obj.visible = true;
+                        if (obj.userData.isSlab) obj.visible = true;
+
+                        // Hide 2D Outline
+                        const line = obj.children.find(c => c.name === '2d-outline');
+                        if (line) line.visible = false;
+                    }
+                });
+
+                // 3D Camera Pose
+                if (bbox && !bbox.isEmpty()) {
+                    const center = new THREE.Vector3(); bbox.getCenter(center);
+                    const size = new THREE.Vector3(); bbox.getSize(size);
+                    const maxDim = Math.max(size.x, size.y, size.z) || 100;
+                    await controls.setLookAt(center.x + maxDim, center.y + maxDim, center.z + maxDim, center.x, center.y, center.z, true);
+                    await controls.fitToBox(bbox, true);
+                }
+
+            } else {
+                console.log("🎥 Switch to 2D Plan");
+                try {
+                    if (cam.projection.current !== 'Ortho') await cam.projection.set('Ortho');
+                } catch (e) { console.error("Camera Ortho Error:", e); }
+
+                scene.background = new THREE.Color(0xffffff); // Pure White
+
+                // 2D Clipper (Wrapped)
+                try {
+                    if (clipper) {
+                        clipper.enabled = true;
+                        if (modelBoundsRef.current && (!clipper.planes || clipper.planes.length === 0)) {
+                            if (clipper.deleteAll) clipper.deleteAll();
+                            let scale = 1;
+                            const s = new THREE.Vector3();
+                            if (!modelBoundsRef.current.isEmpty()) modelBoundsRef.current.getSize(s);
+                            if (Math.max(s.x, s.y, s.z) > 50) scale = 1000;
+                            const cutY = (modelBoundsRef.current.min.y || 0) + (sliceOffset || 1.2) * scale;
+                            clipper.createFromNormalAndCoplanarPoint(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, cutY, 0));
+                        }
+                    }
+                } catch (e) { console.error("Clipper Error:", e); }
+
+                // PLAN STYLES
+                const PLAN_MAT_WALL = new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+                const PLAN_MAT_WINDOW = new THREE.MeshBasicMaterial({ color: 0xdbfaff, transparent: true, opacity: 0.7, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+                const PLAN_MAT_DOOR = new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+                const PLAN_MAT_SLAB = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const PLAN_MAT_MISC = new THREE.MeshBasicMaterial({ color: 0xf5f5f5 });
+
+                scene.traverse((obj) => {
+                    try {
+                        if (obj instanceof THREE.Mesh) {
+                            // AUTO-FIX: If no type, classify by geometry
+                            if (obj.userData.type === undefined || obj.userData.type === 'MISC') {
+                                if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+                                const b = obj.geometry.boundingBox;
+                                if (b) {
+                                    const s = new THREE.Vector3(); b.getSize(s);
+
+                                    // Unit Detection (MM vs M)
+                                    const isMM = (s.x > 100 || s.y > 100 || s.z > 100);
+                                    const slabThick = isMM ? 600 : 0.6;
+                                    const wallH = isMM ? 2000 : 2.0;
+
+                                    // Slabs are flat (Y-Up or Z-Up)
+                                    // If Flat Y (< Thick) -> Slab
+                                    // If Tall Z (> WallH) -> Wall (Z-Up) OR Wall (Y-Up Long Wall)? 
+                                    // Priority: Check Height.
+
+                                    if (s.y > wallH) {
+                                        obj.userData.type = 'WALL'; obj.userData.isWall = true;
+                                    } else if (s.z > wallH && s.y > slabThick) {
+                                        // Tall Z and not flat Y -> Wall (Z-Up)
+                                        obj.userData.type = 'WALL'; obj.userData.isWall = true;
+                                    } else if (s.y < slabThick) {
+                                        obj.userData.type = 'SLAB'; obj.userData.isSlab = true;
+                                    }
+
+                                    // Roof Check via Height
+                                    const c = new THREE.Vector3(); b.getCenter(c);
+                                    const roofH = isMM ? 2800 : 2.8;
+
+                                    if (c.y > roofH) {
+                                        obj.userData.type = 'ROOF';
+                                        obj.userData.isRoof = true;
+                                        obj.userData.isSlab = false;
+                                        obj.userData.isWall = false;
+                                    }
+                                }
+                            }
+
+                            // Save Original if missing
+                            if (!obj.userData.originalMat) obj.userData.originalMat = obj.material;
+
+                            // Apply Plan Material based on flags set in Init
+                            if (obj.userData.isWall) obj.material = PLAN_MAT_WALL;
+                            else if (obj.userData.isWindow) obj.material = PLAN_MAT_WINDOW;
+                            else if (obj.userData.isDoor) obj.material = PLAN_MAT_DOOR;
+                            else if (obj.userData.isSlab) obj.material = PLAN_MAT_SLAB;
+                            else obj.material = PLAN_MAT_MISC;
+
+                            // Transparency logic for windows
+                            if (obj.userData.isWindow) {
+                                obj.visible = true;
+                            }
+
+                            // Visibility: Hide Roofs & Slabs (for simpler plan look)
+                            if (obj.userData.isRoof) obj.visible = false;
+                            else if (obj.userData.isSlab) obj.visible = false; // Hide floor to see grid/white bg clearly
+                            else obj.visible = true;
+
+                            // Show or Create 2D Outline
+                            let line = obj.children.find(c => c.name === '2d-outline');
+                            if (!line && (obj.userData.isWall || obj.userData.isWindow || obj.userData.isDoor)) {
+                                // Create Lazy Outline (With Depth Test to prevent X-Ray)
+                                const edges = new THREE.EdgesGeometry(obj.geometry, 80);
+                                const l = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, depthTest: true }));
+                                l.name = '2d-outline';
+                                l.renderOrder = 999;
+                                obj.add(l);
+                                line = l;
+                            }
+
+                            if (line) {
+                                line.visible = true;
+                                if (line.material instanceof THREE.LineBasicMaterial) line.material.color.setHex(0x000000);
+                            }
+                        }
+                    } catch (e) { console.error(e); }
+                });
+
+                // Top Down Camera
+                const bbox = modelBoundsRef.current;
+                if (bbox && !bbox.isEmpty()) {
+                    const center = new THREE.Vector3(); bbox.getCenter(center);
+                    const size = new THREE.Vector3(); bbox.getSize(size);
+                    const maxDim = Math.max(size.x, size.y, size.z) || 100;
+                    await controls.setLookAt(center.x, center.y + maxDim * 2 + 100, center.z, center.x, center.y, center.z, true);
+                    await controls.fitToBox(bbox, true);
+                }
+            }
+
+            // FINAL COMPLETION LOG
+            try {
+                let log = "";
+                let count = 0;
+                scene.traverse((obj) => {
+                    if (obj instanceof THREE.Mesh && count < 5) {
+                        const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+                        const col = mat && mat.color ? mat.color.getHexString() : "N/A";
+                        // Log Bounds to Debug Fallback
+                        let dims = "N/A";
+                        if (obj.geometry.boundingBox) {
+                            const s = new THREE.Vector3(); obj.geometry.boundingBox.getSize(s);
+                            dims = `${Math.round(s.x)}x${Math.round(s.y)}x${Math.round(s.z)}`;
+                        }
+                        const visible = obj.visible ? "YES" : "NO";
+                        const isSpace = obj.userData.isSpace ? "YES" : "NO";
+                        log += `M${obj.id}: Type='${obj.userData.type || "?"}', Space=${isSpace}, Vis=${visible}, Size=${dims}\n`;
+                        count++;
+                    }
+                });
+                const propRooms = rooms?.length || 0;
+                const slicerCount = extractedLines?.length || 0;
+
+                // Safe Rotation Check
+                let isRotStr = "NO";
+                try {
+                    const group = components.tools.get(OBC.FragmentManager)?.groups[0];
+                    if (group?.userData?.isRotated) isRotStr = "YES";
+                } catch (e) { }
+
+                setDebugParams(prev => (prev ? prev.split("Runtime")[0] : "") + `\nRuntime Stats: PropRooms=${propRooms}, SlicerLines=${slicerCount}, Rotated=${isRotStr}, CamY=${Math.round(components.camera.get().position.y)}\n` + log);
+            } catch (e) { console.error(e); }
+        };
+
+        handleModeSwitch(); // Restore Execution
     }, [viewMode, components, sliceOffset]);
 
     const ROOM_NAMES = [
@@ -1345,6 +1617,93 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         setLabelMenu(null);
         setIsLabelMode(false);
     };
+
+    // --- ROOM LABELS & VECTOR LINES OVERLAY ---
+    const [roomLabels, setRoomLabels] = useState<any[]>([]);
+    const [screenLines, setScreenLines] = useState<any[]>([]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        const cam = components?.camera.get();
+        const controls = components?.camera.controls;
+
+        if (!container || !cam || !components) return;
+
+        // AUTO-ROTATE Moved to Loader Effect
+
+        const updateOverlays = () => {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // 1. Room Labels
+            if (rooms && rooms.length > 0) {
+                const labels = rooms.map(room => {
+                    if (!room.geometry) return null;
+                    try {
+                        const pts = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
+                        if (!Array.isArray(pts) || pts.length === 0) return null;
+
+                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                        pts.forEach((p: any) => {
+                            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+                            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+                        });
+                        const cx = (minX + maxX) / 2;
+                        const cy = (minY + maxY) / 2;
+
+                        // Map 2D (x,y) -> 3D (x,z)
+                        let floorY = modelBoundsRef.current ? modelBoundsRef.current.min.y : 0;
+                        const worldPos = new THREE.Vector3(cx, floorY + 1.0, cy);
+                        const s = worldPos.project(cam);
+
+                        if (s.z > 1) return null; // Behind camera
+
+                        return {
+                            id: room.id, name: room.name, area: room.area,
+                            x: (s.x * 0.5 + 0.5) * width,
+                            y: (-(s.y * 0.5) + 0.5) * height
+                        };
+                    } catch (e) { return null; }
+                }).filter(Boolean);
+                setRoomLabels(labels);
+            }
+
+            // 2. Vector Lines (Slicer)
+            if (extractedLines && extractedLines.length > 0 && viewMode === '2d') {
+                const lines = extractedLines.map((l: any, i: number) => {
+                    if (l.subtype !== 'segment') return null;
+                    // Project Start/End
+                    const v1 = new THREE.Vector3(l.p1.x, 0, l.p1.y); // Y in Slicer is Z in World
+                    const v2 = new THREE.Vector3(l.p2.x, 0, l.p2.y);
+
+                    v1.project(cam);
+                    v2.project(cam);
+
+                    return {
+                        id: i,
+                        x1: (v1.x * 0.5 + 0.5) * width,
+                        y1: (-(v1.y * 0.5) + 0.5) * height,
+                        x2: (v2.x * 0.5 + 0.5) * width,
+                        y2: (-(v2.y * 0.5) + 0.5) * height,
+                        type: l.type
+                    };
+                }).filter(Boolean);
+                setScreenLines(lines);
+            } else {
+                setScreenLines([]);
+            }
+        };
+
+        if (controls) controls.addEventListener('change', updateOverlays);
+        window.addEventListener('resize', updateOverlays);
+        window.addEventListener('viewer-fit-camera', () => setTimeout(updateOverlays, 100));
+        updateOverlays();
+
+        return () => {
+            if (controls) controls.removeEventListener('change', updateOverlays);
+            window.removeEventListener('resize', updateOverlays);
+        };
+    }, [components, rooms, extractedLines, viewMode]);
 
     // --- INTERACTIVE EVENTS (SAFE & CLEANED UP) ---
     useEffect(() => {
@@ -1486,13 +1845,19 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
         if (!components) return;
 
         const bbox = modelBoundsRef.current;
-        if (bbox && !bbox.isEmpty()) {
+        if (bbox && !bbox.isEmpty() && isFinite(bbox.min.x)) {
             const center = new THREE.Vector3();
             bbox.getCenter(center);
             const size = new THREE.Vector3();
             bbox.getSize(size);
 
             const maxDim = Math.max(size.x, size.z);
+
+            if (!isFinite(center.x) || !isFinite(maxDim)) {
+                console.error("⚠️ Cannot Fit: Center/Dim is NaN");
+                return;
+            }
+
             console.log(`🔘 Manual Fit: Center [${center.x | 0}, ${center.y | 0}, ${center.z | 0}] Dim: ${maxDim | 0}`);
 
             const cam = components.camera;
@@ -1524,15 +1889,30 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             }, 100);
 
         } else {
-            console.warn("⚠️ No Model Bounds to Fit");
+            console.warn("⚠️ No Valid Model Bounds to Fit");
+            // Fallback to Origin
+            const cam = components.camera;
+            cam.controls.setLookAt(0, 100, 0, 0, 0, 0, true);
         }
     };
 
     return (
         <div className="relative w-full h-full flex flex-col bg-slate-50 overflow-hidden">
-            {/* DEBUG OVERLAY */}
+            {/* ROBUST LOADING OVERLAY */}
+            {!isModelReady && (
+                <div className="absolute inset-0 z-[2000] bg-slate-50 flex flex-col items-center justify-center p-8 space-y-4">
+                    <div className="w-12 h-12 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin"></div>
+                    <div className="text-slate-700 font-semibold text-lg animate-pulse">Analyzing Model Orientation...</div>
+                    <div className="text-sm text-slate-500 max-w-sm text-center">
+                        Detecting coordinate system (Z-Up vs Y-Up) and performing vector extraction. Please wait...
+                    </div>
+                </div>
+            )}
+
+            {/* DEBUG OVERLAY - VISIBLE */}
             <div className="absolute top-10 right-0 bg-black/80 text-green-400 text-[10px] p-2 z-[999] pointer-events-none font-mono rounded m-2 max-w-xs block">
-                <div className="font-bold border-b border-white/20 mb-1 text-cyan-400">v5.0 - Fragments + Worker</div>
+                <div className="font-bold border-b border-white/20 mb-1 text-cyan-400">v5.1 - Debug Toggle</div>
+                <div className="font-bold text-white bg-blue-600 px-1 rounded mb-1">Mode Prop: {viewMode}</div>
                 <div className="font-bold border-b border-white/20 mb-1">Diagnose ID: {id?.slice(0, 4)}</div>
                 <div className="text-yellow-400 border-b border-white/20 mb-1">{cameraStats}</div>
                 {debugLog.map((l, i) => <div key={i}>{l}</div>)}
@@ -1552,16 +1932,62 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
                 >
                     {isLabelMode ? 'Label Mode: ON' : 'Label Rooms 🏷️'}
                 </button>
+
+                {/* DEBUG PROPS */}
+                <div className="mt-2 bg-slate-900/90 text-white text-[9px] p-1 rounded max-h-32 overflow-auto whitespace-pre-wrap pointer-events-auto select-text">
+                    {debugParams || "No Props Captured"}
+                </div>
+
+            </div>
+
+            {/* VECTOR LINES OVERLAY */}
+            <div className="absolute inset-0 pointer-events-none z-0">
+                <svg className="w-full h-full">
+                    {screenLines.map(l => (
+                        <line key={l.id} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                            stroke={l.type === 'wall' ? 'black' : l.type === 'window' ? '#38bdf8' : '#d97706'}
+                            strokeWidth={l.type === 'wall' ? 2 : 1}
+                            opacity={0.8} />
+                    ))}
+                </svg>
+            </div>
+
+            {/* ROOM LABELS OVERLAY */}
+            <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+                {roomLabels.map((lbl: any) => (
+                    <div
+                        key={lbl.id}
+                        className="absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center text-center pointer-events-auto cursor-pointer group"
+                        style={{ left: lbl.x, top: lbl.y }}
+                        onClick={() => {
+                            if (isLabelMode) {
+                                setLabelMenu({ item: { element: { userData: { api: lbl } } } as any, x: lbl.x, y: lbl.y });
+                            }
+                        }}
+                    >
+                        <div className={`text-xs font-bold px-1 rounded ${isLabelMode ? 'bg-black/50 text-white' : 'text-slate-800 drop-shadow-md'}`}
+                            style={{ textShadow: '0px 0px 2px white' }}>
+                            {lbl.name}
+                        </div>
+                        {lbl.area && (
+                            <div className="text-[10px] text-slate-500 font-mono bg-white/80 px-1 rounded border border-slate-200 shadow-sm mt-1">
+                                {parseFloat(lbl.area).toFixed(1)} m²
+                            </div>
+                        )}
+                    </div>
+                ))}
             </div>
 
             {/* ERROR UI */}
-            {error && (
-                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white p-8">
-                    <div className="text-red-500 font-bold mb-2">Error Loading 3D Engine</div>
-                    <div className="text-sm text-gray-600 mb-4 text-center">{error}</div>
-                    <Button onClick={() => window.location.reload()} variant="outline">Reload Page</Button>
-                </div>
-            )}
+            {
+                error && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white p-8">
+                        <div className="text-red-500 font-bold mb-2">Error Loading 3D Engine</div>
+                        <div className="text-sm text-gray-600 mb-4 text-center">{error}</div>
+                        <Button onClick={() => window.location.reload()} variant="outline">Reload Page</Button>
+                    </div>
+                )
+            }
 
             {/* CANVAS (3D Only) */}
             <div
@@ -1571,13 +1997,15 @@ export const ProfessionalIFCViewer = React.memo(({ fileUrl, id, rooms = [], onEl
             ></div>
 
             {/* Loading Overlay */}
-            {loading && (
-                <div className="absolute inset-0 z-40 bg-white/80 flex flex-col items-center justify-center">
-                    <Loader2 className="h-8 w-8 text-amber-500 animate-spin mb-4" />
-                    <p className="text-slate-600 font-medium">{loadingStatus}</p>
-                </div>
-            )}
-        </div>
+            {
+                loading && (
+                    <div className="absolute inset-0 z-40 bg-white/80 flex flex-col items-center justify-center">
+                        <Loader2 className="h-8 w-8 text-amber-500 animate-spin mb-4" />
+                        <p className="text-slate-600 font-medium">{loadingStatus}</p>
+                    </div>
+                )
+            }
+        </div >
     );
 }); // Close Memo (Default Shallow Compare)
 

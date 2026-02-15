@@ -17,8 +17,10 @@
  */
 
 import { db } from './db';
-import { rooms, roomElements, payableItems, extractedElements, InsertRoom, InsertRoomElement, InsertPayableItem } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { rooms, roomElements, payableItems, extractedElements, jobFiles, jobs, InsertRoom, InsertRoomElement, InsertPayableItem } from '@shared/schema';
+import { eq, like, and, inArray } from 'drizzle-orm';
+import * as WebIFC from 'web-ifc';
+import fs from 'fs/promises';
 
 // =============================================================================
 // AGENTS.md Section 17 - GLOBAL / NON-ROOM ELEMENTS
@@ -226,6 +228,116 @@ export class RoomMapper {
      * Clears all allocated costs from rooms for a specific job
      * Used before re-running allocation to prevent duplication
      */
+    /**
+     * DYNAMIC CLASSIFICATION: Reads uploaded IFC model to identify physical products.
+     * Overrides CSV 'Labour' classification if the item matches a physical IFC entity.
+     * Prevents hardcoding/duplicating CSV data in code.
+     */
+    async classifyItemsFromValidationModel(jobId: string): Promise<void> {
+        console.log(`🏗️ Starting IFC-based item classification for Job ${jobId}...`);
+
+        const files = await db.select().from(jobFiles).where(eq(jobFiles.jobId, jobId));
+        const ifcFile = files.find(f => f.filename.endsWith('.ifc') || f.fileType?.includes('ifc'));
+
+        if (!ifcFile || !ifcFile.filePath) {
+            console.log(`⚠️ No IFC file found. Skipping advanced classification.`);
+            return;
+        }
+
+        try {
+            const content = await fs.readFile(ifcFile.filePath, 'utf-8');
+            const upper = content.toUpperCase();
+
+            const materialKeywords = new Set<string>();
+
+            // Dynamic Mapping from IFC Entities to Material Keywords
+            // If the IFC contains these entities, we treat matching items as Material (not Labour)
+            if (upper.includes('IFCCABLESEGMENT')) { materialKeywords.add('cable'); materialKeywords.add('wire'); }
+            if (upper.includes('IFCCABLECARRIERSEGMENT')) { materialKeywords.add('tray'); materialKeywords.add('trunking'); materialKeywords.add('basket'); }
+            if (upper.includes('IFCJUNCTIONBOX')) { materialKeywords.add('box'); materialKeywords.add('patress'); }
+            if (upper.includes('IFCFASTENER') || upper.includes('IFCMECHANICALFASTENER')) {
+                materialKeywords.add('clip'); materialKeywords.add('screw'); materialKeywords.add('plug'); materialKeywords.add('nail'); materialKeywords.add('strap'); materialKeywords.add('band');
+            }
+            if (upper.includes('IFCOUTLET') || upper.includes('IFCDISTRIBUTIONELEMENT') || upper.includes('IFCSWITCHINGDEVICE')) {
+                materialKeywords.add('socket'); materialKeywords.add('switch'); materialKeywords.add('plate'); materialKeywords.add('module'); materialKeywords.add('outlet');
+            }
+            if (upper.includes('IFCFLOWSEGMENT')) { materialKeywords.add('pipe'); materialKeywords.add('duct'); }
+
+            if (materialKeywords.size === 0) {
+                console.log('ℹ️ No specific MEP entities found in IFC. Skipping reclassification.');
+                return;
+            }
+
+            console.log(`✅ IFC Analysis found entities matching: ${Array.from(materialKeywords).join(', ')}`);
+
+            // Apply to existing items
+            const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+            let updatedCount = 0;
+
+            for (const room of jobRooms) {
+                const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+                for (const el of elements) {
+                    const items = await db.select().from(payableItems).where(eq(payableItems.elementId, el.id));
+
+                    for (const item of items) {
+                        const desc = item.description.toLowerCase();
+                        // Only reclassify if currently LABOUR (or unknown) and matches a confirmed material
+                        // We don't touch PLANT
+                        if (item.itemType === 'PLANT') continue;
+
+                        const isMatch = Array.from(materialKeywords).some(kw => desc.includes(kw));
+
+                        if (isMatch && item.itemType !== 'MATERIAL') {
+                            await db.update(payableItems)
+                                .set({ itemType: 'MATERIAL' })
+                                .where(eq(payableItems.id, item.id));
+                            updatedCount++;
+                        }
+                    }
+                }
+            }
+            console.log(`✅ Reclassified ${updatedCount} items as MATERIAL based on IFC evidence.`);
+
+            // 4. Update phaseTaskData (JSON Blob) to ensure Tender Documents are also correct
+            // (QSCalculator reads from this blob, not the payableItems table)
+            const jobRecord = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
+            if (jobRecord[0] && jobRecord[0].phaseTaskData) {
+                try {
+                    const phaseData = JSON.parse(jobRecord[0].phaseTaskData);
+                    const phases = phaseData.phases || phaseData;
+                    let jsonChanged = false;
+
+                    for (const [pName, pItems] of Object.entries(phases) as [string, any[]][]) {
+                        for (const item of pItems) {
+                            const desc = (item.description || item.task || "").toLowerCase();
+                            if (item.resourceType === 'PLANT') continue;
+
+                            if (Array.from(materialKeywords).some(kw => desc.includes(kw))) {
+                                if (item.resourceType !== 'MATERIAL') {
+                                    item.resourceType = 'MATERIAL';
+                                    if (item.category) item.category = 'MATERIAL';
+                                    jsonChanged = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (jsonChanged) {
+                        await db.update(jobs)
+                            .set({ phaseTaskData: JSON.stringify(phaseData) })
+                            .where(eq(jobs.id, jobId));
+                        console.log(`✅ Sync: Updated phaseTaskData JSON blob to reflect IFC classifications.`);
+                    }
+                } catch (e) {
+                    console.warn("Could not sync phaseTaskData JSON", e);
+                }
+            }
+
+        } catch (err) {
+            console.error('Error classifying from IFC:', err);
+        }
+    }
+
     async clearRoomCosts(jobId: string): Promise<void> {
         console.log(`🧹 Clearing room allocations for Job ${jobId}...`);
 
@@ -750,6 +862,45 @@ export class RoomMapper {
     }
 
     /**
+     * Helper to compute geometric metrics for a room
+     */
+    private calculateRoomGeometryMetrics(room: any) {
+        const area = parseFloat(room.area || '0');
+        let perimeter = 0;
+
+        // Calculate perimeter from geometry if available
+        if (room.geometry) {
+            try {
+                const geom = typeof room.geometry === 'string' ? JSON.parse(room.geometry) : room.geometry;
+                if (Array.isArray(geom) && geom.length >= 3) {
+                    for (let i = 0; i < geom.length; i++) {
+                        const j = (i + 1) % geom.length;
+                        const dx = (geom[j].x || geom[j][0]) - (geom[i].x || geom[i][0]);
+                        const dy = (geom[j].y || geom[j][1]) - (geom[i].y || geom[i][1]);
+                        perimeter += Math.sqrt(dx * dx + dy * dy);
+                    }
+                    // Normalize: if coords in mm (very large), convert to m
+                    if (perimeter > 200) perimeter /= 1000;
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // Fallback: estimate perimeter from area (assume square room)
+        if (perimeter === 0 && area > 0) {
+            perimeter = 4 * Math.sqrt(area);
+        }
+
+        const CEILING_HEIGHT = 2.4; // Standard UK residential
+
+        return {
+            floorArea: area,
+            wallPerimeter: perimeter,
+            wallArea: perimeter * CEILING_HEIGHT,
+            ceilingArea: area
+        };
+    }
+
+    /**
      * Gets all rooms with their elements and items for a job
      */
     async getRoomDataForJob(jobId: string): Promise<RoomData[]> {
@@ -793,12 +944,14 @@ export class RoomMapper {
                         rate: parseFloat(item.rate) / 100, // Convert from pence
                         total: parseFloat(item.total) / 100, // Convert from pence
                         status: item.status,
-                        status: item.status,
                         assignedContractorName: item.assignedContractorName || undefined,
-                        itemType: item.itemType || "MATERIAL"
+                        itemType: item.itemType || "MATERIAL",
+                        hbxlSourcePhase: item.hbxlSourcePhase || undefined
                     }))
                 });
             }
+
+            const metrics = this.calculateRoomGeometryMetrics(room);
 
             roomData.push({
                 id: room.id,
@@ -811,13 +964,484 @@ export class RoomMapper {
                 page: room.page || 1,
                 bbox: room.bbox ? JSON.parse(room.bbox) : undefined,
                 geometry: room.geometry ? JSON.parse(room.geometry) : undefined,
-                area: room.area || undefined
+                area: room.area || undefined,
+                metrics: metrics
             });
         }
 
         return roomData;
     }
+
+    async getRoomPackagesForJob(jobId: string): Promise<any> {
+        const roomsList = await this.getRoomDataForJob(jobId);
+        const extracted = await db.select().from(extractedElements).where(eq(extractedElements.jobId, jobId));
+
+        // Global Elements Categorization
+        const globalItems = extracted.filter(e => e.roomName === 'Global');
+
+        const categorizeGlobal = (items: any[]) => {
+            const cats: Record<string, any[]> = {
+                'Foundations / Concrete': [],
+                'Ground Floor / Slab': [],
+                'External Walls / Brickwork': [],
+                'Roof Structure': [],
+                'Roof Covering': [],
+                'Other Global Items': []
+            };
+
+            items.forEach(i => {
+                const t = (i.elementType || '').toLowerCase();
+                const n = (i.name || '').toLowerCase();
+
+                if (t.includes('footing') || t.includes('foundation') || n.includes('concrete')) cats['Foundations / Concrete'].push(i);
+                else if (t.includes('slab') || t.includes('floor')) cats['Ground Floor / Slab'].push(i);
+                else if (t.includes('wall') || t.includes('brick')) cats['External Walls / Brickwork'].push(i);
+                else if (t.includes('roof') || t.includes('truss') || t.includes('rafte')) cats['Roof Structure'].push(i);
+                else if (t.includes('cover') || t.includes('tile') || t.includes('felt')) cats['Roof Covering'].push(i);
+                else cats['Other Global Items'].push(i);
+            });
+
+            // Remove empty categories
+            Object.keys(cats).forEach(k => {
+                if (cats[k].length === 0) delete cats[k];
+            });
+
+            return cats;
+        };
+
+        return {
+            jobId,
+            projectName: "Unknown Client",
+            globalElements: categorizeGlobal(globalItems),
+            rooms: roomsList.map(r => {
+                // 1. Elements
+                const roomExtracted = extracted.filter(e => e.roomName === r.name);
+
+                // 2. Work Packages
+                // Flatten all items from all elements
+                const allItems = r.elements.flatMap(e => e.items.map(i => ({ ...i, elementName: e.name })));
+
+                const firstFix = allItems.filter(i =>
+                    (i.hbxlSourcePhase && i.hbxlSourcePhase.includes('1st Fix')) ||
+                    (i.elementName.includes('First Fix')) ||
+                    (i.elementName.includes('Structure')) ||
+                    (i.elementName.includes('Foundations')) ||
+                    (i.elementName.includes('Wall Construction'))
+                );
+
+                const secondFix = allItems.filter(i =>
+                    (i.hbxlSourcePhase && i.hbxlSourcePhase.includes('2nd Fix')) ||
+                    (i.elementName.includes('Second Fix')) ||
+                    (i.elementName.includes('Decoration')) ||
+                    (i.elementName.includes('Plastering')) ||
+                    (i.elementName.includes('Finishes')) ||
+                    (i.elementName.includes('Fixtures'))
+                );
+
+                const completion = allItems.filter(i =>
+                    i.elementName.includes('Snagging') || i.elementName.includes('Completion')
+                );
+
+                // Derived Quantities
+                const metrics = r.metrics || { floorArea: 0, wallPerimeter: 0, wallArea: 0, ceilingArea: 0 };
+
+                // Subtract openings from wall area / perimeter
+                // Helper to normalize dimensions (mm -> m)
+                const parseDim = (val: string | null, defaultM: number) => {
+                    let v = parseFloat(val || '0');
+                    if (v === 0) return defaultM;
+                    if (v > 50) return v / 1000;
+                    return v;
+                };
+
+                const doorWidths = roomExtracted.filter(e => e.elementType === 'door')
+                    .reduce((sum, d) => sum + parseDim(d.dimensions, 0.8), 0);
+
+                const doorAreas = roomExtracted.filter(e => e.elementType === 'door')
+                    .reduce((sum, d) => sum + (parseDim(d.dimensions, 0.8) * 2.0), 0); // Assume 2.0m height
+
+                const windowAreas = roomExtracted.filter(e => e.elementType === 'window')
+                    .reduce((sum, w) => sum + (parseDim(w.dimensions, 1.2) * 1.2), 0); // Assume 1.2m height
+
+                const netWallArea = Math.max(0, metrics.wallArea - doorAreas - windowAreas);
+                const netSkirting = Math.max(0, metrics.wallPerimeter - doorWidths);
+
+                return {
+                    roomId: r.id,
+                    name: r.name,
+                    areaM2: parseFloat(r.area || '0'),
+                    geometry: {
+                        perimeterLm: metrics.wallPerimeter,
+                        netWallAreaM2: netWallArea,
+                        ceilingAreaM2: metrics.ceilingArea,
+                        floorAreaM2: metrics.floorArea
+                    },
+                    elements: {
+                        doors: roomExtracted.filter(e => e.elementType === 'door'),
+                        windows: roomExtracted.filter(e => e.elementType === 'window'),
+                        electrical: roomExtracted.filter(e => ['socket', 'switch', 'light'].includes(e.elementType)),
+                        plumbing: roomExtracted.filter(e => ['sanitary', 'radiator'].includes(e.elementType))
+                    },
+                    derivedQuantities: {
+                        floorFinishAreaM2: metrics.floorArea,
+                        ceilingPaintAreaM2: metrics.ceilingArea,
+                        skirtingLengthLm: netSkirting,
+                        wallPaintAreaM2: netWallArea
+                    },
+                    workPackage: {
+                        firstFix,
+                        secondFix,
+                        completion
+                    }
+                };
+                // Keep original return logic...
+                // ...
+            })
+        };
+    }
+
+    /**
+     * Transforms room packages into strict Tender JSON format
+     */
+    async getTenderDataForJob(jobId: string): Promise<any> {
+        const pkgData = await this.getRoomPackagesForJob(jobId);
+
+        // Helper to map global items (extractedElements) to Tender Items
+        const mapGlobalItem = (i: any, globalIdx: number) => {
+            let qty = 1;
+            let unit = 'nr';
+
+            // Extract quantity from properties
+            // IfcWall -> Area
+            const t = (i.elementType || '').toLowerCase();
+            if (t.includes('wall') || t.includes('slab') || t.includes('roof') || t.includes('floor')) {
+                unit = 'm2';
+                qty = parseFloat(String(i.properties?.Area || i.properties?.NetArea || i.properties?.GrossArea || i.properties?.NetSideArea || 0));
+            } else if (t.includes('footing') || t.includes('foundation')) {
+                unit = 'm3';
+                qty = parseFloat(String(i.properties?.NetVolume || i.properties?.Volume || 0));
+            }
+
+            if (qty === 0 && i.dimensions) {
+                // Try dimensions string? Often unreliable without parser.
+                // Fallback to 1 nr
+                unit = 'nr';
+                qty = 1;
+            }
+
+            return {
+                itemId: i.id || `g_${globalIdx}`,
+                description: `${i.name || i.type} (${i.elementType || 'Global'})`,
+                unit,
+                quantity: qty || 0,
+                quantityLocked: true,
+                rateInputByContractor: true,
+                rate: null,
+                lineTotal: null,
+                completion: { status: "NOT_STARTED", completedAtIso: null },
+                source: { basis: "IFC", ifcRef: i.globalId || null, notes: null }
+            };
+        };
+
+        // Helper to map room package items (payableItems) to Tender Items
+        const mapPackageItem = (i: any) => ({
+            itemId: i.id,
+            description: i.description,
+            unit: i.unit,
+            quantity: parseFloat(String(i.quantity || 0)),
+            quantityLocked: true,
+            rateInputByContractor: true,
+            rate: parseFloat(i.rate) > 0 ? parseFloat(i.rate) : null,
+            lineTotal: parseFloat(i.total) > 0 ? parseFloat(i.total) : null,
+            completion: { status: "NOT_STARTED", completedAtIso: null },
+            source: { basis: "IFC", ifcRef: null, notes: null }
+        });
+
+        return {
+            schemaVersion: "1.0.0",
+            tender: {
+                tenderId: `tndr_${jobId.substring(0, 8)}`,
+                projectName: pkgData.projectName || "Project",
+                currency: "GBP",
+                tenderType: "LABOUR_ONLY",
+                paymentBasis: "ITEM_COMPLETE",
+                quantitiesBasis: "IFC_DERIVED_LOCKED",
+                deadlineIso: new Date(Date.now() + 12096e5).toISOString() // +2 weeks
+            },
+            globalElements: Object.entries(pkgData.globalElements || {}).map(([key, items]: [string, any[]], idx) => ({
+                sectionId: `global_${key.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`,
+                title: key,
+                items: items.map((item, iIdx) => mapGlobalItem(item, iIdx))
+            })),
+            rooms: pkgData.rooms.map((r: any) => ({
+                roomId: r.roomId,
+                name: r.name,
+                areaM2: r.areaM2 || 0,
+                packages: [
+                    {
+                        packageId: `${r.roomId}_first_fix`,
+                        label: "FIRST_FIX",
+                        items: r.workPackage.firstFix.map(mapPackageItem)
+                    },
+                    {
+                        packageId: `${r.roomId}_second_fix`,
+                        label: "SECOND_FIX",
+                        items: r.workPackage.secondFix.map(mapPackageItem)
+                    },
+                    {
+                        packageId: `${r.roomId}_completion`,
+                        label: "COMPLETION",
+                        items: r.workPackage.completion.map(mapPackageItem)
+                    }
+                ].filter((p: any) => p.items && p.items.length > 0)
+            }))
+        };
+    }
+
+    async getTenderDataForJobStrict(jobId: string): Promise<any> {
+        const pkgData = await this.getRoomPackagesForJob(jobId);
+
+        // Define Labour Filter (Strict)
+        const isLabour = (i: any) => {
+            const d = (i.description || '').toLowerCase();
+            if (d.includes('undefined') || d.length < 4) return false;
+            if (i.itemType === 'MATERIAL') return false;
+            if (i.itemType === 'LABOUR') return true;
+
+            // Extra keyword checks if itemType is missing/ambiguous
+            // Exclude common materials by name if not explicit labour
+            if (d.includes('brick') && !d.includes('lay') && !d.includes('construct') && !d.includes('work')) return false;
+            if (d.includes('cement') || d.includes('sand') || d.includes('ply') || d.includes('insulation')) return false;
+
+            // Include explicit labour logic
+            if (d.includes('(labour)') || d.includes('(labor)')) return true;
+            if (d.includes('install') || d.includes('fix') || d.includes('fit') || d.includes('paint') || d.includes('lay')) return true;
+            if (d.includes('wiring') || d.includes('plumbing') || d.includes('carpentry') || d.includes('joinery')) return true;
+            if (d.includes('socket') || d.includes('switch') || d.includes('light')) return true;
+            if (d.includes('first fix') || d.includes('second fix') || d.includes('final fix')) return true;
+
+            return false;
+        };
+
+        // Helper to map global items (extractedElements) to Tender Items
+        // Force them to be Labour Tasks
+        const mapGlobalItem = (i: any, globalIdx: number) => {
+            let qty = 1;
+            let unit = 'nr';
+
+            // Extract quantity from properties
+            const t = (i.elementType || '').toLowerCase();
+            if (t.includes('wall') || t.includes('slab') || t.includes('roof') || t.includes('floor')) {
+                unit = 'm2';
+                qty = parseFloat(String(i.properties?.Area || i.properties?.NetArea || i.properties?.GrossArea || i.properties?.NetSideArea || 0));
+            } else if (t.includes('footing') || t.includes('foundation')) {
+                unit = 'm3';
+                qty = parseFloat(String(i.properties?.NetVolume || i.properties?.Volume || 0));
+            }
+
+            if (qty === 0 && i.dimensions) {
+                unit = 'nr';
+                qty = 1;
+            }
+
+            // Generate Labour Description
+            let description = `Construct ${i.name || i.elementType} (Labour)`;
+            if (t.includes('wall')) description = `Construct External Walls (Labour)`;
+            if (t.includes('slab')) description = `Pour Slab / Floor (Labour)`;
+            if (t.includes('footing')) description = `Excavate & Pour Foundation (Labour)`;
+            if (t.includes('roof')) description = `Construct Roof Structure (Labour)`;
+            // Improve window/door descriptions
+            if (t.includes('window')) description = `Install Windows (Labour)`;
+            if (t.includes('door')) description = `Install Doors (Labour)`;
+
+            return {
+                itemId: i.id || `g_${globalIdx}`,
+                itemType: "LABOUR",
+                description: description,
+                unit,
+                quantity: qty || 0,
+                quantityLocked: true,
+                rateInputByContractor: true,
+                rate: null, // STRICT NULL
+                completion: { status: "NOT_STARTED" },
+                source: { basis: "IFC", ifcRef: i.globalId || null, notes: null }
+            };
+        };
+
+        // Helper to map room package items (payableItems) to Tender Items
+        const mapPackageItem = (i: any) => ({
+            itemId: i.id,
+            itemType: "LABOUR",
+            description: i.description,
+            unit: i.unit,
+            quantity: parseFloat(String(i.quantity || 0)),
+            quantityLocked: true,
+            rateInputByContractor: true,
+            rate: null, // STRICT NULL
+            completion: { status: "NOT_STARTED" },
+            source: { basis: "ESTIMATE", ifcRef: null, notes: null }
+        });
+
+        // Filter out "Building / Global" from rooms list
+        const filteredRooms = pkgData.rooms.filter((r: any) => r.name !== 'Building / Global');
+
+        return {
+            schemaVersion: "1.0.0",
+            tender: {
+                tenderId: `tndr_${jobId.substring(0, 8)}`,
+                projectName: pkgData.projectName || "Complete Extraction – Labour Only",
+                currency: "GBP",
+                tenderType: "LABOUR_ONLY",
+                materialsExcluded: true,
+                plantExcluded: true,
+                paymentBasis: "ITEM_COMPLETE",
+                quantitiesBasis: "IFC_DERIVED_LOCKED",
+                deadlineIso: new Date(Date.now() + 12096e5).toISOString() // +2 weeks
+            },
+            globalElements: Object.entries(pkgData.globalElements || {}).map(([key, items]: [string, any[]], idx) => ({
+                sectionId: `global_${key.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`,
+                title: `${key} (Labour)`,
+                items: items.map((item, iIdx) => mapGlobalItem(item, iIdx))
+            })),
+            rooms: filteredRooms.map((r: any) => ({
+                roomId: r.roomId,
+                name: r.name,
+                areaM2: r.areaM2 || 0,
+                packages: [
+                    {
+                        packageId: `${r.roomId}_first_fix`,
+                        label: "FIRST_FIX",
+                        items: (r.workPackage.firstFix || []).filter(isLabour).map(mapPackageItem)
+                    },
+                    {
+                        packageId: `${r.roomId}_second_fix`,
+                        label: "SECOND_FIX",
+                        items: (r.workPackage.secondFix || []).filter(isLabour).map(mapPackageItem)
+                    },
+                    {
+                        packageId: `${r.roomId}_completion`,
+                        label: "COMPLETION",
+                        items: (r.workPackage.completion || []).filter(isLabour).map(mapPackageItem)
+                    }
+                ].filter((p: any) => p.items && p.items.length > 0)
+            }))
+        };
+    }
+
+    /**
+     * GENERATES LABOUR TENDER ITEMS FROM IFC QUANTITIES
+     * 
+     * Creates specific installation items based on room geometry and element counts.
+     * Enforces the "First Fix" / "Second Fix" / "Finishes" structure.
+     */
+    async generateTenderItems(jobId: string): Promise<void> {
+        console.log(`👷 Generating Labour Tender Items for Job ${jobId}...`);
+
+        // 1. Get Rooms
+        const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
+        const physicalRooms = jobRooms.filter(r => r.name !== 'Building / Global');
+
+        // 2. Get Extracted Elements for counts
+        const allElements = await db.select().from(extractedElements).where(eq(extractedElements.jobId, jobId));
+
+        // 3. Mark existing LABOUR items as 'LABOUR_ESTIMATE' to hide them from Tender but keep for budget
+        await db.update(payableItems)
+            .set({ itemType: 'LABOUR_ESTIMATE' })
+            .where(and(
+                like(payableItems.itemType, 'LABOUR'),
+                eq(payableItems.hbxlOriginalQty, '1')
+            ));
+
+        for (const room of physicalRooms) {
+            // Recalculate measurements
+            const area = parseFloat(room.area || '0');
+            let perimeter = parseFloat(room.perimeter || '0');
+
+            // Simplified perimeter calc (fallback)
+            if (perimeter <= 0 && area > 0) perimeter = 4 * Math.sqrt(area);
+
+            // Recalculate counts
+            const roomEls = allElements.filter(el => el.roomName === room.name);
+            const socketCount = roomEls.filter(el => el.elementType === 'socket' || el.elementType === 'outlet').length;
+            const switchCount = roomEls.filter(el => el.elementType === 'switch').length;
+            const lightCount = roomEls.filter(el => el.elementType === 'light').length;
+            const doorCount = roomEls.filter(el => el.elementType === 'door').length;
+
+            const wallArea = perimeter * 2.4; // 2.4m ceiling
+            const ceilingArea = area;
+            const floorArea = area;
+
+            // --- CLEAR EXISTING GENERATED ITEMS ---
+            const existingElIds = (await db.select().from(roomElements).where(eq(roomElements.roomId, room.id))).map(e => e.id);
+            if (existingElIds.length > 0) {
+                await db.delete(payableItems).where(
+                    and(
+                        inArray(payableItems.elementId, existingElIds),
+                        eq(payableItems.hbxlOriginalQty, 'GENERATED')
+                    )
+                );
+            }
+
+            // --- DEFINE ITEMS TO GENERATE ---
+            const newItems: { element: string, desc: string, unit: string, qty: number }[] = [];
+
+            // ELECTRICAL FIRST FIX
+            const firstFixPoints = socketCount + switchCount;
+            if (firstFixPoints > 0) {
+                newItems.push({ element: 'Electrical – First Fix', desc: 'First fix electrical points', unit: 'point', qty: firstFixPoints });
+            }
+
+            // CARPENTRY FIRST FIX
+            if (perimeter > 0) {
+                newItems.push({ element: 'Carpentry – First Fix', desc: 'First fix framing / backing', unit: 'lm', qty: parseFloat((perimeter * 0.8).toFixed(2)) });
+            }
+
+            // ELECTRICAL SECOND FIX
+            if (socketCount > 0) newItems.push({ element: 'Electrical – Second Fix', desc: 'Double socket installation', unit: 'nr', qty: socketCount });
+            if (switchCount > 0) newItems.push({ element: 'Electrical – Second Fix', desc: 'Switch (1-way) installation', unit: 'nr', qty: switchCount });
+            if (lightCount > 0) newItems.push({ element: 'Electrical – Second Fix', desc: 'Light fitting installation', unit: 'nr', qty: lightCount });
+
+            // CARPENTRY SECOND FIX
+            if (doorCount > 0) newItems.push({ element: 'Carpentry – Second Fix', desc: 'Internal door fitting', unit: 'nr', qty: doorCount });
+            if (perimeter > 0) newItems.push({ element: 'Carpentry – Second Fix', desc: 'Skirting installation', unit: 'lm', qty: parseFloat(perimeter.toFixed(2)) });
+
+            // DECORATION / FINISHES
+            if (wallArea > 0) newItems.push({ element: 'Decoration', desc: 'Wall painting', unit: 'm2', qty: parseFloat(wallArea.toFixed(2)) });
+            if (ceilingArea > 0) newItems.push({ element: 'Decoration', desc: 'Ceiling painting', unit: 'm2', qty: parseFloat(ceilingArea.toFixed(2)) });
+
+            // FLOORING
+            if (floorArea > 0) newItems.push({ element: 'Flooring', desc: 'Floor finish installation', unit: 'm2', qty: parseFloat(floorArea.toFixed(2)) });
+
+
+            // --- INSERT ITEMS ---
+            for (const item of newItems) {
+                // Find or create element
+                let [element] = await db.select().from(roomElements).where(and(eq(roomElements.roomId, room.id), eq(roomElements.name, item.element)));
+                if (!element) {
+                    [element] = await db.insert(roomElements).values({
+                        roomId: room.id,
+                        name: item.element,
+                        subtotal: '0'
+                    }).returning();
+                }
+
+                // Insert Payable Item
+                await db.insert(payableItems).values({
+                    elementId: element.id,
+                    description: item.desc,
+                    quantity: String(item.qty),
+                    unit: item.unit,
+                    rate: '0',
+                    total: '0',
+                    itemType: 'LABOUR', // Explicitly LABOUR for Tender
+                    hbxlOriginalQty: 'GENERATED' // Marker
+                });
+            }
+        }
+        console.log(`✅ Generated Labour Tender Items for ${physicalRooms.length} rooms.`);
+    }
 }
+
 
 // Types for room data response
 export interface RoomData {
@@ -832,6 +1456,12 @@ export interface RoomData {
     bbox?: number[];
     geometry?: any[][]; // Polygon coordinates
     area?: string;
+    metrics?: {
+        floorArea: number;
+        wallPerimeter: number;
+        wallArea: number;
+        ceilingArea: number;
+    };
 }
 
 export interface ElementData {
@@ -852,6 +1482,8 @@ export interface PayableItemData {
     status: string;
     assignedContractorName?: string;
     itemType?: string;
+    hbxlSourcePhase?: string;
 }
 
 export const roomMapper = new RoomMapper();
+

@@ -1,565 +1,300 @@
-/**
- * Room Work Packages UI
- * 
- * AGENTS.md Compliant UI for commercial control
- * Hierarchy: ROOM -> ELEMENT -> PAYABLE ITEM
- * 
- * Assignment is allowed ONLY at Payable Item level
- * Status is auto-calculated from item completion
- */
 
 import { useQuery } from "@tanstack/react-query";
-import { useParams, Link } from "wouter";
-import { useState } from "react";
-import {
-    ArrowLeft,
-    ChevronDown,
-    ChevronRight,
-    Home,
-    CheckCircle2,
-    Clock,
-    CircleDot,
-    User,
-    Calendar,
-    Plus,
-    Loader2
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger
-} from "@/components/ui/collapsible";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import { useParams } from "wouter";
+import { Loader2, AlertCircle, Wrench, Home, BarChart3, Lock } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 
-// Types matching the API response
-interface PayableItemData {
-    id: string;
+// --- TENDER TYPES (Matching Server Schema) ---
+export interface TenderItem {
+    itemId: string;
+    itemType: "LABOUR";
     description: string;
+    unit: "m2" | "m3" | "lm" | "nr" | "point" | "hour" | "day";
     quantity: number;
-    unit: string;
-    rate: number;
-    total: number;
-    status: "not_started" | "in_progress" | "complete";
-    status: "not_started" | "in_progress" | "complete";
-    assignedContractorName?: string;
-    itemType?: string;
+    quantityLocked: true;
+    rate: number | null; // Must be null until contractor enters it
+    completion?: {
+        status: "NOT_STARTED" | "COMPLETED";
+    };
 }
 
-interface ElementData {
-    id: string;
+export interface GlobalSection {
+    sectionId: string;
+    title: string;
+    items: TenderItem[];
+}
+
+export interface RoomPackage {
+    packageId: string;
+    label: "FIRST_FIX" | "SECOND_FIX";
+    items: TenderItem[];
+}
+
+export interface TenderRoom {
+    roomId: string;
     name: string;
-    measurementSummary?: string;
-    subtotal: number;
-    items: PayableItemData[];
+    areaM2: number;
+    packages: RoomPackage[];
 }
 
-interface RoomData {
-    id: string;
-    name: string;
-    floor?: string;
-    status: "not_started" | "in_progress" | "complete";
-    totalValue: number;
-    elements: ElementData[];
-}
-
-interface CostBreakdown {
-    labour: number;
-    material: number;
-    plant: number;
-    subcontractor: number;
-    total: number;
-}
-
-interface RoomWorkPackagesResponse {
-    jobId: string;
+export interface TenderData {
+    tenderId: string;
     projectName: string;
-    rooms: RoomData[];
-    costBreakdown?: CostBreakdown;
-    generatedAt: string;
+    currency: "GBP";
+    tenderType: "LABOUR_ONLY";
+    materialsExcluded: true;
+    plantExcluded: true;
+    paymentBasis: "ITEM_COMPLETE";
+    quantitiesBasis: "IFC_DERIVED_LOCKED";
 }
 
-// Main Page Component
+export interface TenderResponse {
+    schemaVersion: "1.0.0";
+    tender: TenderData;
+    globalElements: GlobalSection[];
+    rooms: TenderRoom[];
+}
+
 export default function RoomWorkPackages() {
     const { id } = useParams<{ id: string }>();
-    const queryClient = useQueryClient();
-    const { toast } = useToast();
-    const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-    const [newRoomName, setNewRoomName] = useState("");
-    const [newRoomFloor, setNewRoomFloor] = useState("");
-    const [viewMode, setViewMode] = useState<'ALL' | 'LABOUR'>('ALL');
 
-    const { data, isLoading, error } = useQuery<RoomWorkPackagesResponse>({
-        queryKey: [`/api/jobs/${id}/rooms`],
-    });
-
-    const createRoomMutation = useMutation({
-        mutationFn: async () => {
-            const res = await fetch(`/api/jobs/${id}/rooms`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    name: newRoomName,
-                    floor: newRoomFloor || "Ground Floor"
-                })
-            });
-            if (!res.ok) throw new Error("Failed to create room");
-            return res.json();
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${id}/rooms`] });
-            setIsCreateDialogOpen(false);
-            setNewRoomName("");
-            setNewRoomFloor("");
-            toast({ title: "Room Created", description: `Added ${newRoomName} to work packages.` });
-        },
-        onError: () => {
-            toast({ title: "Error", description: "Failed to create room.", variant: "destructive" });
-        }
+    // Fetch Data
+    const { data, isLoading, error } = useQuery<TenderResponse>({
+        queryKey: [`/api/jobs/${id}/tender`],
     });
 
     if (isLoading) {
         return (
-            <div className="p-8 bg-slate-900 min-h-screen text-slate-100">
-                <Skeleton className="h-12 w-64 bg-slate-800 mb-6" />
-                <div className="space-y-4">
-                    <Skeleton className="h-32 w-full bg-slate-800" />
-                    <Skeleton className="h-32 w-full bg-slate-800" />
-                    <Skeleton className="h-32 w-full bg-slate-800" />
-                </div>
+            <div className="min-h-screen bg-white flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-slate-900" />
             </div>
         );
     }
 
     if (error || !data) {
+        console.error(error);
         return (
-            <div className="p-8 bg-slate-900 min-h-screen text-slate-100 flex flex-col items-center justify-center">
-                <h1 className="text-2xl text-red-500 mb-4">Error Loading Room Data</h1>
-                <p className="text-slate-400 mb-6">Could not retrieve Room Work Packages for this job.</p>
-                <Link href="/job-assignments">
-                    <Button variant="outline">Return to Jobs</Button>
-                </Link>
+            <div className="min-h-screen bg-white p-8 flex items-center justify-center text-red-600">
+                <AlertCircle className="h-6 w-6 mr-2" />
+                Error loading extraction data.
             </div>
         );
     }
 
-    // Calculate totals
-    // Calculate totals dynamically from items (ignoring potentially stale room totals)
-    const processedRooms = data.rooms.map(room => {
-        // Filter elements and items based on viewMode
-        const filteredElements = room.elements.map(el => {
-            const visibleItems = el.items.filter(item => {
-                if (viewMode === 'ALL') return true;
-
-                const desc = item.description.toLowerCase();
-
-                // Explicitly HIDE known materials even if marked as Labour (legacy data fix)
-                if (desc.includes('cable') || desc.includes('box') || desc.includes('clip') || desc.includes('screw') || desc.includes('plug') || desc.includes('plate') || desc.includes('socket') || desc.includes('switch')) {
-                    return false;
-                }
-
-                // Labour Only Filter
-                return item.itemType === 'LABOUR' ||
-                    desc.includes('labour') ||
-                    desc.includes('electrician') ||
-                    desc.includes('plumber') ||
-                    desc.includes('carpenter') ||
-                    desc.includes('mate');
-            });
-
-            return {
-                ...el,
-                items: visibleItems,
-                // Recalculate element subtotal from visible items
-                subtotal: visibleItems.reduce((sum, item) => sum + (item.total || 0), 0)
-            };
-        }).filter(el => el.items.length > 0); // Only keep elements with visible items
-
-        const calculatedTotal = filteredElements.reduce((rSum, el) => rSum + el.subtotal, 0);
-
-        return {
-            ...room,
-            elements: filteredElements,
-            totalValue: calculatedTotal
-        };
-    }).filter(room => room.elements.length > 0 || room.name === 'Building / Global'); // Keep rooms with content (or Global)
-
-    const grandTotal = processedRooms.reduce((sum, room) => sum + room.totalValue, 0);
-    const totalItems = processedRooms.reduce((sum, room) =>
-        sum + room.elements.reduce((eSum, el) => eSum + el.items.length, 0), 0);
-    const completedItems = processedRooms.reduce((sum, room) =>
-        sum + room.elements.reduce((eSum, el) =>
-            eSum + el.items.filter(item => item.status === 'complete').length, 0), 0);
-
-    // Calculate Strict Totals (ignoring backend misclassification)
-    let strictLabourTotal = 0;
-    let strictMaterialTotal = 0;
-    let strictPlantTotal = 0;
-
-    data.rooms.forEach(room => {
-        room.elements.forEach(el => {
-            el.items.forEach(item => {
-                const desc = item.description.toLowerCase();
-                const total = item.total || 0;
-
-                // 1. Force Material for known items
-                if (desc.includes('cable') || desc.includes('box') || desc.includes('clip') || desc.includes('screw') || desc.includes('plug') || desc.includes('plate') || desc.includes('socket') || desc.includes('switch')) {
-                    strictMaterialTotal += total;
-                    return;
-                }
-
-                // 2. Classify Labour
-                if (item.itemType === 'LABOUR' || desc.includes('labour') || desc.includes('electrician') || desc.includes('plumber') || desc.includes('carpenter') || desc.includes('mate')) {
-                    strictLabourTotal += total;
-                    return;
-                }
-
-                // 3. Classify Plant
-                if (item.itemType === 'PLANT' || desc.includes('plant') || desc.includes('hire') || desc.includes('digger') || desc.includes('skip')) {
-                    strictPlantTotal += total;
-                    return;
-                }
-
-                // Default remaining to Material
-                strictMaterialTotal += total;
+    // Calculations
+    const getRoomTotal = (r: TenderRoom) => {
+        let total = 0;
+        r.packages.forEach(pkg => {
+            pkg.items.forEach(item => {
+                const rate = item.rate || 0;
+                total += rate * item.quantity;
             });
         });
-    });
+        return total;
+    };
 
-    const displayLabourTotal = viewMode === 'LABOUR' ? grandTotal : strictLabourTotal;
-    const displayMaterialTotal = strictMaterialTotal;
-    const displayPlantTotal = strictPlantTotal;
-    // When in ALL mode, grandTotal might differ if our strict rules differ from backend. But we should trust strict rules for breakdown.
-    // However, grandTotal (processedRooms) is used for the Total Card in 'ALL' mode currently.
-    // processedRooms in 'ALL' mode basically sums everything.
-    // So displayGrandTotal should be strictLabour + strictMaterial + strictPlant.
-    const displayGrandTotal = strictLabourTotal + strictMaterialTotal + strictPlantTotal;
+    const getGlobalTotal = () => {
+        if (!data) return 0;
+        let total = 0;
+        data.globalElements.forEach(section => {
+            section.items.forEach(item => {
+                const rate = item.rate || 0;
+                total += rate * item.quantity;
+            });
+        });
+        return total;
+    };
+
+    const getTotalLabourTender = () => {
+        if (!data) return 0;
+        const roomsTotal = data.rooms.reduce((acc, r) => acc + getRoomTotal(r), 0);
+        return getGlobalTotal() + roomsTotal;
+    };
 
     return (
-        <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
-            {/* Header */}
-            <div className="bg-slate-800 border-b border-slate-700 sticky top-0 z-50">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16 items-center">
-                        <div className="flex items-center space-x-4">
-                            <Link href="/job-assignments">
-                                <Button variant="ghost" className="text-slate-400 hover:text-amber-400">
-                                    <ArrowLeft className="h-5 w-5 mr-2" />
-                                    Back
-                                </Button>
-                            </Link>
-                            <div>
-                                <h1 className="text-xl font-bold text-amber-400 flex items-center">
-                                    <Home className="mr-2 h-6 w-6" />
-                                    Room Work Packages
-                                </h1>
-                                <p className="text-xs text-slate-400">
-                                    Project: {data?.projectName} | {data?.rooms.length || 0} Rooms | {completedItems}/{totalItems} Items Complete
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                                <DialogTrigger asChild>
-                                    <Button className="bg-amber-600 hover:bg-amber-700 text-white">
-                                        <Plus className="h-4 w-4 mr-2" />
-                                        Add Room
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent className="bg-slate-800 text-slate-100 border-slate-700">
-                                    <DialogHeader>
-                                        <DialogTitle>Add New Room</DialogTitle>
-                                        <DialogDescription className="text-slate-400">
-                                            Manually add a room to this job. You can populate it with items later.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <div className="grid gap-4 py-4">
-                                        <div className="grid grid-cols-4 items-center gap-4">
-                                            <Label htmlFor="name" className="text-right text-slate-300">
-                                                Name
-                                            </Label>
-                                            <Input
-                                                id="name"
-                                                value={newRoomName}
-                                                onChange={(e) => setNewRoomName(e.target.value)}
-                                                className="col-span-3 bg-slate-700 border-slate-600 text-slate-100"
-                                                placeholder="e.g. Master Bedroom"
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-4 items-center gap-4">
-                                            <Label htmlFor="floor" className="text-right text-slate-300">
-                                                Floor
-                                            </Label>
-                                            <Input
-                                                id="floor"
-                                                value={newRoomFloor}
-                                                onChange={(e) => setNewRoomFloor(e.target.value)}
-                                                className="col-span-3 bg-slate-700 border-slate-600 text-slate-100"
-                                                placeholder="e.g. First Floor"
-                                            />
-                                        </div>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button
-                                            onClick={() => createRoomMutation.mutate()}
-                                            disabled={createRoomMutation.isPending || !newRoomName}
-                                            className="bg-amber-600 hover:bg-amber-700"
-                                        >
-                                            {createRoomMutation.isPending && (
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            )}
-                                            Create Room
-                                        </Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
+        <div className="min-h-screen bg-white text-slate-900 font-sans p-8 md:p-16 max-w-5xl mx-auto selection:bg-yellow-100">
 
-                            <div className="text-right hidden sm:block">
-                                <p className="text-xs text-slate-400">Total Contract Value</p>
-                                <p className="text-2xl font-bold text-amber-400">
-                                    £{grandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                        </div>
+            {/* --- HEADER --- */}
+            <div className="mb-12 border-b border-slate-200 pb-6">
+                <h1 className="text-2xl font-bold uppercase tracking-tight mb-2 text-slate-900">
+                    COMPLETE EXTRACTION — GLOBAL + {data.rooms.length} ROOMS
+                </h1>
+                <p className="text-sm text-slate-500 font-medium tracking-wide uppercase">
+                    Labour Only • Quantities from IFC
+                </p>
+                <p className="text-xs text-slate-400 mt-1 uppercase font-mono">
+                    Tender ID: {data.tender.tenderId}
+                </p>
+            </div>
+
+            {/* --- GLOBAL ELEMENTS --- */}
+            <div className="mb-16">
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-6 uppercase tracking-tight">
+                    <Wrench className="h-5 w-5 text-slate-400" />
+                    GLOBAL ELEMENTS (BUILDING-LEVEL)
+                </h2>
+
+                {data.globalElements.map((section) => (
+                    <div key={section.sectionId} className="mb-8 last:mb-0">
+                        <h3 className="text-md font-bold text-slate-800 mb-3 pl-2 border-l-4 border-slate-200">
+                            {section.title}
+                        </h3>
+                        <ExtractionTable items={section.items} withRates />
                     </div>
+                ))}
+
+                {data.globalElements.length === 0 && <p className="text-slate-400 italic">No global elements found.</p>}
+
+                <div className="mt-6 pt-4 border-t border-slate-200 flex justify-between items-center text-slate-900 font-bold uppercase text-sm">
+                    <span>GLOBAL ELEMENTS SUBTOTAL (AUTO):</span>
+                    <span className="font-mono text-lg border-b border-slate-300 min-w-[100px] text-right">
+                        £{getGlobalTotal() > 0 ? getGlobalTotal().toFixed(2) : '_____'}
+                    </span>
                 </div>
             </div>
 
-            {/* Filter Toggle & Cost Breakdown Summary */}
-            <div className="max-w-7xl mx-auto pt-6 px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between items-center mb-6">
-                    <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
-                        <button
-                            onClick={() => setViewMode('ALL')}
-                            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'ALL'
-                                ? 'bg-slate-600 text-white shadow-sm'
-                                : 'text-slate-400 hover:text-slate-200'
-                                }`}
-                        >
-                            All Items
-                        </button>
-                        <button
-                            onClick={() => setViewMode('LABOUR')}
-                            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${viewMode === 'LABOUR'
-                                ? 'bg-amber-600 text-white shadow-sm'
-                                : 'text-slate-400 hover:text-slate-200'
-                                }`}
-                        >
-                            Labour Only
-                        </button>
-                    </div>
-                    {viewMode === 'LABOUR' && (
-                        <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/50 px-3 py-1">
-                            Viewing Labour Tender Scope
-                        </Badge>
-                    )}
-                </div>
+            <Separator className="my-12 bg-slate-200" />
 
-                {/* Summary Cards - Dynamic based on View */}
-                {/* Summary Cards - Dynamic based on View */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    {/* Labour - Always Show */}
-                    <div className={`border rounded-xl p-4 ${viewMode === 'LABOUR' ? 'bg-amber-900/20 border-amber-500/50 ring-1 ring-amber-500/30' : 'bg-gradient-to-br from-blue-900/50 to-blue-800/30 border-blue-700/50'}`}>
-                        <div className="flex items-center justify-between mb-2">
-                            <span className={`text-sm font-medium ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`}>Labour Total</span>
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${viewMode === 'LABOUR' ? 'bg-amber-500/20' : 'bg-blue-600/30'}`}>
-                                <User className={`h-4 w-4 ${viewMode === 'LABOUR' ? 'text-amber-400' : 'text-blue-400'}`} />
-                            </div>
+            {/* --- ROOM PACKAGES --- */}
+            <div className="mb-16">
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-8 uppercase tracking-tight">
+                    <Home className="h-5 w-5 text-slate-400" />
+                    ROOM PACKAGES
+                </h2>
+
+                {data.rooms.map((room, index) => (
+                    <div key={room.roomId} className="mb-16 last:mb-0">
+                        <div className="mb-4">
+                            <h3 className="text-xl font-bold text-slate-900 uppercase">
+                                ROOM {index + 1} — {room.name}
+                            </h3>
+                            <p className="text-sm text-slate-500 font-medium">Area: {room.areaM2.toFixed(2)} m²</p>
                         </div>
-                        <p className="text-xl font-bold text-white">
-                            £{displayLabourTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </p>
-                        {viewMode === 'LABOUR' ? (
-                            <p className="text-xs text-amber-500/70 mt-1">Total Labour Scope</p>
-                        ) : (
-                            <p className="text-xs text-blue-300/70 mt-1">Strict Labour Only</p>
-                        )}
-                    </div>
 
-                    {/* Material - Hide if Labour Only */}
-                    {viewMode === 'ALL' && (
-                        <div className="bg-gradient-to-br from-emerald-900/50 to-emerald-800/30 border border-emerald-700/50 rounded-xl p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-emerald-400 text-sm font-medium">Material</span>
-                                <div className="w-8 h-8 bg-emerald-600/30 rounded-lg flex items-center justify-center">
-                                    <Home className="h-4 w-4 text-emerald-400" />
+                        <div className="space-y-6">
+                            {room.packages.map(pkg => (
+                                <div key={pkg.packageId}>
+                                    <h4 className="text-sm font-bold text-slate-700 mb-2">
+                                        {formatLabel(pkg.label)} (label only)
+                                    </h4>
+                                    <ExtractionTable items={pkg.items} withRates />
                                 </div>
-                            </div>
-                            <p className="text-xl font-bold text-white">
-                                £{displayMaterialTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </p>
+                            ))}
                         </div>
-                    )}
 
-                    {/* Plant - Hide if Labour Only */}
-                    {viewMode === 'ALL' && (
-                        <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/30 border border-orange-700/50 rounded-xl p-4">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-orange-400 text-sm font-medium">Plant</span>
-                                <div className="w-8 h-8 bg-orange-600/30 rounded-lg flex items-center justify-center">
-                                    <Clock className="h-4 w-4 text-orange-400" />
-                                </div>
-                            </div>
-                            <p className="text-xl font-bold text-white">
-                                £{displayPlantTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </p>
+                        <div className="mt-4 pt-4 flex justify-between items-center text-slate-900 font-bold uppercase text-sm">
+                            <span>{room.name} Subtotal (auto):</span>
+                            <span className="font-mono text-lg border-b border-slate-300 min-w-[100px] text-right">
+                                £{getRoomTotal(room) > 0 ? getRoomTotal(room).toFixed(2) : '_____'}
+                            </span>
                         </div>
-                    )}
-
-                    {/* Total - Context Aware */}
-                    <div className="bg-gradient-to-br from-amber-900/50 to-amber-800/30 border border-amber-700/50 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-amber-400 text-sm font-medium">{viewMode === 'LABOUR' ? 'Visible Total' : 'Total Project Cost'}</span>
-                            <div className="w-8 h-8 bg-amber-600/30 rounded-lg flex items-center justify-center">
-                                <CheckCircle2 className="h-4 w-4 text-amber-400" />
-                            </div>
-                        </div>
-                        <p className="text-xl font-bold text-amber-400">
-                            £{displayGrandTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </p>
                     </div>
+                ))}
+            </div>
+
+            <Separator className="my-12 bg-slate-200" />
+
+            {/* --- FINAL TOTALS --- */}
+            <div className="mb-16">
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-6 uppercase tracking-tight">
+                    <BarChart3 className="h-5 w-5 text-slate-400" />
+                    FINAL TOTALS (READ-ONLY)
+                </h2>
+
+                <div className="max-w-md ml-auto">
+                    <table className="w-full text-sm font-medium">
+                        <thead>
+                            <tr className="border-b border-slate-200 text-slate-500">
+                                <th className="text-left py-2 font-normal">Section</th>
+                                <th className="text-right py-2 font-normal">Total (£)</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            <tr>
+                                <td className="py-3 text-slate-700">Global Elements</td>
+                                <td className="py-3 text-right font-mono">
+                                    £{getGlobalTotal() > 0 ? getGlobalTotal().toFixed(2) : '_____'}
+                                </td>
+                            </tr>
+                            {data.rooms.map(r => (
+                                <tr key={r.roomId}>
+                                    <td className="py-3 text-slate-700">{r.name}</td>
+                                    <td className="py-3 text-right font-mono">£{getRoomTotal(r) > 0 ? getRoomTotal(r).toFixed(2) : '_____'}</td>
+                                </tr>
+                            ))}
+                            <tr className="border-t border-slate-300 font-bold text-slate-900 text-base">
+                                <td className="py-4 uppercase">TOTAL LABOUR TENDER</td>
+                                <td className="py-4 text-right font-mono">
+                                    £{getTotalLabourTender() > 0 ? getTotalLabourTender().toFixed(2) : '_____'}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            {/* Room Cards */}
-            <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                <div className="space-y-4">
-                    {processedRooms.length === 0 ? (
-                        <div className="bg-slate-800 border border-slate-700 rounded-lg p-12 text-center">
-                            <Home className="h-12 w-12 text-slate-600 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-slate-400 mb-2">No Rooms Generated</h3>
-                            <p className="text-sm text-slate-500">
-                                Import a CSV to automatically generate Room Work Packages from HBXL phases.
-                            </p>
-                        </div>
-                    ) : (
-                        processedRooms.map(room => (
-                            <RoomCard key={room.id} room={room} />
-                        ))
-                    )}
-                </div>
+            {/* --- FOOTER: RULES --- */}
+            <div className="pt-8 border-t border-slate-200 text-slate-600">
+                <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+                    <Lock className="h-4 w-4" /> Locked Rules (unchanged)
+                </h3>
+                <ul className="text-xs space-y-1 list-disc pl-5 font-medium leading-relaxed">
+                    <li>Quantities fixed from IFC</li>
+                    <li>Contractor enters <strong>rates only</strong></li>
+                    <li>Payment released <strong>per completed line item</strong></li>
+                    <li>No % stages, no phased payments</li>
+                </ul>
             </div>
         </div>
     );
 }
 
-function RoomCard({ room }: { room: RoomData }) {
-    const [isOpen, setIsOpen] = useState(false);
+// --- SUB-COMPONENTS ---
 
-    // Dynamic status color
-    const statusColor = room.status === 'complete' ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/10' :
-        room.status === 'in_progress' ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' :
-            'text-slate-500 border-slate-700 bg-slate-800';
-
-    return (
-        <Collapsible open={isOpen} onOpenChange={setIsOpen} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden transition-all duration-200 shadow-sm hover:shadow-md hover:border-slate-600">
-            {/* Header Trigger */}
-            <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-750 transition-colors" onClick={() => setIsOpen(!isOpen)}>
-                <div className="flex items-center gap-4">
-                    <div className={`p-1 rounded transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
-                        <ChevronDown className="h-5 w-5 text-slate-400" />
-                    </div>
-                    <div>
-                        <div className="flex items-center gap-3">
-                            <h3 className="font-semibold text-slate-100 text-lg tracking-tight">{room.name}</h3>
-                            {room.floor && (
-                                <Badge variant="secondary" className="bg-slate-700 text-slate-400 text-[10px] h-5">
-                                    {room.floor}
-                                </Badge>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-slate-500">{room.elements.length} elements</span>
-                            <span className="text-slate-700 mx-1">•</span>
-                            <span className="text-xs text-slate-500">
-                                {room.elements.reduce((acc, el) => acc + el.items.length, 0)} items
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center gap-6">
-                    <Badge variant="outline" className={`${statusColor} capitalize`}>
-                        {room.status.replace('_', ' ')}
-                    </Badge>
-                    <div className="text-right min-w-[100px]">
-                        <p className="text-xs text-slate-500 uppercase tracking-wider mb-0.5">Value</p>
-                        <p className="font-mono text-amber-400 font-bold text-lg">
-                            £{room.totalValue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <CollapsibleContent>
-                <div className="px-4 pb-4 pt-0 space-y-3">
-                    <div className="h-px bg-slate-700/50 mb-4" />
-                    {room.elements.length === 0 ? (
-                        <div className="text-center py-8 border-2 border-dashed border-slate-700/50 rounded-lg">
-                            <p className="text-slate-500 text-sm">No elements have been identified for this room yet.</p>
-                        </div>
-                    ) : (
-                        room.elements.map(el => <ElementRow key={el.id} element={el} />)
-                    )}
-                </div>
-            </CollapsibleContent>
-        </Collapsible>
-    )
+function formatLabel(label: string) {
+    if (label === 'FIRST_FIX') return 'First Fix';
+    if (label === 'SECOND_FIX') return 'Second Fix';
+    return label;
 }
 
-function ElementRow({ element }: { element: ElementData }) {
-    return (
-        <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/50 hover:border-slate-600 transition-colors">
-            <div className="flex justify-between items-center mb-3">
-                <h4 className="text-slate-200 font-medium text-sm flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500/50" />
-                    {element.name}
-                </h4>
-                <div className="flex items-center gap-4">
-                    {element.measurementSummary && (
-                        <span className="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded">
-                            {element.measurementSummary}
-                        </span>
-                    )}
-                    <span className="text-slate-400 text-sm font-mono font-medium">
-                        £{element.subtotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                    </span>
-                </div>
-            </div>
+function ExtractionTable({ items, withRates = false }: { items: TenderItem[], withRates?: boolean }) {
+    if (!items.length) return <div className="text-xs text-slate-400 italic pl-4">No items</div>;
 
-            <div className="space-y-1 bg-slate-950/30 rounded px-3 py-2">
-                {element.items.length === 0 ? (
-                    <p className="text-xs text-slate-600 italic">No payable items linked</p>
-                ) : (
-                    element.items.map(item => (
-                        <div key={item.id} className="grid grid-cols-[1fr_auto_auto] gap-4 text-xs text-slate-400 py-1.5 border-b border-slate-800/50 last:border-0 hover:text-slate-300">
-                            <span className="truncate pr-4">{item.description}</span>
-                            <div className="flex items-center gap-3 text-slate-500">
-                                <span className="font-mono">{item.quantity} {item.unit}</span>
-                                <span className="text-slate-600">x</span>
-                                <span className="font-mono">£{item.rate}</span>
-                            </div>
-                            <span className="font-mono text-slate-300 w-[70px] text-right">
-                                £{item.total.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                            </span>
-                        </div>
-                    ))
-                )}
-            </div>
-        </div>
+    return (
+        <table className="w-full text-sm text-left border-collapse">
+            <thead>
+                <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase font-semibold tracking-wide">
+                    <th className="py-2 pl-0 w-[50%]">Item</th>
+                    <th className="py-2 px-4 w-[10%] text-left">Unit</th>
+                    <th className="py-2 px-4 w-[15%] text-right">Quantity</th>
+                    <th className="py-2 px-4 w-[15%] text-right font-normal text-slate-400">Rate (£)</th>
+                    <th className="py-2 pr-0 w-[10%] text-right font-normal text-slate-400">Total (£)</th>
+                </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+                {items.map((item) => {
+                    const lineTotal = (item.rate || 0) * item.quantity;
+                    return (
+                        <tr key={item.itemId} className="hover:bg-slate-50">
+                            <td className="py-3 pl-0 font-medium text-slate-700 align-top">
+                                {item.description}
+                            </td>
+                            <td className="py-3 px-4 text-left text-slate-500 align-top">
+                                {item.unit}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-slate-800 align-top">
+                                {item.quantity ? item.quantity.toFixed(2) : '-'}
+                            </td>
+                            <td className="py-3 px-4 text-right font-mono text-slate-400 align-top">
+                                {withRates && item.rate ? item.rate.toFixed(2) : '—'}
+                            </td>
+                            <td className="py-3 pr-0 text-right font-mono text-slate-400 font-medium align-top">
+                                {withRates && item.rate ? lineTotal.toFixed(2) : 'auto'}
+                            </td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
     );
 }

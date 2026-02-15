@@ -42,9 +42,15 @@ import {
   type JobImportPayload,
   type FinancialSummary,
   jobCostItems,
-  jobFiles
+
+  type Room,
+  type InsertRoom,
+  type JobFile,
+  type InsertJobFile,
+  type ExtractedElement,
+  type InsertExtractedElement
 } from "@shared/schema";
-import { contractors, jobs, csvUploads, contractorApplications, workSessions, adminSettings, jobAssignments, contractorReports, adminInspections, inspectionNotifications, taskProgress, taskInspectionResults, projectCashflowWeekly, materialPurchases, projectMaster, calendarEvents, emailRecords, meetings, jobFiles, jobCostItems, extractedElements, rooms, roomElements, payableItems } from "@shared/schema";
+import { contractors, jobs, csvUploads, contractorApplications, workSessions, adminSettings, jobAssignments, contractorReports, adminInspections, inspectionNotifications, taskProgress, taskInspectionResults, projectCashflowWeekly, materialPurchases, projectMaster, calendarEvents, emailRecords, meetings, rooms, jobFiles, jobCostItems, roomElements, payableItems, extractedElements } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, inArray, sql } from "drizzle-orm";
 import { IStorage, JobAssignment } from "./storage";
@@ -136,9 +142,12 @@ export class DatabaseStorage implements IStorage {
 
     if (!job) return undefined;
 
+    const files = await this.getJobFiles(id);
+
     return {
       ...job,
-      contractor: job.contractor || undefined
+      contractor: job.contractor || undefined,
+      files
     };
   }
 
@@ -157,85 +166,53 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteJob(id: string): Promise<boolean> {
-    console.log(`🗑️ Deleting Job: ${id} and all related records (Cascading)...`);
+    try {
+      console.log(`🗑️ Starting deletion for job ${id}...`);
 
-    // 1. Get all rooms for this job to find deeper dependencies
-    const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, id));
-    console.log(`   - Found ${jobRooms.length} rooms to cleanup`);
+      // 1. Delete extracted elements
+      await db.delete(extractedElements).where(eq(extractedElements.jobId, id));
 
-    for (const room of jobRooms) {
-      // 2. Get all elements for this room
-      const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
+      // 2. Delete job files
+      await db.delete(jobFiles).where(eq(jobFiles.jobId, id));
 
-      for (const element of elements) {
-        // 3. Delete payable items for each element
-        await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
+      // 3. Delete job cost items
+      await db.delete(jobCostItems).where(eq(jobCostItems.jobId, id));
+
+      // 4. Handle rooms and related entities
+      const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, id));
+      const roomIds = jobRooms.map(r => r.id);
+
+      if (roomIds.length > 0) {
+        // Get all room elements for these rooms
+        const elementsInRooms = await db.select().from(roomElements).where(inArray(roomElements.roomId, roomIds));
+        const elementIds = elementsInRooms.map(e => e.id);
+
+        if (elementIds.length > 0) {
+          // Delete payable items for these elements
+          await db.delete(payableItems).where(inArray(payableItems.elementId, elementIds));
+        }
+
+        // Delete room elements
+        await db.delete(roomElements).where(inArray(roomElements.roomId, roomIds));
+
+        // Delete rooms
+        await db.delete(rooms).where(inArray(rooms.id, roomIds));
       }
 
-      // 4. Delete the elements themselves
-      await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
+      // 5. Finally delete the job
+      const result = await db.delete(jobs).where(eq(jobs.id, id));
+
+      console.log("✅ Successfully deleted job:", id, "Affected rows:", result.rowCount);
+      return result.rowCount > 0;
+    } catch (error) {
+      console.error("❌ Error deleting job:", error);
+      throw error; // Propagate to route handler
     }
-
-    // 5. Delete the rooms
-    await db.delete(rooms).where(eq(rooms.jobId, id));
-
-    // 6. Delete Extracted Elements (Direct link to Job)
-    await db.delete(extractedElements).where(eq(extractedElements.jobId, id));
-
-    // 7. Delete Job Cost Items
-    await db.delete(jobCostItems).where(eq(jobCostItems.jobId, id));
-
-    // 8. Delete Job Files
-    await db.delete(jobFiles).where(eq(jobFiles.jobId, id));
-
-    // 9. Finally, delete the Job
-    const result = await db.delete(jobs).where(eq(jobs.id, id));
-    console.log("   ✅ Deleted job:", id, "Affected rows:", result.rowCount);
-
-    return result.rowCount > 0;
   }
 
   async createJobsFromCsv(jobsData: InsertJob[], uploadId: string): Promise<Job[]> {
     const createdJobs = await db.insert(jobs).values(jobsData).returning();
     return createdJobs;
-  }
-
-  // Job Files
-  async getJobFiles(jobId: string): Promise<JobFile[]> {
-    return await db.select().from(jobFiles).where(eq(jobFiles.jobId, jobId));
-  }
-
-  async createJobFile(file: InsertJobFile): Promise<JobFile> {
-    const [jobFile] = await db.insert(jobFiles).values(file).returning();
-    return jobFile;
-  }
-
-  async deleteJobFile(id: string): Promise<void> {
-    console.log(`🗑️ Deleting Job File: ${id} and related records...`);
-
-    // 1. Get rooms linked to this file
-    const fileRooms = await db.select().from(rooms).where(eq(rooms.fileId, id));
-
-    for (const room of fileRooms) {
-      // 2. Get elements for this room
-      const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
-      for (const element of elements) {
-        // 3. Delete payable items
-        await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
-      }
-      // 4. Delete elements
-      await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
-    }
-
-    // 5. Delete rooms
-    await db.delete(rooms).where(eq(rooms.fileId, id));
-
-    // 6. Delete extracted elements
-    await db.delete(extractedElements).where(eq(extractedElements.fileId, id));
-
-    // 7. Delete the file
-    await db.delete(jobFiles).where(eq(jobFiles.id, id));
-    console.log(`   ✅ Deleted file ${id}`);
   }
 
   // CSV Uploads
@@ -1561,6 +1538,49 @@ export class DatabaseStorage implements IStorage {
       costItems: createdCostItems,
       financialSummary
     };
+  }
+
+  // Rooms & IFC
+  async getRooms(jobId: string): Promise<Room[]> {
+    return db.select().from(rooms).where(eq(rooms.jobId, jobId));
+  }
+
+  async createRoom(insertRoom: InsertRoom): Promise<Room> {
+    const [room] = await db.insert(rooms).values(insertRoom).returning();
+    return room;
+  }
+
+  async updateRoom(id: string, updateRoom: Partial<Room>): Promise<Room | undefined> {
+    const [room] = await db
+      .update(rooms)
+      .set(updateRoom)
+      .where(eq(rooms.id, id))
+      .returning();
+    return room;
+  }
+
+  async deleteRoom(id: string): Promise<boolean> {
+    const result = await db.delete(rooms).where(eq(rooms.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getJobFiles(jobId: string): Promise<JobFile[]> {
+    return db.select().from(jobFiles).where(eq(jobFiles.jobId, jobId));
+  }
+
+  async createJobFile(insertFile: InsertJobFile): Promise<JobFile> {
+    const [file] = await db.insert(jobFiles).values(insertFile).returning();
+    return file;
+  }
+
+  // Extracted Elements (IFC)
+  async createExtractedElement(insertElement: InsertExtractedElement): Promise<ExtractedElement> {
+    const [element] = await db.insert(extractedElements).values(insertElement).returning();
+    return element;
+  }
+
+  async getExtractedElements(jobId: string): Promise<ExtractedElement[]> {
+    return db.select().from(extractedElements).where(eq(extractedElements.jobId, jobId));
   }
 }
 

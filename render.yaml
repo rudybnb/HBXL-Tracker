@@ -1,10 +1,11 @@
 services:
   # Node.js + React Frontend Service
   - type: web
-    name: HBXL-Tracker
-    runtime: docker
-    env: docker
-    dockerContext: .
+    name: erdesignandbuild-web
+    runtime: node
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production

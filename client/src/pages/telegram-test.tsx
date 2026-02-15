@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 export default function TelegramTest() {
   const [isLoading, setIsLoading] = useState(false);
   const [chatId, setChatId] = useState('');
-  const [testMessage, setTestMessage] = useState('🔨 Test message from Sculpt Projects!\n\nThis is a test to verify Telegram integration is working correctly.');
+  const [testMessage, setTestMessage] = useState('🔨 Test message from ERdesignandbuild!\n\nThis is a test to verify Telegram integration is working correctly.');
   const [recentMessages, setRecentMessages] = useState<any[]>([]);
   const { toast } = useToast();
 
@@ -18,7 +18,7 @@ export default function TelegramTest() {
     try {
       const response = await fetch('/api/telegram/test');
       const result = await response.json();
-
+      
       if (result.success) {
         toast({
           title: 'Bot Connection Success',
@@ -57,9 +57,9 @@ export default function TelegramTest() {
           startDate: '06/08/2025'
         })
       });
-
+      
       const result = await response.json();
-
+      
       if (result.success) {
         toast({
           title: 'Notification Sent',
@@ -103,9 +103,9 @@ export default function TelegramTest() {
           message: testMessage
         })
       });
-
+      
       const result = await response.json();
-
+      
       if (result.success) {
         toast({
           title: 'Message Sent Successfully!',
@@ -134,7 +134,7 @@ export default function TelegramTest() {
     try {
       const response = await fetch('/api/telegram/messages');
       const result = await response.json();
-
+      
       if (result.success) {
         setRecentMessages(result.messages || []);
         toast({
@@ -184,8 +184,8 @@ export default function TelegramTest() {
                 <p className="text-slate-400 font-mono">8382710567</p>
               </div>
             </div>
-
-            <Button
+            
+            <Button 
               onClick={testBotConnection}
               disabled={isLoading}
               className="bg-yellow-600 hover:bg-yellow-700 text-white"
@@ -220,8 +220,8 @@ export default function TelegramTest() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-slate-300">Send a test job assignment notification:</p>
-
-            <Button
+            
+            <Button 
               onClick={sendTestNotification}
               disabled={isLoading}
               className="w-full bg-orange-600 hover:bg-orange-700 text-white"
@@ -251,7 +251,7 @@ export default function TelegramTest() {
                   Get this by messaging @userinfobot in Telegram
                 </p>
               </div>
-
+              
               <div>
                 <Label htmlFor="message" className="text-slate-300">Test Message</Label>
                 <Textarea
@@ -262,8 +262,8 @@ export default function TelegramTest() {
                   rows={4}
                 />
               </div>
-
-              <Button
+              
+              <Button 
                 onClick={sendCustomMessage}
                 disabled={!chatId || isLoading}
                 className="w-full bg-green-600 hover:bg-green-700 text-white"
@@ -281,8 +281,8 @@ export default function TelegramTest() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-slate-300">Check if you've sent any messages to the bot:</p>
-
-            <Button
+            
+            <Button 
               onClick={checkRecentMessages}
               disabled={isLoading}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white"

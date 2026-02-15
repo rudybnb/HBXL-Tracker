@@ -13,8 +13,8 @@ interface ContextualTooltipProps {
 }
 
 export function ContextualTooltip({
-  id = 'tooltip',
-  title = '',
+  id,
+  title,
   content,
   type = 'info',
   placement = 'top',
@@ -100,37 +100,37 @@ export function ContextualTooltip({
     return <>{children}</>;
   }
 
-  const eventHandlers = trigger === 'hover'
+  const eventHandlers = trigger === 'hover' 
     ? { onMouseEnter: showTooltip, onMouseLeave: hideTooltip }
     : { onClick: () => setIsVisible(!isVisible) };
 
   return (
     <div className={`relative inline-block ${className}`} {...eventHandlers}>
       {children}
-
+      
       {isVisible && (
         <div className={`absolute z-50 ${getPlacementClasses()}`}>
           <div className={`relative max-w-xs p-3 rounded-lg border shadow-lg ${getTypeColors()}`}>
             {/* Arrow */}
             <div className={getArrowClasses()}></div>
-
+            
             {/* Header */}
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center space-x-2">
                 {getIcon()}
                 <h4 className="font-medium text-sm">{title}</h4>
               </div>
-              <button
+              <button 
                 onClick={dismissTooltip}
                 className="text-slate-400 hover:text-white text-xs ml-2"
               >
                 ✕
               </button>
             </div>
-
+            
             {/* Content */}
             <p className="text-xs leading-relaxed">{content}</p>
-
+            
             {/* Got it button */}
             <button
               onClick={dismissTooltip}
