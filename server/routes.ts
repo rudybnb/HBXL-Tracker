@@ -1,8 +1,7 @@
-import express, { type Express } from "express";
+import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { DatabaseStorage } from "./database-storage";
-import { lookupPrice, PricingEntry } from "./pricing-library";
 
 // Session interface for type safety
 interface SessionRequest extends Express.Request {
@@ -15,241 +14,59 @@ interface SessionRequest extends Express.Request {
 }
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, jobs, jobFiles, extractedElements, rooms, roomElements, payableItems, jobCostItems, tenderSubmissions, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
-
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession, insertJobFileSchema, insertRoomSchema, insertRoomElementSchema, insertPayableItemSchema, insertExtractedElementSchema } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
+import { DxfAgent } from "./agents/dxf-agent";
+import { IfcAgent } from "./agents/ifc-agent";
 import multer from "multer";
 import type { Request as ExpressRequest } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import * as XLSX from "xlsx";
-import { db } from "./db";
-import { sql, eq, and } from "drizzle-orm";
 
 interface MulterRequest extends ExpressRequest {
   file?: Express.Multer.File;
 }
 import { parse } from "csv-parse";
 import { parseEnhancedCSV } from "./enhanced-csv-parser";
-import { roomMapper } from "./room-mapper";
 
-// Ensure uploads directory exists
-// Ensure uploads directory exists
-// Revert to process.cwd() because __dirname is not available in ESM ("type": "module")
-const uploadsDir = path.resolve(process.cwd(), "uploads");
-console.log(`📂 Server Uploads Directory: ${uploadsDir}`);
+const upload = multer({ storage: multer.memoryStorage() });
 
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-  console.log(`📂 Created uploads directory at: ${uploadsDir}`);
+const jobUploadsDir = path.join(process.cwd(), "uploads", "jobs");
+if (!fs.existsSync(jobUploadsDir)) {
+  fs.mkdirSync(jobUploadsDir, { recursive: true });
 }
 
-const mt = multer({ storage: multer.memoryStorage() });
-const upload = mt; // Alias for backward compatibility if needed, or just use mt
+const jobFileStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, jobUploadsDir);
+  },
+  filename: function (req, file, cb) {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const timestamp = Date.now();
+    cb(null, `${timestamp}-${safeName}`);
+  }
+});
+
+const uploadJobFile = multer({ storage: jobFileStorage });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Serve uploaded files statically
-  app.use('/uploads', express.static(uploadsDir));
-
-  // AI Configuration Health Check
-  app.get("/api/health/ai", (req, res) => {
-    const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
-    res.json({
-      aiEnabled: hasOpenAIKey,
-      message: hasOpenAIKey
-        ? "OpenAI API key configured - AI extraction enabled"
-        : "OpenAI API key NOT configured - please add OPENAI_API_KEY to Render environment variables",
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  // Database Health Check
-  app.get("/api/health/db", async (req, res) => {
+  // TEMPORARY: One-off migration to add DXF fittings columns
+  app.get("/api/migrate-dxf", async (req, res) => {
     try {
-      const start = Date.now();
-      // Simple query to test connection
-      const result = await db.execute(sql`SELECT 1 as connected`);
-      const duration = Date.now() - start;
-
-      res.json({
-        status: "ok",
-        message: "Database connected successfully",
-        duration: `${duration}ms`,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error("Database health check failed:", error);
-      res.status(500).json({
-        status: "error",
-        message: "Database connection failed",
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        env: {
-          hasUrl: !!process.env.DATABASE_URL,
-          nodeEnv: process.env.NODE_ENV
-        }
-      });
-    }
-  });
-
-  // AGENTS.md Compliance: Cleanup phase-based rooms
-  // Delete rooms that were incorrectly created from HBXL phases
-  // Access via browser: http://localhost:5000/api/admin/cleanup-phase-rooms
-  app.get("/api/admin/cleanup-phase-rooms", async (req, res) => {
-    try {
-      const PHASE_BASED_ROOMS = ['General Works', 'Utility', 'External'];
-
-      console.log('🧹 AGENTS.md Compliance - Cleaning up phase-based rooms');
-
-      // Find all phase-based rooms
-      const allRooms = await db.select().from(rooms);
-      const phaseRooms = allRooms.filter(room => PHASE_BASED_ROOMS.includes(room.name));
-
-      console.log(`Found ${phaseRooms.length} phase-based rooms to delete`);
-
-      let deletedCount = 0;
-      for (const room of phaseRooms) {
-        // Delete payable items first
-        const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
-        for (const element of elements) {
-          await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
-        }
-        // Delete elements
-        await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
-        // Delete room
-        await db.delete(rooms).where(eq(rooms.id, room.id));
-        deletedCount++;
-        console.log(`✓ Deleted room: ${room.name}`);
-      }
-
-      res.json({
-        success: true,
-        message: `Deleted ${deletedCount} phase-based rooms`,
-        deletedRooms: phaseRooms.map(r => r.name)
-      });
-    } catch (error) {
-      console.error("Cleanup error:", error);
-      res.status(500).json({ error: "Failed to cleanup rooms" });
-    }
-  });
-
-  // AGENTS.md Compliance: Allocate HBXL costs to rooms from drawing extraction
-  // Call this after uploading a drawing AND importing CSV
-  app.get("/api/jobs/:id/allocate-costs", async (req, res) => {
-    try {
-      const jobId = req.params.id;
-      const job = await storage.getJob(jobId);
-
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      if (!job.phaseTaskData) {
-        return res.status(400).json({
-          error: "No HBXL data found",
-          message: "Import a CSV first before allocating costs"
-        });
-      }
-
-      // Get existing rooms from drawing extraction
-      const existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
-
-      if (existingRooms.length === 0) {
-        return res.status(400).json({
-          error: "No rooms found",
-          message: "Upload a drawing first to identify rooms"
-        });
-      }
-
-      console.log(`💰 Allocating HBXL costs to ${existingRooms.length} rooms for job ${jobId}`);
-
-      // Parse the HBXL phase data
-      const phaseData = JSON.parse(job.phaseTaskData);
-      const phases = phaseData.phases || phaseData;
-
-      // Import and run room mapper
-      const { roomMapper } = await import("./room-mapper");
-      await roomMapper.allocateCostsToRooms(jobId, phases);
-
-      // Get updated room data
-      const updatedRoomData = await roomMapper.getRoomDataForJob(jobId);
-
-      res.json({
-        success: true,
-        message: `Allocated costs to ${existingRooms.length} rooms`,
-        rooms: updatedRoomData.map(r => ({
-          name: r.name,
-          totalValue: r.totalValue,
-          elementCount: r.elements.length
-        }))
-      });
-    } catch (error) {
-      console.error("Cost allocation error:", error);
-      res.status(500).json({ error: "Failed to allocate costs" });
-    }
-  });
-
-  // Clear allocations endpoint - for re-testing cost allocation
-  // Removes all room elements and payable items for a job (keeps rooms from drawing)
-  app.get("/api/admin/clear-allocations/:id", async (req, res) => {
-    try {
-      const jobId = req.params.id;
-      const job = await storage.getJob(jobId);
-
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      console.log(`🧹 Clearing cost allocations for job ${jobId}`);
-
-      // Get all rooms for this job
-      const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
-
-      let elementsDeleted = 0;
-      let itemsDeleted = 0;
-
-      for (const room of jobRooms) {
-        // Get elements for this room
-        const elements = await db.select().from(roomElements).where(eq(roomElements.roomId, room.id));
-
-        for (const element of elements) {
-          // Delete payable items for this element
-          const deleted = await db.delete(payableItems).where(eq(payableItems.elementId, element.id));
-          itemsDeleted++;
-        }
-
-        // Delete elements for this room
-        await db.delete(roomElements).where(eq(roomElements.roomId, room.id));
-        elementsDeleted += elements.length;
-
-        // Reset room total
-        await db.update(rooms).set({ totalValue: '0' }).where(eq(rooms.id, room.id));
-      }
-
-      // Also delete "Building / Global" room so it gets recreated fresh
-      const globalRoom = jobRooms.find(r => r.name === 'Building / Global');
-      if (globalRoom) {
-        await db.delete(rooms).where(eq(rooms.id, globalRoom.id));
-        console.log('🗑️ Deleted Building / Global room for fresh re-creation');
-      }
-
-      res.json({
-        success: true,
-        message: `Cleared allocations for job`,
-        elementsDeleted,
-        itemsDeleted,
-        roomsReset: jobRooms.length
-      });
-    } catch (error) {
-      console.error("Clear allocations error:", error);
-      res.status(500).json({ error: "Failed to clear allocations" });
+      const { db } = await import("./db");
+      const { sql } = await import("drizzle-orm");
+      await db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS fittings TEXT`);
+      await db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS fittings_source TEXT`);
+      res.json({ success: true, message: "DXF columns added to rooms table" });
+    } catch (error: any) {
+      console.error("Migration error:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
   // Stats endpoint
-
-
   app.get("/api/stats", async (req, res) => {
     try {
       const stats = await storage.getStats();
@@ -314,194 +131,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete a job and all associated data
   app.delete("/api/jobs/:id", async (req, res) => {
     try {
-      const jobId = req.params.id;
-      await storage.deleteJob(jobId);
-
-      res.status(204).send();
+      const { id } = req.params;
+      const success = await storage.deleteJob(id);
+      if (success) {
+        res.status(200).json({ message: "Job deleted successfully" });
+      } else {
+        res.status(404).json({ error: "Job not found" });
+      }
     } catch (error) {
       console.error("Error deleting job:", error);
-      res.status(500).json({ error: "Failed to delete job", details: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  // Job Tender endpoint
-  app.get("/api/jobs/:id/qs-tender", async (req, res) => {
-    try {
-      const job = await storage.getJob(req.params.id);
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      const { QSCalculator } = await import("./qs-calculator");
-      const tenderDoc = QSCalculator.calculate(job);
-
-      res.json(tenderDoc);
-    } catch (error) {
-      console.error("Error generating QS Tender:", error);
-      res.status(500).json({ error: "Failed to generate tender document" });
-    }
-  });
-
-  // Room Work Packages endpoint (AGENTS.md compliant)
-  // Returns Room-based data: rooms -> elements -> payable items
-  app.get("/api/jobs/:id/rooms", async (req, res) => {
-    try {
-      const job = await storage.getJob(req.params.id);
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      const { roomMapper } = await import("./room-mapper");
-      const roomData = await roomMapper.getRoomDataForJob(req.params.id);
-
-      // Extract cost breakdown from job data
-      // First try job.costBreakdown, then try phaseTaskData.financials
-      let costBreakdown = {
-        labour: 0,
-        material: 0,
-        plant: 0,
-        subcontractor: 0,
-        total: 0
-      };
-
-      // Try to get from costBreakdown field (stored in pence)
-      if (job.costBreakdown?.total) {
-        costBreakdown = {
-          labour: (job.costBreakdown.labour || 0) / 100,
-          material: (job.costBreakdown.material || 0) / 100,
-          plant: (job.costBreakdown.plant || 0) / 100,
-          subcontractor: (job.costBreakdown.subcontractor || 0) / 100,
-          total: (job.costBreakdown.total || 0) / 100
-        };
-      }
-      // Try to get from phaseTaskData.financials (from CSV import)
-      else if (job.phaseTaskData) {
-        try {
-          const phaseData = JSON.parse(job.phaseTaskData);
-          if (phaseData.financials) {
-            // Values from CSV are stored in pence, convert to pounds
-            costBreakdown = {
-              labour: (phaseData.financials.totalLabour || 0) / 100,
-              material: (phaseData.financials.totalMaterial || 0) / 100,
-              plant: (phaseData.financials.totalPlant || 0) / 100,
-              subcontractor: (phaseData.financials.totalSubcontractor || 0) / 100,
-              total: (phaseData.financials.grandTotal || 0) / 100
-            };
-            console.log('📊 Cost breakdown from phaseTaskData (converted to £):', costBreakdown);
-          }
-        } catch (e) {
-          console.error('Failed to parse phaseTaskData for costBreakdown:', e);
-        }
-      }
-
-      // Fallback to job totalCost if available
-      if (costBreakdown.total === 0 && job.totalCost) {
-        costBreakdown.total = parseFloat(job.totalCost) || 0;
-      }
-
-      // AGENTS.md COMPLIANCE: Rooms come from drawing extraction ONLY
-      // If no rooms exist, user needs to upload a drawing first
-      if (roomData.length === 0) {
-        console.log('⚠️ No rooms from drawing extraction for job. Upload a drawing to identify rooms.');
-        return res.json({
-          jobId: job.id,
-          projectName: job.title,
-          rooms: [],
-          costBreakdown,
-          message: 'No rooms identified. Upload a construction drawing to extract rooms.',
-          generatedAt: new Date().toISOString()
-        });
-      }
-
-
-      res.json({
-        jobId: job.id,
-        projectName: job.title,
-        rooms: roomData,
-        costBreakdown,
-        generatedAt: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error("Error fetching room data:", error);
-      res.status(500).json({ error: "Failed to fetch room data" });
-    }
-  });
-
-  // Manual Room Renaming
-  app.patch("/api/rooms/:id", async (req, res) => {
-    try {
-      const roomId = req.params.id;
-      const { name } = req.body;
-
-      if (!name) return res.status(400).json({ error: "Name is required" });
-
-      // Update Room Table
-      // Note: id might be int or string depending on schema. UUID usually.
-      // Drizzle handles type checking.
-      const updatedRooms = await db.update(rooms)
-        .set({ name })
-        .where(eq(rooms.id, roomId))
-        .returning();
-
-      if (updatedRooms.length === 0) {
-        // Maybe it's not found, but extractedElement also needs update if possible.
-        // But extracting room ID from extractedElements is hard.
-        // We rely on 'rooms' table for the Viewer.
-        // If room is not in table (e.g. temporary?), it fails.
-        return res.status(404).json({ error: "Room not found" });
-      }
-
-      const updatedRoom = updatedRooms[0];
-
-      // Update ExtractedElements description to match
-      // We find elements where elementType='room' and description=OLD_NAME?
-      // Or if we have room.name link.
-      // Since schema doesn't link extractedElements.id to rooms.id solidly:
-      // We update extractedElements where roomName = OLD_NAME to New Name?
-      // We assume user wants associated elements to update? No, "roomName" column in extractedElements needs update.
-      // AND the element representing the room itself (elementType='room').
-
-      // Update usage in extractedElements
-      // 1. Update the 'room' element itself (description)
-      // We don't have the old name handy unless we fetched first.
-
-      // Just Update rooms table is enough for Viewer (which reads rooms table).
-
-      res.json(updatedRoom);
-
-    } catch (error) {
-      console.error("Error updating room:", error);
-      res.status(500).json({ error: "Failed to update room" });
-    }
-  });
-
-  // Manual Extracted Element Update (For renaming rooms/elements in UI)
-  app.patch("/api/extracted-elements/:id", async (req, res) => {
-    try {
-      const elementId = req.params.id;
-      const { description, roomName, quantity } = req.body;
-
-      const updateData: any = {};
-      if (description) updateData.description = description;
-      if (roomName) updateData.roomName = roomName;
-      if (quantity) updateData.quantity = quantity;
-
-      const updatedElements = await db.update(extractedElements)
-        .set(updateData)
-        .where(eq(extractedElements.id, elementId))
-        .returning();
-
-      if (updatedElements.length === 0) {
-        return res.status(404).json({ error: "Element not found" });
-      }
-
-      res.json(updatedElements[0]);
-    } catch (error) {
-      console.error("Error updating extracted element:", error);
-      res.status(500).json({ error: "Failed to update extracted element" });
+      res.status(500).json({ error: "Failed to delete job" });
     }
   });
 
@@ -517,6 +158,382 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to update job" });
     }
   });
+
+  // --- IFC & Room Endpoints ---
+  app.post("/api/jobs/:id/files", uploadJobFile.single('file'), async (req, res) => {
+    try {
+      const jobId = req.params.id;
+      const file = (req as MulterRequest).file;
+
+      if (!file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const fileUrl = `/api/files/${file.filename}`;
+      let finalFileUrl = fileUrl;
+      let finalFileType = file.mimetype;
+
+
+      // IFC PROCESSING
+      if (file.originalname.toLowerCase().endsWith('.ifc')) {
+        console.log("🏗️ IFC Upload Detected: Processing with IfcAgent...");
+        try {
+          const agent = new IfcAgent();
+          const result = await agent.process(file.path);
+
+          if (result.success) {
+            console.log(`✅ IFC Processed: ${result.rooms.length} rooms, ${result.elements.length} elements`);
+
+            // Delete existing data for this job to avoid duplicates on re-upload
+            // (Assuming full replacement workflow)
+            try {
+              // Note: deleteJob deletes everything, but here we might want to be more granular if we supported multiple files per job
+              // For now, we'll assume one model per job or append. 
+              // Better to just add the new data.
+            } catch (cleanupAuth) {
+              console.warn("Cleanup warning:", cleanupAuth);
+            }
+
+            // Save Rooms
+            for (const room of result.rooms) {
+              await storage.createRoom({
+                jobId,
+                name: room.name,
+                area: room.area,
+                totalValue: room.totalValue,
+                perimeter: room.perimeter,
+                height: room.height,
+                volume: room.volume,
+                geometry: JSON.stringify(room.geometry),
+                bbox: JSON.stringify(room.bbox)
+              });
+            }
+
+            // Save Elements
+            for (const el of result.elements) {
+              await storage.createExtractedElement({
+                jobId,
+                originalId: el.id,
+                elementType: el.type,
+                description: el.name, // Mapping name to description
+                roomName: el.roomName || 'Unassigned',
+                dimensions: el.dimensions,
+                bbox: JSON.stringify(el.bbox),
+                geometry: JSON.stringify(el.geometry),
+                quantity: "1",
+                rawJson: JSON.stringify(el)
+              });
+            }
+          } else {
+            console.error("❌ IFC Processing Failed:", result.error);
+          }
+        } catch (ifcError) {
+          console.error("❌ Critical Error in IfcAgent:", ifcError);
+        }
+      }
+
+      // DXF PROCESSING
+      if (file.originalname.toLowerCase().endsWith('.dxf')) {
+        console.log("📐 DXF Upload Detected: Processing with DxfAgent...");
+        const agent = new DxfAgent();
+        const result = await agent.process(file.path, jobUploadsDir);
+
+        if (result.success) {
+          if (result.svgPath) {
+            // Point the URL to the generated SVG so the frontend can render it natively
+            // Result.svgPath is just the filename (basename)
+            finalFileUrl = `/api/files/${result.svgPath}`;
+            finalFileType = 'image/svg+xml'; // Treat as SVG for browser
+            console.log("✅ DXF converted to SVG at:", finalFileUrl);
+          } else {
+            console.warn("⚠️ DXF conversion generated no SVG path.");
+          }
+
+          // SAVE EXTRACTED DXF DATA to Database (Just like IFC)
+          console.log(`💾 Saving DXF Extraction: ${result.rooms.length} rooms, ${result.detailedElements.length} elements`);
+
+          // 1. Rooms
+          for (const room of result.rooms) {
+            await storage.createRoom({
+              jobId,
+              name: room.name,
+              area: "0", // DXF extraction doesn't calc area yet, default to 0
+              perimeter: "0",
+              geometry: JSON.stringify(room.bbox), // Store bbox as geometry for now
+              bbox: JSON.stringify(room.bbox),
+              // DXF doesn't usually give us 3D height/vol
+            });
+          }
+
+          // 2. Elements
+          for (const el of result.detailedElements) {
+            // Generate a pseudo ID
+            const pseudoId = `DXF-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+            await storage.createExtractedElement({
+              jobId,
+              originalId: pseudoId,
+              elementType: el.type,
+              description: el.name,
+              roomName: 'Unassigned', // DXF doesn't link elements to rooms automatically yet
+              dimensions: 'N/A',
+              bbox: JSON.stringify(el.bbox),
+              geometry: JSON.stringify(el.bbox), // Just point/box
+              quantity: "1",
+              rawJson: JSON.stringify(el)
+            });
+          }
+
+        } else {
+          console.warn("⚠️ DXF processing failed, saving original only.");
+        }
+      }
+
+      const jobFile = await storage.createJobFile({
+        jobId,
+        filename: file.originalname,
+        fileType: finalFileType,
+        fileUrl: finalFileUrl,
+        filePath: file.path
+      });
+
+      res.status(201).json(jobFile);
+    } catch (error) {
+      console.error("Error uploading job file:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  app.get("/api/files/:filename", (req, res) => {
+    const filename = req.params.filename;
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).send("Invalid filename");
+    }
+    const filePath = path.join(jobUploadsDir, filename);
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.status(404).send("File not found");
+    }
+  });
+
+  app.get("/api/rooms", async (req, res) => {
+    try {
+      const jobId = req.query.jobId as string;
+      if (!jobId) return res.status(400).json({ error: "jobId required" });
+      const rooms = await storage.getRooms(jobId);
+      res.json(rooms);
+    } catch (error) {
+      console.error("Error fetching rooms:", error);
+      res.status(500).json({ error: "Failed to fetch rooms" });
+    }
+  });
+
+  // Nested Job Routes
+  app.get("/api/jobs/:id/rooms", async (req, res) => {
+    try {
+      const rooms = await storage.getRooms(req.params.id);
+      res.json(rooms);
+    } catch (error) {
+      console.error("Error fetching rooms:", error);
+      res.status(500).json({ error: "Failed to fetch rooms" });
+    }
+  });
+
+  app.get("/api/jobs/:id/elements", async (req, res) => {
+    try {
+      const elements = await storage.getExtractedElements(req.params.id);
+      res.json(elements);
+    } catch (error) {
+      console.error("Error fetching elements:", error);
+      res.status(500).json({ error: "Failed to fetch elements" });
+    }
+  });
+
+  app.post("/api/rooms", async (req, res) => {
+    try {
+      const parsed = insertRoomSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error });
+      const room = await storage.createRoom(parsed.data);
+      res.status(201).json(room);
+    } catch (error) {
+      console.error("Error creating room:", error);
+      res.status(500).json({ error: "Failed to create room" });
+    }
+  });
+
+  app.delete("/api/rooms/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteRoom(req.params.id);
+      if (success) res.sendStatus(204);
+      else res.status(404).json({ error: "Room not found" });
+    } catch (error) {
+      res.status(500).json({ error: "Delete failed" });
+    }
+  });
+
+  app.patch("/api/rooms/:id", async (req, res) => {
+    try {
+      const parsed = insertRoomSchema.partial().safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid data", details: parsed.error });
+
+      const room = await storage.updateRoom(req.params.id, parsed.data);
+      if (room) res.json(room);
+      else res.status(404).json({ error: "Room not found" });
+    } catch (error) {
+      console.error("Error updating room:", error);
+      res.status(500).json({ error: "Update failed" });
+    }
+  });
+
+  // --- DXF MICROSERVICE INTEGRATION ---
+  // Proxies DXF file + room polygons to Python scanner at localhost:8000
+  const DXF_SCANNER_URL = process.env.DXF_SCANNER_URL || "http://localhost:8000";
+
+  app.post("/api/jobs/:jobId/scan-dxf", uploadJobFile.single('file'), async (req, res) => {
+    try {
+      const jobId = req.params.jobId;
+      const file = (req as MulterRequest).file;
+
+      if (!file) {
+        return res.status(400).json({ error: "No DXF file uploaded" });
+      }
+
+      // 1. Get all rooms for this job
+      const rooms = await storage.getRooms(jobId);
+      if (!rooms || rooms.length === 0) {
+        return res.status(400).json({
+          error: "No rooms defined. Draw rooms on the plan first, then scan DXF."
+        });
+      }
+
+      // Filter to rooms that have polygon data
+      const roomsWithPolygons = rooms.filter(r => r.polygon && r.polygon !== "[]");
+      if (roomsWithPolygons.length === 0) {
+        return res.status(400).json({
+          error: "No rooms have polygon data. Draw room boundaries first."
+        });
+      }
+
+      // 2. Build rooms JSON for the Python scanner
+      const roomsForScanner = roomsWithPolygons.map(r => ({
+        id: r.id,
+        name: r.name,
+        polygon: r.polygon // Already a JSON string of [{x,y}]
+      }));
+
+      // 3. Forward to Python microservice
+      console.log(`📐 DXF Scan: Forwarding to Python scanner for job ${jobId} with ${roomsForScanner.length} rooms`);
+
+      // Read the file from disk and create a FormData to send to Python
+      const fileBuffer = fs.readFileSync(file.path);
+      const blob = new Blob([fileBuffer], { type: 'application/octet-stream' });
+
+      const formData = new FormData();
+      formData.append('file', blob, file.originalname);
+      formData.append('rooms_json', JSON.stringify(roomsForScanner));
+
+      const scanResponse = await fetch(`${DXF_SCANNER_URL}/scan-dxf-fittings`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!scanResponse.ok) {
+        const errorBody = await scanResponse.text();
+        console.error("❌ DXF Scanner error:", errorBody);
+        return res.status(502).json({
+          error: "DXF Scanner service error",
+          details: errorBody
+        });
+      }
+
+      const scanResult = await scanResponse.json() as {
+        status: string;
+        total_inserts: number;
+        total_matched: number;
+        total_assigned: number;
+        unmatched_blocks: string[];
+        per_room: Record<string, {
+          room_id: string;
+          room_name: string;
+          fittings: Record<string, number>;
+          has_fittings: boolean;
+          source: string;
+        }>;
+      };
+
+      if (scanResult.status !== "success") {
+        return res.status(500).json({ error: "DXF scan did not succeed", result: scanResult });
+      }
+
+      // 4. Write fittings back into PostgreSQL room records
+      let updatedCount = 0;
+      for (const [roomId, roomData] of Object.entries(scanResult.per_room)) {
+        try {
+          await storage.updateRoom(roomId, {
+            fittings: JSON.stringify(roomData.fittings),
+            fittingsSource: "DXF_AUTO"
+          });
+          updatedCount++;
+          console.log(`  ✅ ${roomData.room_name}: ${JSON.stringify(roomData.fittings)}`);
+        } catch (updateError) {
+          console.error(`  ❌ Failed to update room ${roomId}:`, updateError);
+        }
+      }
+
+      // 5. Clean up uploaded DXF file
+      try { fs.unlinkSync(file.path); } catch { }
+
+      console.log(`📐 DXF Scan Complete: ${updatedCount}/${roomsWithPolygons.length} rooms updated`);
+
+      res.json({
+        status: "success",
+        total_inserts: scanResult.total_inserts,
+        total_matched: scanResult.total_matched,
+        total_assigned: scanResult.total_assigned,
+        unmatched_blocks: scanResult.unmatched_blocks,
+        rooms_updated: updatedCount,
+        per_room: scanResult.per_room
+      });
+
+    } catch (error: any) {
+      console.error("❌ DXF Scan Error:", error);
+
+      // Check if it's a connection error (Python server not running)
+      if (error.code === 'ECONNREFUSED' || error.cause?.code === 'ECONNREFUSED') {
+        return res.status(503).json({
+          error: "DXF Scanner service is not running. Start the Python server on port 8000.",
+          hint: "Run: cd 'Sculpt Drawings Upload' && .\\start_server.ps1"
+        });
+      }
+
+      res.status(500).json({ error: `DXF scan failed: ${error.message}` });
+    }
+  });
+
+  // Get DXF scan status for a job (checks if any rooms have DXF fittings)
+  app.get("/api/jobs/:jobId/dxf-status", async (req, res) => {
+    try {
+      const rooms = await storage.getRooms(req.params.jobId);
+      const dxfRooms = rooms.filter(r => r.fittingsSource === "DXF_AUTO");
+
+      res.json({
+        has_dxf: dxfRooms.length > 0,
+        dxf_room_count: dxfRooms.length,
+        total_rooms: rooms.length,
+        rooms: dxfRooms.map(r => ({
+          id: r.id,
+          name: r.name,
+          fittings: r.fittings ? JSON.parse(r.fittings) : null,
+          source: r.fittingsSource
+        }))
+      });
+    } catch (error) {
+      console.error("Error checking DXF status:", error);
+      res.status(500).json({ error: "Failed to check DXF status" });
+    }
+  });
+
 
   // Contractors endpoints
   app.get("/api/contractors", async (req, res) => {
@@ -600,1361 +617,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Job Files API
-  app.get("/api/jobs/:id/files", async (req, res) => {
-    try {
-      const files = await storage.getJobFiles(req.params.id);
-      res.json(files);
-    } catch (error) {
-      console.error("Error fetching files:", error);
-      res.status(500).json({
-        error: "Failed to fetch job files",
-        details: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  // NEW AUTO-CREATE JOB FROM CSV endpoint
-  app.post("/api/jobs/import-new-from-csv", upload.single('file'), async (req: MulterRequest, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No CSV file uploaded" });
-      }
-
-      console.log(`🚀 Starting Header Detection & Auto-Import...`);
-
-      const csvContent = req.file.buffer.toString('utf-8');
-
-      // DEBUG: Save file to inspect later
-      try {
-        const fs = await import('fs');
-        const path = await import('path');
-        fs.writeFileSync(path.join(process.cwd(), 'uploads', 'debug_last_upload.csv'), csvContent);
-        console.log("💾 Saved debug CSV to uploads/debug_last_upload.csv");
-      } catch (e) {
-        console.error("Failed to save debug CSV", e);
-      }
-
-      const lines = csvContent.split(/\r?\n/);
-      console.log("📄 CSV DEBUG - First 5 lines:", lines.slice(0, 5));
-
-      // --- 1. DETECT HEADER BLOCK (Rows 1-5) ---
-      let clientName = "Unknown Client";
-      let address = "Unknown Address";
-      let postcode = "";
-      let projectType = "Construction";
-      let headerEndIndex = 0;
-
-      // Scan first 10 lines for "Key, Value" pairs
-      for (let i = 0; i < Math.min(lines.length, 10); i++) {
-        const line = lines[i];
-        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/^"|"$/g, '').trim());
-
-        if (cols[0]?.toLowerCase().includes("name") && cols[1]) clientName = cols[1];
-        if (cols[0]?.toLowerCase().includes("address") && cols[1]) address = cols[1];
-        if (cols[0]?.toLowerCase().includes("post code") && cols[1]) postcode = cols[1];
-        if (cols[0]?.toLowerCase().includes("project type") && cols[1]) projectType = cols[1];
-
-        // Check for Data Header Row to stop scanning headers
-        // Check for Data Header Row to stop scanning headers
-        if (cols[0]?.toLowerCase().includes("resource quantity") || cols[0]?.toLowerCase().includes("phase") || cols[2]?.toLowerCase().includes("build phase") || cols[0]?.toLowerCase() === "resource") {
-          headerEndIndex = i + 1; // Start data after this line
-          break;
-        }
-      }
-
-      // Combine address and postcode if needed
-      const fullLocation = `${address}, ${postcode}`.replace(/^, |, $/g, '');
-
-      console.log(`✅ Extracted Header Info: Client=${clientName}, Type=${projectType}, Loc=${fullLocation}`);
-
-      // --- 2. CREATE JOB ---
-      const newJobData = {
-        title: `${projectType} - ${clientName}`,
-        clientName: clientName,
-        projectType: projectType, // Save distinct project type
-        address: address, // Save distinct address
-        postcode: postcode, // Save distinct postcode
-        location: fullLocation || "Client Address",
-        status: "pending",
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        description: `Imported from CSV. Project Type: ${projectType}`
-      };
-
-      const job = await storage.createJob(newJobData);
-      console.log(`✅ Auto-Created Job ID: ${job.id}`);
-
-
-      // --- 3. PARSE COST ITEMS (Dynamic Column Mapping) ---
-      const hbxLines: any[] = [];
-
-      // Attempt to identify column indices from the header row
-      // The header row was established as headerEndIndex (start of data) - 1 ?? 
-      // Actually headerEndIndex is where data starts. So header is headerEndIndex - 1.
-      let colMap: Record<string, number> = { phase: -1, desc: -1, qty: -1, unit: -1, rate: -1, total: -1, type: -1 };
-
-      if (headerEndIndex > 0) {
-        const headerRow = lines[headerEndIndex - 1].toLowerCase().split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/^"|"$/g, '').trim());
-        console.log("Found Header Row:", headerRow);
-
-        headerRow.forEach((col, idx) => {
-          if (col.includes("phase")) colMap.phase = idx;
-          else if (col.includes("description") || col === "task" || col === "resource") colMap.desc = idx;
-          else if (col.includes("quantity") || col === "qty") {
-            // Prefer "altering order quantity" or just simple quantity. 
-            // If we already found a quantity column, maybe keep the last one or selective?
-            // For John Do, "Resource cost including wastage altering order quantity" is the total? No.
-            // Let's look for "altering order quantity" specifically for John Do.
-            if (col.includes("altering") && col.includes("quantity")) colMap.qty = idx;
-            else if (colMap.qty === -1) colMap.qty = idx; // Only set if not set
-          }
-          else if (col.includes("unit")) colMap.unit = idx;
-          else if (col.includes("rate") || col.includes("price") || (col.includes("cost") && !col.includes("total") && !col.includes("quantity"))) colMap.rate = idx;
-          else if (col.includes("total") || (col.includes("cost") && col.includes("including") && col.includes("quantity"))) colMap.total = idx;
-          else if (col.includes("type") || col.includes("category")) colMap.type = idx;
-        });
-      }
-
-      // Fallback defaults if mapping failed (e.g. Freddy Jackson might not have standard headers in correct row)
-      // We will perform a check per-row if dynamic mapping didn't find critical fields
-
-      console.log("Column Mapping:", colMap);
-
-      for (let i = headerEndIndex; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line.trim()) continue;
-
-        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-        if (cols.length < 3) continue;
-
-        const clean = (s: string) => s ? s.replace(/^"|"$/g, '').trim() : '';
-
-        let phase = "", desc = "", type = "MATERIAL", unit = "", qty = 0, price = 0, total = 0;
-
-        // STRATEGY 1: Freddy Jackson / Legacy Manual Format override
-        // (This format is tricky because it hides price inside Description)
-        const col0 = clean(cols[0]);
-        const col2 = clean(cols[2]);
-        const col7 = clean(cols[7]);
-
-        if (col2 && col7 && col7.includes("£")) {
-          // ... Keep existing logic for this specific file structure ...
-          phase = col2;
-          let rawDesc = col7;
-          const priceMatch = rawDesc.match(/£([\d.]+)\/([a-zA-Z0-9³²]+)/);
-          if (priceMatch) {
-            price = parseFloat(priceMatch[1]);
-            unit = priceMatch[2];
-            desc = rawDesc.replace(priceMatch[0], "").trim();
-          } else {
-            desc = rawDesc;
-            price = 0;
-            unit = "Item";
-          }
-          qty = parseFloat(clean(cols[9] || "0").replace(/[^0-9.-]/g, ""));
-          type = clean(cols[3]).toUpperCase() || "MATERIAL";
-          total = parseFloat((price * qty).toFixed(2));
-
-        }
-        // STRATEGY 2: John Do / Resource Format (Explict)
-        // Col0=Phase, Col2=Desc, Col5=Price, Col8=Unit, Col11=Qty, Col14=Total
-        // Relaxed check: check for digits in Price col instead of "£" symbol to handle encoding/BOM issues
-        else if (col0 && col2 && /[0-9]/.test(clean(cols[5]))) {
-          console.log("Using John Do Strategy for line:", i);
-          phase = col0;
-          desc = col2;
-          price = parseFloat(clean(cols[5] || "0").replace(/[^0-9.-]/g, ""));
-          unit = clean(cols[8] || "Each");
-          qty = parseFloat(clean(cols[11] || "1").replace(/[^0-9.-]/g, ""));
-          total = parseFloat(clean(cols[14] || "0").replace(/[^0-9.-]/g, ""));
-
-          // Infer type from Description if not explicit
-          const descLower = desc.toLowerCase();
-          if (descLower.includes("labor") || descLower.includes("labour") || descLower.includes("fix") || descLower.includes("install")) type = "LABOUR";
-          else type = "MATERIAL";
-        }
-        // STRATEGY 3: Dynamic Mapping
-        else if (colMap.desc !== -1 && colMap.total !== -1) {
-          phase = colMap.phase !== -1 ? clean(cols[colMap.phase]) : "General";
-          desc = clean(cols[colMap.desc]);
-          unit = colMap.unit !== -1 ? clean(cols[colMap.unit]) : "nr";
-          type = colMap.type !== -1 ? clean(cols[colMap.type]) : "MATERIAL";
-
-          // Numbers
-          qty = parseFloat(clean(cols[colMap.qty] || "1").replace(/[^0-9.-]/g, "") || "1");
-          price = parseFloat(clean(cols[colMap.rate] || "0").replace(/[^0-9.-]/g, "") || "0");
-          total = parseFloat(clean(cols[colMap.total] || "0").replace(/[^0-9.-]/g, "") || "0");
-
-          // If Total is missing but we have Rate/Qty
-          if (total === 0 && price > 0 && qty > 0) total = price * qty;
-        }
-        // STRATEGY 3: Last Resort Fallback (Old logic)
-        else {
-          if (clean(cols[0]) && clean(cols[3])) {
-            // Try Material Used standard format
-            phase = clean(cols[0]);
-            desc = clean(cols[3]);
-            unit = clean(cols[4]);
-            total = parseFloat(clean(cols[15] || "0").replace(/[^0-9.-]/g, ""));
-          } else if (clean(cols[10]) && clean(cols[7])) {
-            // Try HBXL Standard export
-            phase = clean(cols[10]);
-            desc = clean(cols[7]);
-            total = parseFloat(clean(cols[23] || "0").replace(/[^0-9.-]/g, ""));
-          }
-        }
-
-        if (desc && (total > 0 || price > 0)) {
-          // Ensure Type is set (default to MATERIAL if not found)
-          if (!type) type = "MATERIAL";
-
-          hbxLines.push({
-            Phase: phase || "General",
-            Description: desc,
-            Tag: "",
-            Unit: unit || "Each",
-            Price: price,
-            Qty: qty,
-            Total: total,
-            Type: type
-          });
-        }
-      }
-
-      console.log(`✅ Extracted ${hbxLines.length} cost items.`);
-
-      // --- 4. FINALIZE (Save Financials) ---
-      const phaseTaskData: Record<string, any[]> = {};
-      let totalLabour = 0, totalMaterial = 0, totalPlant = 0, totalSubcontractor = 0;
-      let grandTotal = 0;
-
-      for (const line of hbxLines) {
-        // Categorize
-        let cat = "MATERIAL"; // Default to MATERIAL
-
-        const unitLower = line.Unit.toLowerCase();
-        const descLower = line.Description.toLowerCase();
-
-        // Type Detection (Labour vs Material)
-        if (unitLower.includes('hour') ||
-          unitLower.includes('day') ||
-          unitLower.includes('week') ||
-          descLower.includes('labour') ||
-          descLower.includes('electrician') ||
-          descLower.includes('plumber')) {
-
-          // Refine Plant vs Labour
-          if (descLower.includes('hire') || descLower.includes('plant') || descLower.includes('digger') || descLower.includes('skip')) {
-            cat = 'PLANT';
-          } else {
-            cat = 'LABOUR';
-          }
-        } else if (descLower.includes("plant") || descLower.includes("hire")) {
-          cat = "PLANT";
-        }
-
-        // Safety override for common materials
-        if (descLower.includes('cable') || descLower.includes('clip') || descLower.includes('box') || descLower.includes('screw') || descLower.includes('plug') || descLower.includes('plate') || descLower.includes('socket') || descLower.includes('switch')) {
-          cat = "MATERIAL";
-        }
-        if (!phaseTaskData[line.Phase]) phaseTaskData[line.Phase] = [];
-
-        const costPence = Math.round(line.Total * 100);
-
-        phaseTaskData[line.Phase].push({
-          task: line.Description,
-          description: line.Description,
-          quantity: line.Qty,
-          unit: line.Unit,
-          unitPrice: Math.round(line.Price * 100),
-          totalCost: costPence,
-          resourceType: cat
-        });
-
-        grandTotal += costPence;
-        if (cat === "LABOUR") totalLabour += costPence;
-        else if (cat === "MATERIAL") totalMaterial += costPence;
-        else if (cat === "PLANT") totalPlant += costPence;
-        else totalSubcontractor += costPence;
-      }
-
-      const financialSummary = {
-        totalLabour,
-        totalMaterial,
-        totalPlant,
-        totalSubcontractor,
-        grandTotal
-      };
-
-      const finalPhaseData = JSON.stringify({
-        phases: phaseTaskData,
-        financials: financialSummary
-      });
-
-      // Update the Job object
-      await storage.updateJob(job.id, {
-        phaseTaskData: finalPhaseData,
-        totalCost: (grandTotal / 100).toFixed(2),
-        status: "pending" // Ready for assignment
-      });
-
-      // --- 5. AUTO-POPULATE ROOMS (For Room Work Packages UI) ---
-      try {
-        console.log("🏗️ Auto-generating Rooms from Phases...");
-
-        for (const [phaseName, items] of Object.entries(phaseTaskData)) {
-          // 1. Create Room
-          const [newRoom] = await db.insert(rooms).values({
-            jobId: job.id,
-            name: phaseName, // e.g., "Electrical 1st Fix"
-            status: "not_started",
-            totalValue: String(items.reduce((sum: number, item: any) => sum + item.totalCost, 0)),
-            floor: "Phase Group"
-          }).returning();
-
-          // 2. Create Generic Element
-          const [newElement] = await db.insert(roomElements).values({
-            roomId: newRoom.id,
-            name: "Works",
-            subtotal: String(items.reduce((sum: number, item: any) => sum + item.totalCost, 0))
-          }).returning();
-
-          // 3. Create Payable Items
-          for (const item of items) {
-            await db.insert(payableItems).values({
-              elementId: newElement.id,
-              description: item.description,
-              quantity: String(item.quantity),
-              unit: item.unit,
-              rate: String(item.unitPrice), // Stored in Pence
-              total: String(item.totalCost), // Pence
-              status: "not_started",
-              itemType: item.resourceType
-            });
-          }
-        }
-      } catch (roomErr) {
-        console.error("⚠️ Failed to auto-populate rooms from phases. Continuing with Job creation...", roomErr);
-      }
-
-      console.log(`✅ Job ${job.id} populated. Total: £${(grandTotal / 100).toFixed(2)}`);
-
-      res.json({ success: true, jobId: job.id, message: "Job created and populated from CSV" });
-
-    } catch (error) {
-      console.error("Error in auto-import:", error);
-      res.status(500).json({ error: "Failed to auto-import job from CSV" });
-    }
-  });
-
-  // HBXL Import Endpoint (Existing)
-  app.post("/api/jobs/:id/import-hbxl", upload.single('file'), async (req: MulterRequest, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No CSV file uploaded" });
-      }
-
-      const jobId = req.params.id;
-      const job = await storage.getJob(jobId);
-      if (!job) return res.status(404).json({ error: "Job not found" });
-
-      console.log(`🚀 Starting HBXL Import for Job ${jobId}`);
-
-      // 1. Load CSV content
-      const csvContent = req.file.buffer.toString('utf-8');
-
-      // 2. Parse CSV to HBXLLine[] using our custom logic
-      // We need to import the helper function. Currently it is in the test script.
-      // I will inline a robust parser here or create a shared one.
-      // For now, let's use a robust inline parser similar to the test script.
-      const lines = csvContent.split('\n');
-      const hbxLines: any[] = []; // Typed as any to bypass strict HBXLLine check for this inline parser
-
-      let idCounter = 1;
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-        if (cols.length < 5) continue;
-
-        const clean = (s: string) => s ? s.replace(/^"|"$/g, '').trim() : '';
-
-        // Determine Format (Material Used or Standard)
-        // Standard: Order Date, Phase...
-        // Material Used: Phase, Empty, Desc...
-
-        let phase = "", desc = "", type = "MATERIAL", unit = "", qty = 0, price = 0, total = 0;
-
-        // Heuristic: Check column counts or headers
-        // Let's rely on the "Material Used" format we just tested if it matches
-        // Col 0: Phase
-        // Col 2: Desc
-        const col0 = clean(cols[0]); // Phase
-        const col2 = clean(cols[2]); // Description in Material Used
-        const col7 = clean(cols[7]); // Description in Freddy Jackson
-
-        // "Materials Used" Format Detection (HBXL Report)
-        // Col 0: Phase, Col 2: Desc, Col 8: Unit, Col 9: Qty (Ex Waste), Col 12: Cost (Ex Waste)
-        if (col0 && col2 && !col7 && (cols.length >= 13)) {
-          // Likely Material Used Format
-          phase = col0;
-          desc = col2;
-          unit = clean(cols[8]);
-          // Col 9 is Qty (Excluding Wastage). Col 11 is Qty (Inc Wastage). Use Net for Tender.
-          qty = parseFloat(clean(cols[9] || "0").replace(/[^0-9.-]/g, ""));
-          price = parseFloat(clean(cols[5] || "0").replace(/[^0-9.-]/g, ""));
-          // Col 12 is Cost (Excluding Wastage). Col 14 is Cost (Inc Wastage).
-          total = parseFloat(clean(cols[12] || "0").replace(/[^0-9.-]/g, ""));
-        } else {
-          // Likely Freddy Jackson / Standard Format
-          phase = clean(cols[2]);
-          desc = col7;
-          unit = clean(cols[8]);
-          qty = parseFloat(clean(cols[cols.length - 1] || "0"));
-
-          const costMatch = desc.match(/£([\d\.]+)/);
-          if (costMatch) price = parseFloat(costMatch[1]);
-          total = price * qty;
-        }
-
-        if (isNaN(qty)) qty = 0;
-        if (isNaN(price)) price = 0;
-        if (isNaN(total)) total = 0;
-
-        // Skip lines with no description as they are likely headers or empty
-        if (!desc) continue;
-
-        // Type Detection
-        // Type Detection
-        // Type Detection
-        const col3Type = clean(cols[3]).toLowerCase();
-
-        if (col3Type) {
-          if (col3Type.includes('labour')) type = "LABOUR";
-          else if (col3Type.includes('plant')) type = "PLANT";
-          else if (col3Type.includes('material')) type = "MATERIAL";
-        } else {
-          // Fallback Heuristics
-          const textCheck = (desc + " " + phase).toLowerCase();
-          const unitCheck = unit.toLowerCase();
-
-          if (unitCheck.includes('hour') || unitCheck.includes('day') || unitCheck.includes('week')) {
-            type = "LABOUR";
-          } else if (textCheck.includes('labour') || textCheck.includes('labor') || textCheck.includes('electrician') || textCheck.includes('plumber') || textCheck.includes('carpenter') || textCheck.includes('bricklayer') || textCheck.includes('gang') || textCheck.includes('mate')) {
-            type = "LABOUR";
-          } else if (textCheck.includes('plant') || textCheck.includes('hire') || textCheck.includes('excavator') || textCheck.includes('digger') || textCheck.includes('skip')) {
-            type = "PLANT";
-          } else {
-            // Default to MATERIAL
-            type = "MATERIAL";
-
-            // Safety override for common materials that might trigger false positives
-            if (textCheck.includes('cable') || textCheck.includes('clip') || textCheck.includes('box') || textCheck.includes('screw') || textCheck.includes('plug') || textCheck.includes('plate') || textCheck.includes('socket') || textCheck.includes('switch')) {
-              type = "MATERIAL";
-            }
-          }
-        }
-
-        hbxLines.push({
-          job_code: job.jobCode || `JOB-${jobId}`,
-          item_id: idCounter++,
-          phase_code: phase,
-          type: type,
-          description: desc,
-          qty: qty,
-          unit: unit,
-          hbxl_total_pence: Math.round(total * 100) || 0, // Ensure not NaN
-          hbxl_unit_rate_pence: Math.round(price * 100) || 0, // Ensure not NaN
-          category: clean(cols[4]) // Only in standard format usually
-        });
-      }
-
-      console.log(`✅ Parsed ${hbxLines.length} lines from CSV`);
-
-      // 3. Run HBXL Builder
-      const { HBXLRoomJobBuilder } = await import('./services/hbxl-job-builder');
-
-      // We need existing Rooms to Map to
-      const existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, jobId));
-      const roomConfig = existingRooms.map(r => ({
-        room_code: r.name ? r.name.toUpperCase().replace(/\s+/g, '_') : `ROOM_${r.id}`,
-        room_name: r.name || "Unnamed Room",
-        include_patterns: [r.name || ""]
-      }));
-
-      // Fallback: If no rooms, create "Global"
-      if (roomConfig.length === 0) {
-        roomConfig.push({ room_code: "GLOBAL", room_name: "Global Scope", include_patterns: [""] });
-      }
-
-      const jobPayload = HBXLRoomJobBuilder.buildJobPayload(hbxLines, {
-        job_code: job.jobCode || `JOB-${jobId}`,
-        client_name: job.clientName,
-        project_type: "Standard",
-        postcode: job.location,
-        address: job.location,
-        default_material_lead_days: 3,
-        rooms: roomConfig
-      });
-
-      // 3b. CLEANUP: Remove old HBXL imports to prevent duplication
-      // AGGRESSIVE CLEANUP: Remove ALL cost items for this job to ensure a fresh state
-      await db.delete(jobCostItems).where(eq(jobCostItems.jobId, jobId));
-      console.log(`🧹 Cleared all previous cost items for Job ${jobId}`);
-
-      // 4. Save to Database
-      // A. Create/Ensure JobCostItems
-      // B. Create Rooms if not exist (HBXL Builder might create UNALLOCATED)
-
-      for (const rPayload of jobPayload.rooms) {
-        // Find or Create Room
-        let roomId;
-        const matchingRoom = existingRooms.find(r => r.name === rPayload.room_name);
-
-        if (matchingRoom) {
-          roomId = matchingRoom.id;
-        } else {
-          // Create new room (e.g. Unallocated)
-          const [newRoom] = await db.insert(rooms).values({
-            jobId: jobId,
-            name: rPayload.room_name,
-            floor: "Ground",
-            totalValue: String(rPayload.sums.total_pence / 100)
-          }).returning();
-          roomId = newRoom.id;
-        }
-
-        // Create Tasks
-        for (const task of rPayload.tasks) {
-          await db.insert(jobCostItems).values({
-            jobId: jobId,
-            category: task.type.toUpperCase() as "LABOUR" | "MATERIAL" | "PLANT" | "SUBCONTRACTOR",
-            description: `${task.description} (${task.phase_code || "Imported"})`,
-            quantity: String(task.qty),
-            unit: task.unit,
-            rate: String(task.hbxl_unit_rate_pence / 100),
-            total: String(task.hbxl_total_pence / 100),
-            source: "hbxl_import"
-          });
-        }
-      }
-
-      // 5. Update Status
-      const updatedJob = await db.update(jobs)
-        .set({ status: 'pending', phaseTaskData: JSON.stringify(jobPayload) }) // Store raw payload for reference
-        .where(eq(jobs.id, jobId))
-        .returning();
-
-      // 6. TRIGGER AUTOMATIC COST ALLOCATION TO ROOMS
-      // Transform HbxLines (Pence) to RoomMapper Format (Pounds)
-      const phaseTaskData: Record<string, any[]> = {};
-
-      for (const line of hbxLines) {
-        if (!phaseTaskData[line.phase_code]) {
-          phaseTaskData[line.phase_code] = [];
-        }
-        phaseTaskData[line.phase_code].push({
-          description: line.description,
-          quantity: line.qty,
-          unit: line.unit,
-          rate: line.hbxl_unit_rate_pence / 100, // Convert to Pounds for mapper
-          total: line.hbxl_total_pence / 100,    // Convert to Pounds for mapper
-          category: line.type
-        });
-      }
-
-      console.log(`🔄 Triggering Auto-Allocation for ${hbxLines.length} items...`);
-      try {
-        const { roomMapper } = await import("./room-mapper");
-        // Clear existing payable items to avoid duplication if re-importing
-        const { payableItems, roomElements } = await import("@shared/schema");
-        // We can't easily clear complex relations here without cascading. 
-
-        // Clear existing room allocations to ensure fresh import
-        await roomMapper.clearRoomCosts(jobId);
-
-        await roomMapper.allocateCostsToRooms(jobId, phaseTaskData);
-        console.log(`✅ Auto-Allocation Complete: Costs distributed to rooms.`);
-      } catch (allocError) {
-        console.error(`⚠️ Auto-Allocation Failed:`, allocError);
-      }
-
-      console.log(`✅ HBXL Import Complete for Job ${jobId}`);
-      res.json({ success: true, message: "HBXL Data Imported Successfully", totals: jobPayload.totals, rooms: jobPayload.rooms.length });
-
-    } catch (error) {
-      console.error("Result of HBXL Import:", error);
-      res.status(500).json({ error: "Failed to process HBXL Import", details: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-
-  app.post("/api/jobs/:id/files", upload.single('file'), async (req: MulterRequest, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
-
-      // Sanitize and Unique Filename
-      const sanitizedOriginalName = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const uniqueFilename = `${Date.now()}-${sanitizedOriginalName}`;
-
-      const filePath = path.join(uploadsDir, uniqueFilename);
-      console.log(`💾 Writing file to: ${filePath}`);
-
-      // Write file to disk
-      try {
-        fs.writeFileSync(filePath, req.file.buffer);
-        console.log(`✅ File written successfully (${req.file.size} bytes)`);
-      } catch (writeErr) {
-        console.error(`❌ Failed to write file to storage:`, writeErr);
-        throw writeErr;
-      }
-
-      const jobFile = await storage.createJobFile({
-        jobId: req.params.id,
-        filename: uniqueFilename,
-        originalName: req.file.originalname,
-        fileUrl: `/uploads/${uniqueFilename}`,
-        fileType: req.file.mimetype,
-        uploadedBy: "user"
-      });
-
-      // DXF HANDLING (Deterministic)
-      if (req.file.originalname.toLowerCase().endsWith('.dxf')) {
-        console.log(`📐 DXF File detected: ${uniqueFilename}`);
-
-        import('./agents/dxf-agent').then(async ({ DxfAgent }) => {
-          try {
-            const agent = new DxfAgent();
-            const outputDir = path.dirname(filePath);
-            const result = await agent.process(filePath, outputDir);
-
-            if (result.success && result.svgPath) {
-              // Update DB to point to the SVG for visualization
-              await db.update(jobFiles)
-                .set({
-                  fileUrl: `/uploads/${result.svgPath}`,
-                  extractionStatus: 'completed'
-                })
-                .where(eq(jobFiles.id, jobFile.id));
-
-              // Save Extracted Rooms (Exact)
-              for (const room of result.rooms) {
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: 'room',
-                  description: room.name,
-                  dimensions: JSON.stringify(room.bbox), // Raw CAD coords
-                  quantity: "1", unit: "nr", rate: "0", total: "0",
-                  roomName: room.name
-                });
-              }
-
-              // Save Extracted Elements (Exact)
-              for (const el of result.detailedElements) {
-                // Find which room it's in (Simple Point in Rect)
-                let assignedRoom = "Unassigned";
-                const cx = (el.bbox[0] + el.bbox[2]) / 2;
-                const cy = (el.bbox[1] + el.bbox[3]) / 2;
-
-                for (const room of result.rooms) {
-                  const [rx, ry, rx2, ry2] = room.bbox;
-                  // Check considering min/max (coordinates might be flipped in CAD)
-                  const minX = Math.min(rx, rx2); const maxX = Math.max(rx, rx2);
-                  const minY = Math.min(ry, ry2); const maxY = Math.max(ry, ry2);
-
-                  if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
-                    assignedRoom = room.name;
-                    break;
-                  }
-                }
-
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: el.type,
-                  description: el.name,
-                  dimensions: JSON.stringify(el.bbox),
-                  quantity: "1", unit: "nr", rate: "0", total: "0",
-                  roomName: assignedRoom
-                });
-              }
-              console.log(`✅ DXF Processing Complete. Saved ${result.rooms.length} rooms and ${result.detailedElements.length} elements.`);
-            } else {
-              console.error("❌ DXF Extraction returned failure:", result.error);
-              await db.update(jobFiles)
-                .set({
-                  extractionStatus: 'failed',
-                  extractionError: result.error || "Unknown DXF Processing Error"
-                })
-                .where(eq(jobFiles.id, jobFile.id));
-            }
-          } catch (err) {
-            console.error("❌ DXF Extraction failed:", err);
-            await db.update(jobFiles)
-              .set({ extractionStatus: 'failed', extractionError: String(err) })
-              .where(eq(jobFiles.id, jobFile.id));
-          }
-        });
-      }
-      // IFC HANDLING (BIM)
-      else if (req.file.originalname.toLowerCase().endsWith('.ifc')) {
-        console.log(`🏗️ IFC File detected: ${uniqueFilename}`);
-
-        import('./agents/ifc-agent').then(async ({ IfcAgent }) => {
-          try {
-            const agent = new IfcAgent();
-            const result = await agent.process(filePath);
-            console.log(`🔍 IFC Extraction Result: Success=${result.success}, Rooms=${result.rooms?.length}`);
-
-            if (result.success) {
-              await db.update(jobFiles)
-                .set({ extractionStatus: 'completed' })
-                .where(eq(jobFiles.id, jobFile.id));
-
-              // Helper to insert
-              const insertEl = async (type: string, desc: string, qty: string, bbox?: number[], geometry?: any, roomName: string = "Global", props?: any) => {
-                try {
-                  await db.insert(extractedElements).values({
-                    jobId: req.params.id,
-                    fileId: jobFile.id,
-                    elementType: type,
-                    description: desc,
-                    dimensions: bbox ? JSON.stringify(bbox) : null,
-                    quantity: qty, unit: "nr", rate: "0", total: "0",
-                    roomName: roomName,
-                    bbox: bbox ? JSON.stringify(bbox) : null,
-                    geometry: geometry ? JSON.stringify(geometry) : null,
-                    rawJson: props ? JSON.stringify(props) : null
-                  });
-                } catch (e) {
-                  console.error(`INSERT ERROR for ${type}:`, e);
-                }
-              };
-
-              // Save Rooms
-              for (const room of result.rooms) {
-                // Add to extractedElements
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: "room",
-                  description: room.name,
-                  dimensions: JSON.stringify(room.bbox || [0, 0, 0, 0]),
-                  quantity: String(room.area),
-                  unit: "sqm",
-                  rate: "0", total: "0",
-                  roomName: room.name,
-                  bbox: JSON.stringify(room.bbox || null),
-                  geometry: JSON.stringify(room.geometry), // Store Polygon
-                  rawJson: JSON.stringify(room.properties || {}) // Store Props (Enclosed By)
-                });
-
-                // Add to 'rooms' table
-                await db.insert(rooms).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  name: room.name,
-                  floor: "Ground", // Default to Ground for now
-                  bbox: JSON.stringify(room.bbox || [0, 0, 0, 0]),
-                  geometry: JSON.stringify(room.geometry),
-                  area: String(room.area || "0"),
-                  totalValue: "0"
-                });
-
-                // --- AGENTS.md: TRIGGER QS CHECKLIST AGENT (Mandatory Audit) ---
-                import('./agents/qs-checklist-agent').then(async ({ runQSChecklistAgent }) => {
-                  try {
-                    console.log(`📋 Running QS Checklist Agent for room: ${room.name}`);
-
-                    // Collect items for this room to send to Agent
-                    const roomItems = result.elements.filter(e => e.roomName === room.name);
-                    const roomScope = {
-                      roomName: room.name,
-                      area: room.area,
-                      identifiedItems: roomItems.map(i => ({ type: i.type, name: i.name }))
-                    };
-
-                    const checklistResult = await runQSChecklistAgent(roomScope);
-                    console.log(`✅ QS Checklist Result for ${room.name}:\n${checklistResult}`);
-
-                    // We could store this report in DB if needed (e.g. in room notes)
-                  } catch (qsErr) {
-                    console.error(`❌ QS Checklist Agent failed for ${room.name}:`, qsErr);
-                  }
-                });
-                // -------------------------------------------------------------
-              }
-
-              // Save Elements
-              for (const el of result.elements) {
-                await insertEl(el.type, el.name || el.type, "1", el.bbox, el.geometry, el.roomName || "Global");
-              }
-
-              console.log(`✅ IFC Processing Complete. ${result.rooms.length} rooms, ${result.elements.length} elements.`);
-
-              // AUTO-ALLOCATE COSTS: If CSV data already exists, trigger measurement-based allocation
-              try {
-                const jobData = await storage.getJob(req.params.id);
-                if (jobData?.phaseTaskData) {
-                  console.log(`💰 CSV data found — auto-allocating costs to ${result.rooms.length} rooms...`);
-                  const { roomMapper } = await import('./room-mapper');
-                  // Clear any previous allocation first
-                  await roomMapper.clearRoomCosts(req.params.id);
-                  const phaseData = JSON.parse(jobData.phaseTaskData);
-                  const phases = phaseData.phases || phaseData;
-                  await roomMapper.allocateCostsToRooms(req.params.id, phases);
-                  console.log(`✅ Auto-allocation complete — room costs now visible on floor plan`);
-                } else {
-                  console.log(`ℹ️ No CSV data yet — upload HBXL CSV to see room costs on the floor plan`);
-                }
-              } catch (allocErr: any) {
-                console.error(`⚠️ Auto-allocation failed (non-blocking):`, allocErr.message);
-              }
-            } else {
-              console.error("❌ IFC Extraction Failed:", result.error);
-              await db.update(jobFiles)
-                .set({ extractionStatus: 'failed', extractionError: result.error })
-                .where(eq(jobFiles.id, jobFile.id));
-            }
-
-          } catch (err: any) {
-            console.error("IFC Agent Error:", err);
-            await db.update(jobFiles)
-              .set({ extractionStatus: 'failed', extractionError: err.message })
-              .where(eq(jobFiles.id, jobFile.id));
-          }
-        });
-      }
-      else if (req.file.mimetype.startsWith('image/') || req.file.mimetype === 'application/pdf') {
-        console.log(`🤖 Triggering AI extraction for file: ${uniqueFilename}`);
-        console.log(`📁 File path: ${filePath}`);
-
-        // Run AGENT SWARM (Room + Structure + Electrical)
-        Promise.all([
-          import('./agents/room-agent'),
-          import('./drawing-extraction-agent'), // Structure Agent
-          import('./agents/electrical-expert')
-        ]).then(async ([roomAgent, structureAgent, electricalAgent]) => {
-          try {
-            console.log("🚀 Starting Agent Swarm Extraction (Room + Structure + Electrical)...");
-
-            // Use allSettled so one failure doesn't crash the whole swarm
-            const results = await Promise.allSettled([
-              roomAgent.extractRooms(filePath),
-              structureAgent.extractFromImage(filePath),
-              electricalAgent.extractElectrical(filePath)
-            ]);
-
-            const roomResult = results[0].status === 'fulfilled' ? results[0].value : { success: false, rooms: [] };
-            const structureResult = results[1].status === 'fulfilled' ? results[1].value : { success: false, detailedElements: [] };
-            const electricalResult = results[2].status === 'fulfilled' ? results[2].value : { success: false, elements: [] };
-
-            if (results[0].status === 'rejected') console.error("❌ Room Agent Crashed:", results[0].reason);
-            if (results[1].status === 'rejected') console.error("❌ Structure Agent Crashed:", results[1].reason);
-            if (results[2].status === 'rejected') console.error("❌ Electrical Agent Crashed:", results[2].reason);
-
-            console.log("✅ Agents finished.");
-            console.log(`   - Rooms: ${roomResult.success ? 'Success (' + (roomResult.rooms?.length || 0) + ')' : 'Failed'}`);
-            console.log(`   - Structure: ${structureResult.success ? 'Success' : 'Failed'}`);
-            console.log(`   - Electrical: ${electricalResult.success ? 'Success' : 'Failed'}`);
-
-            const success = roomResult.success || structureResult.success || electricalResult.success;
-
-            if (success) {
-              await db.update(jobFiles)
-                .set({ extractionStatus: 'completed' })
-                .where(eq(jobFiles.id, jobFile.id));
-
-              // Master Map: Room Bounding Boxes
-              const masterRooms = roomResult.rooms || [];
-
-              // Helper: Point in Rect
-              const findRoomForElement = (bbox: number[]) => {
-                if (masterRooms.length === 0) return "Unassigned";
-                const [ex, ey, ex2, ey2] = bbox;
-                const cx = (ex + ex2) / 2;
-                const cy = (ey + ey2) / 2;
-
-                for (const room of masterRooms) {
-                  if (!room.bbox) continue;
-                  const [rx, ry, rx2, ry2] = room.bbox;
-                  if (cx >= rx && cx <= rx2 && cy >= ry && cy <= ry2) {
-                    return room.name;
-                  }
-                }
-                return "Unassigned";
-              };
-
-              // 1. Save Rooms (from Room Agent)
-              for (const room of masterRooms) {
-                await db.insert(extractedElements).values({
-                  jobId: req.params.id,
-                  fileId: jobFile.id,
-                  elementType: 'room',
-                  description: room.name,
-                  dimensions: JSON.stringify(room.bbox),
-                  quantity: "1", unit: "nr", rate: "0", total: "0",
-                  roomName: room.name
-                });
-              }
-
-              // 2. Save Structural Elements (from Structure Agent) - Assign to Room Agent's Rooms
-              if (structureResult.detailedElements) {
-                for (const el of structureResult.detailedElements) {
-                  await db.insert(extractedElements).values({
-                    jobId: req.params.id,
-                    fileId: jobFile.id,
-                    elementType: el.type,
-                    description: el.name || el.type || 'Unknown Structure',
-                    dimensions: JSON.stringify(el.bbox),
-                    quantity: "1", unit: "nr", rate: "0", total: "0",
-                    roomName: findRoomForElement(el.bbox) // Assign spatial location
-                  });
-                }
-              }
-
-              // 3. Save Electrical Elements (from Electrical Agent) - Assign to Room Agent's Rooms
-              if (electricalResult.success && electricalResult.elements) {
-                for (const el of electricalResult.elements) {
-                  await db.insert(extractedElements).values({
-                    jobId: req.params.id,
-                    fileId: jobFile.id,
-                    elementType: el.type,
-                    description: el.name || el.type || 'Unknown Electrical',
-                    dimensions: JSON.stringify(el.bbox),
-                    quantity: "1", unit: "nr", rate: "0", total: "0",
-                    roomName: findRoomForElement(el.bbox) // Assign spatial location
-                  });
-                }
-              }
-              console.log("💾 Swarm extraction data saved.");
-
-              // 4. TRIGGER COST ALLOCATION (Map CSV Costs to these Rooms)
-              try {
-                const { roomMapper } = await import('./room-mapper');
-                const job = await storage.getJob(req.params.id);
-                if (job && job.phaseTaskData) {
-                  console.log("💰 Triggering Cost Allocation to Rooms...");
-
-                  let phaseData = job.phaseTaskData;
-                  if (typeof phaseData === 'string') {
-                    try { phaseData = JSON.parse(phaseData); } catch (e) { console.error("Failed to parse phaseData", e); phaseData = {}; }
-                  }
-
-                  // Pass existing rooms from DB (which were just inserted)
-                  // The mapper fetches them internally using jobId
-                  await roomMapper.allocateCostsToRooms(job.id.toString(), phaseData as Record<string, any[]>);
-
-                  console.log("✅ Cost Allocation Complete!");
-                }
-              } catch (allocError) {
-                console.error("❌ Cost Allocation Failed:", allocError);
-              }
-            } else {
-              throw new Error("All agents failed.");
-            }
-
-          } catch (err) {
-            console.error("❌ background extraction failed:", err);
-            await db.update(jobFiles)
-              .set({ extractionStatus: 'failed', extractionError: String(err) })
-              .where(eq(jobFiles.id, jobFile.id));
-          }
-        });
-      }
-
-      res.status(201).json(jobFile);
-    } catch (error) {
-      console.error("Upload error:", error);
-      res.status(500).json({
-        error: "Upload failed",
-        details: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  // NEW: Handle Tender Submission
-  app.post("/api/jobs/:id/tender-submission", async (req, res) => {
-    try {
-      const jobId = req.params.id;
-      const { contractorName, rates, totalPrice, notes } = req.body;
-
-      if (!contractorName || !rates) {
-        return res.status(400).json({ error: "Missing required fields" });
-      }
-
-      console.log(`📩 Received tender submission for Job ${jobId} from ${contractorName}`);
-
-      // Insert submission
-      const [submission] = await db.insert(tenderSubmissions).values({
-        jobId,
-        contractorName,
-        totalPrice: String(totalPrice),
-        status: 'submitted',
-        submittedAt: new Date(),
-        lineItemRates: JSON.stringify(rates), // Store granular rates
-        notes
-      }).returning();
-
-      console.log(`✅ Tender saved: ${submission.id}`);
-      res.json(submission);
-
-    } catch (error) {
-      console.error("Tender submission error:", error);
-      res.status(500).json({ error: "Failed to submit tender" });
-    }
-  });
-
-  // Get extracted elements for a job
-  app.get("/api/jobs/:id/elements", async (req, res) => {
-    try {
-      console.log(`🔍 Fetching elements for job: ${req.params.id}`);
-      const elements = await db.select()
-        .from(extractedElements)
-        .where(eq(extractedElements.jobId, req.params.id));
-      console.log(`📊 Found ${elements.length} elements for job ${req.params.id}`);
-
-      // Parse dimensions JSON into bbox for UI
-      const elementsWithBbox = elements.map(el => {
-        let bbox = null;
-        try {
-          if (el.dimensions && el.dimensions !== "0,0,0,0") {
-            bbox = JSON.parse(el.dimensions);
-          }
-        } catch (e) {
-          console.warn(`Failed to parse bbox for element ${el.id}: ${el.dimensions}`);
-        }
-        return { ...el, bbox };
-      });
-
-      res.json(elementsWithBbox);
-    } catch (error) {
-      console.error("Error fetching elements:", error);
-      res.status(500).json({ error: "Failed to fetch elements" });
-    }
-  });
-
-  // Get extracted rooms for a job
-  app.get("/api/jobs/:id/extracted-rooms", async (req, res) => {
-    try {
-      console.log(`🔍 Fetching rooms for job: ${req.params.id}`);
-
-      // Fetch elements with type='room' 
-      const roomElements = await db.select()
-        .from(extractedElements)
-        .where(and(
-          eq(extractedElements.jobId, req.params.id),
-          eq(extractedElements.elementType, 'room')
-        ));
-
-      // Transform to UI format
-      const rooms = roomElements.map(el => ({
-        id: el.id,
-        name: el.roomName || el.description,
-        bbox: el.dimensions ? JSON.parse(el.dimensions) : null,
-        fileId: el.fileId,
-        floor: 'Ground', // default
-        status: 'identified',
-        createdAt: el.createdAt || new Date().toISOString()
-      }));
-
-      console.log(`📊 Found ${rooms.length} rooms for job ${req.params.id}`);
-      res.json({ rooms });
-    } catch (error) {
-      console.error("Error fetching rooms:", error);
-      res.status(500).json({ error: "Failed to fetch rooms" });
-    }
-  });
-
-  // Updates a room name (updates both extractedElements and rooms table for consistency)
-  app.patch("/api/rooms/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { name } = req.body;
-
-      console.log(`✏️ Renaming Room/Element ${id} to "${name}"`);
-
-      if (!name) return res.status(400).json({ error: "Name is required" });
-
-      // 1. Try to find it in extractedElements first (since Viewer uses this)
-      const [element] = await db.select().from(extractedElements).where(eq(extractedElements.id, id));
-
-      if (element) {
-        // Update Extracted Element
-        await db.update(extractedElements)
-          .set({
-            description: name,
-            roomName: name
-          })
-          .where(eq(extractedElements.id, id));
-
-        // Propagate to 'rooms' table (Sync for Room Work Packages)
-        if (element.elementType === 'room') {
-          // Find room by JobID and Old Name
-          // (Assuming strict name matching)
-          const oldName = element.description || element.roomName;
-
-          const [matchedRoom] = await db.select()
-            .from(rooms)
-            .where(and(
-              eq(rooms.jobId, element.jobId),
-              eq(rooms.name, oldName)
-            ));
-
-          if (matchedRoom) {
-            console.log(`🔄 Syncing rename to 'rooms' table: ${matchedRoom.id}`);
-            await db.update(rooms)
-              .set({ name: name })
-              .where(eq(rooms.id, matchedRoom.id));
-          }
-        }
-        return res.json({ success: true, message: "Element renamed" });
-      }
-
-      // 2. If not in extractedElements, maybe it is a direct Room ID (from Room Work Packages)
-      const [room] = await db.select().from(rooms).where(eq(rooms.id, id));
-      if (room) {
-        await db.update(rooms).set({ name }).where(eq(rooms.id, id));
-
-        // Propagate back to extractedElements?
-        // Find elements that belonged to this room
-        await db.update(extractedElements)
-          .set({ roomName: name })
-          .where(and(
-            eq(extractedElements.jobId, room.jobId),
-            eq(extractedElements.roomName, room.name)
-          ));
-
-        return res.json({ success: true, message: "Room renamed" });
-      }
-
-      return res.status(404).json({ error: "Room or Element not found" });
-
-    } catch (error) {
-      console.error("Error renaming room:", error);
-      res.status(500).json({ error: "Failed to rename room" });
-    }
-  });
-
-  // Manually trigger extraction for a file
-  app.post("/api/files/:id/extract", async (req, res) => {
-    try {
-      console.log(`🔄 Manual extraction requested for file ID: ${req.params.id}`);
-
-      const [file] = await db.select().from(jobFiles).where(eq(jobFiles.id, req.params.id));
-      if (!file) {
-        console.log(`❌ File not found in database: ${req.params.id}`);
-        return res.status(404).json({ error: "File not found in database" });
-      }
-
-      // Only extract from images and PDFs
-      if (!file.fileType.startsWith('image/') && file.fileType !== 'application/pdf') {
-        return res.status(400).json({ error: "Only image and PDF files can be extracted" });
-      }
-
-      const filePath = path.join(uploadsDir, file.filename);
-      console.log(`📁 Checking file path: ${filePath}`);
-
-      // Check if file exists on disk (Render's ephemeral filesystem may have deleted it)
-      if (!fs.existsSync(filePath)) {
-        console.log(`❌ File not found on disk: ${filePath}`);
-        await db.update(jobFiles)
-          .set({
-            extractionStatus: 'failed',
-            extractionError: 'File deleted from server - please re-upload the drawing'
-          })
-          .where(eq(jobFiles.id, file.id));
-        return res.status(400).json({
-          error: "File was deleted from server (Render restart). Please re-upload the drawing.",
-          needsReupload: true
-        });
-      }
-
-      // Update status to processing
-      console.log(`⏳ Setting extraction status to 'processing'`);
-      await db.update(jobFiles)
-        .set({ extractionStatus: 'processing', extractionError: null })
-        .where(eq(jobFiles.id, file.id));
-
-      // Run extraction
-      console.log(`🔍 Starting AI extraction...`);
-      const agent = await import('./drawing-extraction-agent');
-      const result = await agent.extractFromImage(filePath);
-      console.log(`📊 Extraction result:`, { success: result.success, rooms: result.rooms?.length, error: result.error });
-
-      if (result.success && result.rooms && result.rooms.length > 0) {
-        // Store extracted rooms (costs come from HBXL CSV, not AI)
-        console.log(`💾 Saving ${result.rooms.length} rooms for job ${file.jobId}`);
-        const allNewElementIds: number[] = [];
-        let roomsCreated = 0;
-        for (const room of result.rooms) {
-          // Check if room already exists for this job
-          const existing = await db.select()
-            .from(rooms)
-            .where(and(
-              eq(rooms.jobId, file.jobId),
-              eq(rooms.name, room.name)
-            ))
-            .limit(1);
-
-          if (existing.length === 0) {
-            const [newRoom] = await db.insert(rooms).values({
-              jobId: file.jobId,
-              name: room.name,
-              floor: room.floor || 'Ground',
-              status: 'not_started'
-            }).returning();
-
-            roomsCreated++;
-            console.log(`   📍 Created room: ${room.name}`);
-
-            // NEW: Process Detailed Elements for this room
-            if (result.detailedElements && result.detailedElements.length > 0) {
-              const roomElems = result.detailedElements.filter(e => e.room === room.name);
-              console.log(`      Found ${roomElems.length} elements for ${room.name}`);
-
-              // AGGREGATION: Group identical elements for cleaner UI (e.g. "Socket (2 nr)")
-              const roomGroups = new Map<string, {
-                type: string,
-                description: string,
-                code: string,
-                count: number
-              }>();
-
-              for (const element of roomElems) {
-                // 1. Save to extractedElements (Traceability - INDIVIDUAL)
-                await db.insert(extractedElements).values({
-                  jobId: file.jobId,
-                  fileId: file.id,
-                  elementType: element.type,
-                  elementCode: element.code,
-                  description: element.description,
-                  roomName: room.name,
-                  quantity: "1",
-                  unit: "nr",
-                  rawJson: JSON.stringify(element)
-                });
-
-                // 2. Add to Group
-                // Group by description (e.g. "Double Socket Symbol")
-                const key = element.description || element.code || "Item";
-                if (!roomGroups.has(key)) {
-                  roomGroups.set(key, {
-                    type: element.type,
-                    description: element.description,
-                    code: element.code,
-                    count: 0
-                  });
-                }
-                const group = roomGroups.get(key)!;
-                group.count++;
-              }
-
-              // 3. Create Grouped UI Elements
-              for (const group of roomGroups.values()) {
-                const [newRoomElement] = await db.insert(roomElements).values({
-                  roomId: newRoom.id,
-                  name: group.description || group.type, // Use readable description
-                  measurementSummary: `${group.count} nr`,
-                  subtotal: "0"
-                }).returning();
-
-                await db.insert(payableItems).values({
-                  elementId: newRoomElement.id,
-                  description: group.description || "Visual Item",
-                  quantity: group.count.toString(),
-                  unit: "nr",
-                  rate: "0",
-                  total: "0",
-                  status: "not_started"
-                });
-
-                // Track for cost matching
-                allNewElementIds.push(newRoomElement.id);
-              }
-            }
-
-            // FALLBACK: If no elements found for this room (or detailedElements was empty), create a default one
-            if (!result.detailedElements || result.detailedElements.filter(e => e.room === room.name).length === 0) {
-              console.log(`      ⚠️ No elements found for ${room.name}, creating default container.`);
-
-              const [defaultElement] = await db.insert(roomElements).values({
-                roomId: newRoom.id,
-                name: "Room Construction",
-                measurementSummary: "Item",
-                subtotal: "0"
-              }).returning();
-
-              await db.insert(payableItems).values({
-                elementId: defaultElement.id,
-                description: "General construction works",
-                quantity: "1",
-                unit: "item",
-                rate: "0",
-                total: "0",
-                status: "not_started"
-              });
-
-              // Track for cost matching
-              allNewElementIds.push(defaultElement.id);
-            }
-
-          } else {
-            console.log(`   📍 Room exists: ${room.name}`);
-            // Logic to add elements to existing room could go here if needed
-          }
-        }
-        console.log(`✅ Created ${roomsCreated} new rooms for job`);
-
-        // TRIGGER COST MATCHING (Missing Link)
-        if (allNewElementIds.length > 0) {
-          console.log(`💰 Triggering cost matching for ${allNewElementIds.length} new elements...`);
-          const { matchCostsToExtractedItems } = await import('./cost-matcher');
-          await matchCostsToExtractedItems(file.jobId, allNewElementIds);
-        }
-
-        await db.update(jobFiles)
-          .set({ extractionStatus: 'completed' })
-          .where(eq(jobFiles.id, file.id));
-
-        res.json({ success: true, roomsIdentified: result.rooms.length, roomsCreated });
-      } else {
-        await db.update(jobFiles)
-          .set({
-            extractionStatus: 'failed',
-            extractionError: result.error || 'No rooms found'
-          })
-          .where(eq(jobFiles.id, file.id));
-
-        res.json({ success: false, error: result.error || 'No rooms found' });
-      }
-    } catch (error) {
-      console.error("Manual extraction error:", error);
-      res.status(500).json({
-        error: "Extraction failed",
-        details: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  app.delete("/api/files/:id", async (req, res) => {
-    try {
-      // Delete associated extracted elements first
-      await db.delete(extractedElements).where(eq(extractedElements.fileId, req.params.id));
-
-      await storage.deleteJobFile(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Delete error:", error);
-      res.status(500).json({
-        error: "Failed to delete file",
-        details: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
   // CSV Upload endpoint
   app.post("/api/upload-csv", upload.single('csvFile'), async (req: MulterRequest, res) => {
     try {
@@ -1983,19 +645,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('🔄 Converted Excel to CSV format');
       } else {
         // Parse CSV with specific handling for your format
-        // HBXL exports use Windows-1252/Latin-1 encoding for £ symbols
-        // Try UTF-8 first, if £ is corrupted, use Latin-1
-        let utf8Content = req.file.buffer.toString('utf8');
-
-        // Check if £ symbol is corrupted (appears as replacement character)
-        if (utf8Content.includes('�') || !utf8Content.includes('£')) {
-          // Use Latin-1 encoding which properly handles £ (0xA3)
-          csvContent = req.file.buffer.toString('latin1');
-          console.log('📄 Processing CSV file (Latin-1 encoding):', req.file.originalname);
-        } else {
-          csvContent = utf8Content;
-          console.log('📄 Processing CSV file (UTF-8 encoding):', req.file.originalname);
-        }
+        csvContent = req.file.buffer.toString();
+        console.log('📄 Processing CSV file:', req.file.originalname);
       }
 
       console.log('🔍 Raw Content:', csvContent.substring(0, 500) + '...');
@@ -2014,446 +665,255 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let jobType = "Data Missing from CSV";
         let phases: string[] = [];
 
-        // ROBUST METADATA PARSING (Replaces old 'Locked Down' logic)
-        for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        // LOCKED DOWN PARSING LOGIC - DO NOT CHANGE THIS EVER
+        for (let i = 0; i < Math.min(lines.length, 5); i++) {
           const line = lines[i];
-          if (!line) continue;
+          console.log(`🔍 Parsing line ${i}: "${line}"`);
 
-          // Case-insensitive regex matching for metadata fields
-          if (line.match(/^(name|client|customer)\s*[,:]/i)) {
-            const val = line.replace(/^(name|client|customer)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-            if (val) jobName = val;
+          if (line.startsWith('Name ,') || line.startsWith('Name,') || line.startsWith('name,')) {
+            // Extract everything after "Name," or "name," and remove trailing commas
+            const extracted = line.substring(line.indexOf(',') + 1).replace(/,+$/, '').trim();
+            jobName = extracted || "Data Missing from CSV";
             console.log(`📝 Extracted job name: "${jobName}"`);
-          }
-          else if (line.match(/^(address|site address|location)\s*[,:]/i)) {
-            const val = line.replace(/^(address|site address|location)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-            if (val) jobAddress = val;
+          } else if (line.startsWith('Address,') || line.startsWith('Address ,')) {
+            // Extract everything after first comma and remove trailing commas
+            const extracted = line.substring(line.indexOf(',') + 1).replace(/,+$/, '').trim();
+            jobAddress = extracted || "Data Missing from CSV";
             console.log(`📍 Extracted job address: "${jobAddress}"`);
-          }
-          else if (line.match(/^(post\s*code|postcode|zip\s*code)\s*[,:]/i)) {
-            const val = line.replace(/^(post\s*code|postcode|zip\s*code)\s*[,:]\s*/i, '').replace(/,+$/, '').trim().toUpperCase();
-            if (val) jobPostcode = val;
+          } else if (line.startsWith('Post Code ,') || line.startsWith('Post code,')) {
+            // Extract everything after "Post code," and remove trailing commas - handle space in "Post Code "
+            const colonIndex = line.indexOf(',');
+            const extracted = line.substring(colonIndex + 1).replace(/,+$/, '').trim().toUpperCase();
+            jobPostcode = extracted || "Data Missing from CSV";
             console.log(`📮 Extracted job postcode: "${jobPostcode}"`);
-          }
-          else if (line.match(/^(project type|job type|type)\s*[,:]/i)) {
-            const val = line.replace(/^(project type|job type|type)\s*[,:]\s*/i, '').replace(/,+$/, '').trim();
-            if (val) jobType = val;
+          } else if (line.startsWith('Project Type,')) {
+            // Extract everything after "Project Type," and remove trailing commas
+            const extracted = line.substring(13).replace(/,+$/, '').trim();
+            jobType = extracted || "Data Missing from CSV";
             console.log(`🏗️ Extracted job type: "${jobType}"`);
           }
         }
 
         console.log('🎯 Final extracted data:', { jobName, jobAddress, jobPostcode, jobType });
 
-        // Parse data section - supports multiple formats
-        // 1. Check for MATERIALS USED format (Job 49 style) - multiple detection patterns
-        // Pattern A: Header row with "Resource quantity" and "Resource cost" columns
-        // Pattern B: Data rows starting with work phases like "Electrical 1st Fix" directly after header info
-        let materialsFormatIndex = lines.findIndex(line =>
-          line.includes('Type of resource') &&
-          (line.includes('Resource quantity') || line.includes('Resource cost'))
+        // Parse data section - supports both formats
+        // Check if this is the new enhanced format with Order Date, Build Phase, etc.
+        const enhancedFormatIndex = lines.findIndex(line =>
+          line.includes('Order Date') && line.includes('Build Phase') && (line.includes('Resource Description') || line.includes('Type of Resource'))
         );
 
-        // Pattern B: Look for "Resource quantity excluding wastage" or similar header structure
-        if (materialsFormatIndex === -1) {
-          materialsFormatIndex = lines.findIndex(line =>
-            line.includes('Resource quantity') &&
-            line.includes('Resource cost') &&
-            (line.includes('excluding wastage') || line.includes('including wastage'))
+        if (enhancedFormatIndex !== -1) {
+          // ENHANCED FORMAT PARSING - for accounting integration
+          const resources: any[] = [];
+          let totalLabourCost = 0;
+          let totalMaterialCost = 0;
+          const phaseTaskData: { [key: string]: any[] } = {};
+          const weeklyBreakdown: { [key: string]: { labour: number; material: number; total: number } } = {};
+          let phases: string[] = [];
+
+          console.log('🎯 Using ENHANCED CSV parsing for accounting format');
+          console.log('🔍 Enhanced format index:', enhancedFormatIndex);
+          console.log('🔍 Lines to process:', lines.length - enhancedFormatIndex - 1);
+
+          // FIRST PASS: Extract ALL phases from Build Phase column (match frontend logic)
+          const headerLine = lines[enhancedFormatIndex];
+          const headers = headerLine.split(',').map(h => h.trim());
+          const buildPhaseColumnIndex = headers.findIndex(h =>
+            h.toLowerCase().includes('build phase') || h.toLowerCase() === 'phase'
           );
-        }
 
-        if (materialsFormatIndex !== -1) {
-          // MATERIALS USED FORMAT PARSING
-          console.log('🎯 Using MATERIALS USED CSV parsing (Job 49 style)');
+          console.log('🔍 Phase column detection:', {
+            headerLine,
+            headers,
+            buildPhaseColumnIndex,
+            foundHeader: headers[buildPhaseColumnIndex]
+          });
 
-          const headerLine = lines[materialsFormatIndex].toLowerCase();
-          const headers = lines[materialsFormatIndex].split(',').map(h => h.trim().toLowerCase());
+          const phaseSet = new Set<string>();
+          if (buildPhaseColumnIndex >= 0) {
+            for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
+              const line = lines[i];
+              if (!line || line.trim() === '') continue;
 
-          // Find relevant column indices
-          const workTypeIndex = 0; // First column is work type (Electrical 1st Fix, Footings, etc.)
-          const resourceDescIndex = headers.findIndex(h => h.includes('resource') && !h.includes('quantity') && !h.includes('cost'));
-          const unitIndex = headers.findIndex(h => h.includes('unit') || h === 'each' || h === 'hours');
-          const quantityIndex = headers.findIndex(h => h.includes('quantity including wastage'));
-          const costIndex = headers.findIndex(h => h.includes('cost including wastage') && !h.includes('altering'));
+              const parts = line.split(',').map(p => p.trim());
+              if (parts.length <= buildPhaseColumnIndex) continue;
 
-          console.log('📊 Column indices:', { workTypeIndex, resourceDescIndex, quantityIndex, costIndex });
-
-          interface MaterialItem {
-            description: string;
-            quantity: number;
-            unit: string;
-            rate: number;
-            total: number;
-            category: 'LABOUR' | 'MATERIAL' | 'PLANT' | 'SUBCONTRACTOR';
-          }
-
-          const phaseData: Record<string, MaterialItem[]> = {};
-          let totalLabour = 0;
-          let totalMaterial = 0;
-          let totalPlant = 0;
-          let totalSubcontractor = 0;
-
-          // Helper function to properly parse CSV with quoted values containing commas
-          const parseCSVLine = (line: string): string[] => {
-            const result: string[] = [];
-            let current = '';
-            let inQuotes = false;
-
-            for (let i = 0; i < line.length; i++) {
-              const char = line[i];
-              if (char === '"') {
-                inQuotes = !inQuotes;
-              } else if (char === ',' && !inQuotes) {
-                result.push(current.trim().replace(/^"|"$/g, ''));
-                current = '';
-              } else {
-                current += char;
+              const buildPhase = parts[buildPhaseColumnIndex] || '';
+              if (buildPhase && buildPhase.trim() !== '' &&
+                buildPhase.toLowerCase() !== 'material' &&
+                buildPhase.toLowerCase() !== 'labour') {
+                phaseSet.add(buildPhase);
+                console.log('✅ Found phase:', buildPhase);
               }
             }
-            result.push(current.trim().replace(/^"|"$/g, ''));
-            return result;
-          };
-
-          // First, check for a Grand Total row to validate our parsing
-          let csvGrandTotal = 0;
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i];
-            if (line.startsWith('Grand Total')) {
-              const columns = parseCSVLine(line);
-              // Grand Total row has the total in the last column
-              const lastCol = columns[columns.length - 1];
-              if (lastCol) {
-                csvGrandTotal = parseFloat(lastCol.replace(/[£,]/g, ''));
-                console.log(`📊 Found Grand Total row: £${csvGrandTotal.toFixed(2)}`);
-              }
-              break;
-            }
           }
+          phases = Array.from(phaseSet);
+          console.log('🎯 Extracted phases from Build Phase column:', phases);
 
-          // Parse data rows
-          for (let i = materialsFormatIndex + 1; i < lines.length; i++) {
+          // Initialize phaseTaskData for ALL extracted phases (even if they have no tasks)
+          phases.forEach(phase => {
+            if (!phaseTaskData[phase]) {
+              phaseTaskData[phase] = [];
+            }
+          });
+
+          // SECOND PASS: Process resources for task data
+          for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
             const line = lines[i];
             if (!line || line.trim() === '') continue;
 
-            // Skip the Grand Total row - we extracted it already
-            if (line.startsWith('Grand Total')) continue;
-
-            // Properly split CSV respecting quoted values
-            const columns = parseCSVLine(line);
-
-            const workType = columns[0] || '';
-            if (!workType || workType === '') continue;
-
-            // Get description (usually column 2)
-            const description = columns[2] || columns[1] || 'Unknown';
-
-            // Find unit (usually column 8 or 9)
-            let unit = 'Each';
-            for (let c = 7; c < 10 && c < columns.length; c++) {
-              const val = columns[c]?.trim();
-              if (val && ['Each', 'Hours', 'Week', 'Day', 'm²', 'm³', 'm', 'Unit'].includes(val)) {
-                unit = val;
-                break;
-              }
+            const parts = line.split(',').map(p => p.trim());
+            // Allow processing of rows with at least 3 columns (to reach buildPhase)
+            if (parts.length < 3) {
+              console.log(`❌ Skipping line ${i} - only ${parts.length} columns (need at least 3)`);
+              continue;
             }
 
-            // Get quantity (column 11 typically = "Resource quantity including wastage")
-            let quantity = 0;
-            // Look for quantity in columns 9-13 (0-indexed)
-            for (let c = 9; c < 14 && c < columns.length; c++) {
-              const val = parseFloat(columns[c]?.replace(/[^\d.-]/g, '') || '0');
-              if (!isNaN(val) && val > 0) {
-                quantity = val;
-                break;
-              }
-            }
-
-            // Get total cost - ALWAYS use the LAST column which is "Resource cost including wastage"
-            // This is the definitive total cost per line item
-            let totalCost = 0;
-            const lastCol = columns[columns.length - 1];
-            if (lastCol) {
-              const val = lastCol.replace(/[£,]/g, '');
-              const parsed = parseFloat(val);
-              if (!isNaN(parsed)) {
-                totalCost = parsed;
-              }
-            }
-
-            // Debug logging for first 5 data rows
-            if (i < materialsFormatIndex + 6) {
-              console.log(`📝 Row ${i - materialsFormatIndex}: phase="${workType}", desc="${description}", qty=${quantity}, cost=£${totalCost.toFixed(2)}, cols=${columns.length}`);
-            }
-
-            // Determine category based on description
-            let category: 'LABOUR' | 'MATERIAL' | 'PLANT' | 'SUBCONTRACTOR' = 'MATERIAL';
-            const descLower = description.toLowerCase();
-            if (descLower.includes('bricklayer') || descLower.includes('electrician') ||
-              descLower.includes('decorator') || descLower.includes('groundworker') ||
-              descLower.includes('joiner') || descLower.includes('plasterer') ||
-              descLower.includes('plumber') || descLower.includes('carpenter') ||
-              descLower.includes('labourer') || descLower.includes('mate') ||
-              unit.toLowerCase() === 'hours') {
-              category = 'LABOUR';
-              totalLabour += totalCost;
-            } else if (descLower.includes('digger') || descLower.includes('driver') ||
-              descLower.includes('scaffolding') || descLower.includes('skip') ||
-              unit.toLowerCase() === 'week' || unit.toLowerCase() === 'day') {
-              category = 'PLANT';
-              totalPlant += totalCost;
-            } else if (descLower.includes('subcontract')) {
-              category = 'SUBCONTRACTOR';
-              totalSubcontractor += totalCost;
-            } else {
-              totalMaterial += totalCost;
-            }
-
-            // Add to phase data
-            if (!phaseData[workType]) {
-              phaseData[workType] = [];
-              phases.push(workType);
-            }
-
-            const rate = quantity > 0 ? Math.round((totalCost / quantity) * 100) : 0; // Rate in pence
-
-            phaseData[workType].push({
-              description,
-              quantity,
-              unit,
-              rate,
-              total: Math.round(totalCost * 100), // Total in pence
-              category
-            });
-          }
-
-          // Use csvGrandTotal if found, otherwise use calculated sum
-          const calculatedTotal = totalLabour + totalMaterial + totalPlant + totalSubcontractor;
-          const grandTotal = csvGrandTotal > 0 ? csvGrandTotal : calculatedTotal;
-
-          console.log('💰 MATERIALS FORMAT TOTALS:', {
-            csvGrandTotal: csvGrandTotal > 0 ? `£${csvGrandTotal.toFixed(2)}` : 'Not found',
-            calculatedTotal: `£${calculatedTotal.toFixed(2)}`,
-            usingGrandTotal: `£${grandTotal.toFixed(2)}`,
-            totalLabour: `£${totalLabour.toFixed(2)}`,
-            totalMaterial: `£${totalMaterial.toFixed(2)}`,
-            totalPlant: `£${totalPlant.toFixed(2)}`,
-            totalSubcontractor: `£${totalSubcontractor.toFixed(2)}`,
-            phases: phases.length,
-            totalItems: Object.values(phaseData).reduce((sum, items) => sum + items.length, 0)
-          });
-
-
-          // Unified Flow Logic: Check for existing job first
-          console.log(`🔍 Checking for existing job to merge: "${jobName}"`);
-
-          const allJobs = await storage.getJobs();
-          // Find match based on Name AND (Postcode OR Address)
-          // Relaxed matching for better UX
-          const existingJob = allJobs.find(j => {
-            const nameMatch = j.title.toLowerCase().trim() === jobName.toLowerCase().trim();
-            // Check if postcode is present in the location string
-            const postcodeMatch = jobPostcode !== "Data Missing from CSV" &&
-              j.location.toLowerCase().includes(jobPostcode.toLowerCase().trim());
-
-            return nameMatch && (postcodeMatch || !jobPostcode || jobPostcode === "Data Missing from CSV");
-          });
-
-          if (existingJob) {
-            console.log(`✅ Found existing job: ${existingJob.id} ("${existingJob.title}") - MERGING DATA`);
-
-            // 1. Update the existing job with CSV financial data
-            const financialUpdates: any = {
-              uploadId: csvUpload.id, // Link the CSV
-              phaseTaskData: JSON.stringify({
-                phases: phaseData,
-                financials: {
-                  totalLabour: Math.round(totalLabour * 100),
-                  totalMaterial: Math.round(totalMaterial * 100),
-                  totalPlant: Math.round(totalPlant * 100),
-                  totalSubcontractor: Math.round(totalSubcontractor * 100),
-                  grandTotal: Math.round(grandTotal * 100)
-                }
-              }),
-              financialSummary: JSON.stringify({
-                labour: Math.round(totalLabour * 100),
-                material: Math.round(totalMaterial * 100),
-                plant: Math.round(totalPlant * 100),
-                subcontractor: Math.round(totalSubcontractor * 100),
-                total: Math.round(grandTotal * 100)
-              }),
-              quotedAmount: Math.round(grandTotal * 100).toString(),
-              // Update phases list if it creates a more complete list
-              phases: phases.length > (existingJob.phases?.split(',').length || 0) ? phases.join(', ') : existingJob.phases
+            const resource: any = {
+              orderDate: parts[0] || '',
+              requiredDate: parts[1] || '',
+              buildPhase: parts[2] || 'General',
+              resourceType: parts[3] || '', // Labour or Material
+              description: parts[4] || '', // Description in column 5 for 6-column format
+              quantity: parseInt(parts[5]) || 0, // Quantity in column 6 for 6-column format
+              supplier: parts[6] || 'Not specified' // Supplier might be in column 7 if available
             };
 
-            // Update status if it was pending
-            if (existingJob.status === 'pending') {
-              // Keep as pending or update? Keep as pending waiting for assignment
-            }
+            // Process ALL resources with valid descriptions (HBXL format often doesn't include prices)
+            if (resource.description && resource.description.trim() !== '') {
+              // Extract price using regex - MANDATORY RULE: authentic data only
+              const priceMatch = resource.description.match(/£(\d+\.?\d*)/);
+              const unitMatch = resource.description.match(/£\d+\.?\d*\/(\w+)/);
 
-            await storage.updateJob(existingJob.id, financialUpdates);
-            console.log(`💾 Updated financial data for job ${existingJob.id}`);
+              // Set pricing info if available
+              if (priceMatch && resource.quantity > 0) {
+                resource.unitPrice = parseFloat(priceMatch[1]);
+                resource.unit = unitMatch ? unitMatch[1] : 'Each';
+                resource.totalCost = resource.unitPrice * resource.quantity;
 
-            // 2. Create/Update Cost Items
-            // Delete old cost items for this job to avoid duplication on re-upload
-            const { jobCostItems } = await import("@shared/schema");
-            await db.delete(jobCostItems).where(eq(jobCostItems.jobId, existingJob.id));
-
-            for (const [phase, items] of Object.entries(phaseData)) {
-              for (const item of items) {
-                await db.insert(jobCostItems).values({
-                  jobId: existingJob.id,
-                  category: item.category,
-                  description: `[${phase}] ${item.description}`,
-                  quantity: item.quantity.toString(),
-                  unit: item.unit,
-                  rate: item.rate.toString(),
-                  total: item.total.toString(),
-                  sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
-                });
-              }
-            }
-            console.log(`💾 Refreshed cost items for job ${existingJob.id}`);
-
-            // 3. TRIGGER AUTOMATIC COST ALLOCATION
-            // Check if we have rooms from drawing extraction
-            const existingRooms = await db.select().from(rooms).where(eq(rooms.jobId, existingJob.id));
-
-            if (existingRooms.length > 0) {
-              console.log(`🔄 Existing drawing data detected (${existingRooms.length} rooms). Triggering Auto-Allocation...`);
-              try {
-                const { roomMapper } = await import("./room-mapper");
-                await roomMapper.allocateCostsToRooms(existingJob.id, phaseData);
-                console.log(`✅ Auto-Allocation Complete: Costs distributed to rooms.`);
-              } catch (allocError) {
-                console.error(`⚠️ Auto-Allocation Failed:`, allocError);
-              }
-            } else {
-              console.log(`ℹ️ No drawing data (rooms) found. Skipping allocation. Upload a drawing to finish the process.`);
-            }
-
-            jobsCreated = 0; // We didn't create a new one, we merged.
-
-            // Update CSV upload status
-            await storage.updateCsvUpload(csvUpload.id, {
-              status: "processed",
-              jobsCount: "0 (Merged)"
-            });
-
-          } else {
-            // ORIGINAL LOGIC: Create new job
-            console.log(`🆕 No existing job found. Creating new job.`);
-
-            // Use filename as job name if not found in headers
-            if (jobName === "Data Missing from CSV") {
-              jobName = req.file.originalname.replace(/\.[^/.]+$/, '').replace(/-/g, ' ').trim();
-            }
-
-            // Create the job with financial summary
-            const newJob = await storage.createJob({
-              title: jobName,
-              description: `Materials Schedule Import - ${phases.length} work phases`,
-              location: `${jobAddress}, ${jobPostcode}`,
-              status: "pending",
-              dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              notes: `Imported from ${req.file.originalname}`,
-              phases: phases.join(', '),
-              uploadId: csvUpload.id,
-              phaseTaskData: JSON.stringify({
-                phases: phaseData,
-                financials: {
-                  totalLabour: Math.round(totalLabour * 100),
-                  totalMaterial: Math.round(totalMaterial * 100),
-                  totalPlant: Math.round(totalPlant * 100),
-                  totalSubcontractor: Math.round(totalSubcontractor * 100),
-                  grandTotal: Math.round(grandTotal * 100)
+                // Track costs by type for accounting
+                if (resource.resourceType.toLowerCase() === 'labour') {
+                  totalLabourCost += resource.totalCost;
+                } else if (resource.resourceType.toLowerCase() === 'material') {
+                  totalMaterialCost += resource.totalCost;
                 }
-              }),
-              financialSummary: JSON.stringify({
-                labour: Math.round(totalLabour * 100),
-                material: Math.round(totalMaterial * 100),
-                plant: Math.round(totalPlant * 100),
-                subcontractor: Math.round(totalSubcontractor * 100),
-                total: Math.round(grandTotal * 100)
-              }),
-              quotedAmount: Math.round(grandTotal * 100).toString()
-            });
 
-            // Create individual cost items
-            const { jobCostItems } = await import("@shared/schema");
-            for (const [phase, items] of Object.entries(phaseData)) {
-              for (const item of items) {
-                await db.insert(jobCostItems).values({
-                  jobId: newJob.id,
-                  category: item.category,
-                  description: `[${phase}] ${item.description}`,
-                  quantity: item.quantity.toString(),
-                  unit: item.unit,
-                  rate: item.rate.toString(),
-                  total: item.total.toString(),
-                  sourceMetadata: JSON.stringify({ phase, originalUnit: item.unit })
-                });
+                // Weekly cash flow breakdown
+                if (resource.orderDate) {
+                  if (!weeklyBreakdown[resource.orderDate]) {
+                    weeklyBreakdown[resource.orderDate] = { labour: 0, material: 0, total: 0 };
+                  }
+                  const costType = resource.resourceType.toLowerCase();
+                  if (costType === 'labour') {
+                    weeklyBreakdown[resource.orderDate].labour += resource.totalCost;
+                    weeklyBreakdown[resource.orderDate].total += resource.totalCost;
+                  } else if (costType === 'material') {
+                    weeklyBreakdown[resource.orderDate].material += resource.totalCost;
+                    weeklyBreakdown[resource.orderDate].total += resource.totalCost;
+                  }
+                }
+              } else {
+                // No price data - normal for HBXL format
+                resource.unitPrice = 0;
+                resource.unit = resource.resourceType.toLowerCase() === 'labour' ? 'Hours' : 'Each';
+                resource.totalCost = 0;
+              }
+
+              // Build phase task structure - MANDATORY RULE: use only authentic CSV data
+              let phaseName = resource.buildPhase && resource.buildPhase.trim() !== '' &&
+                resource.buildPhase.toLowerCase() !== 'material' &&
+                resource.buildPhase.toLowerCase() !== 'labour' ?
+                resource.buildPhase : 'General Works';
+
+              if (!phaseTaskData[phaseName]) {
+                phaseTaskData[phaseName] = [];
+              }
+
+              // Create meaningful task descriptions from actual CSV data
+              let taskName = resource.description.replace(/£.*/, '').trim();
+              let taskDescription;
+
+              if (resource.unitPrice > 0) {
+                // Has pricing information
+                taskDescription = `${taskName} (${resource.quantity} ${resource.unit}) - ${resource.supplier} - £${resource.totalCost.toFixed(2)}`;
+              } else {
+                // No pricing (typical HBXL format)
+                taskDescription = `${taskName} (${resource.quantity} ${resource.unit}) - ${resource.supplier}`;
+              }
+
+              phaseTaskData[phaseName].push({
+                task: taskName,
+                description: taskDescription,
+                quantity: resource.quantity,
+                unitPrice: resource.unitPrice,
+                totalCost: resource.totalCost,
+                supplier: resource.supplier,
+                orderDate: resource.orderDate,
+                resourceType: resource.resourceType,
+                unit: resource.unit,
+                costBreakdown: resource.unitPrice > 0 ? `${resource.quantity} × £${resource.unitPrice} = £${resource.totalCost.toFixed(2)}` : 'Price not specified in CSV'
+              });
+
+              // Add phase to phases array if not already present
+              if (!phases.includes(phaseName)) {
+                phases.push(phaseName);
               }
             }
 
-            jobsCreated = 1;
-
-            await storage.updateCsvUpload(csvUpload.id, {
-              status: "processed",
-              jobsCount: "1"
-            });
+            resources.push(resource);
           }
 
-        } else if (lines.findIndex(line => {
-          const l = line.toLowerCase();
-          return (l.includes('order date') || l.includes('order')) &&
-            (l.includes('build phase') || l.includes('phase')) &&
-            (l.includes('resource description') || l.includes('type of resource'));
-        }) !== -1) {
-          // 2. Check if this is the ENHANCED format with Order Date, Build Phase, etc.
-          const enhancedFormatIndex = lines.findIndex(line => {
-            const l = line.toLowerCase();
-            return (l.includes('order date') || l.includes('order')) &&
-              (l.includes('build phase') || l.includes('phase')) &&
-              (l.includes('resource description') || l.includes('type of resource'));
+          // Remove duplicate phases
+          phases = phases.filter((p, i, arr) => arr.indexOf(p) === i);
+
+          console.log('🎯 Enhanced parsing results:', {
+            phases: phases,
+            resourceCount: resources.length,
+            totalLabourCost,
+            totalMaterialCost,
+            grandTotal: totalLabourCost + totalMaterialCost,
+            weeklyBreakdown,
+            detectedPhases: Object.keys(phaseTaskData)
           });
-          // ENHANCED FORMAT PARSING - using shared parser logic
-          console.log('🎯 Using ENHANCED CSV parsing (Imported Function)');
 
-          const enhancedData = parseEnhancedCSV(lines);
-
-          if (enhancedData) {
-            const phases = Object.keys(enhancedData.phases);
-
-            // Use metadata from parser if available, fallback to existing logic
-            if (enhancedData.metadata) {
-              if (enhancedData.metadata.clientName) jobName = enhancedData.metadata.clientName;
-              if (enhancedData.metadata.projectType) jobType = enhancedData.metadata.projectType;
-              if (enhancedData.metadata.address) jobAddress = enhancedData.metadata.address;
-              if (enhancedData.metadata.postcode) jobPostcode = enhancedData.metadata.postcode;
-            }
-
-            console.log('🎯 Enhanced parsing results:', {
-              phases: phases,
-              totalLabourCost: enhancedData.financials.totalLabour,
-              grandTotal: enhancedData.financials.grandTotal,
-              metadata: enhancedData.metadata
+          // Debug: Show detailed phase task data
+          console.log('🔍 BUILD PHASES AND SUB-TASKS EXTRACTED:');
+          Object.keys(phaseTaskData).forEach(phase => {
+            console.log(`📋 Phase: ${phase} (${phaseTaskData[phase].length} tasks)`);
+            phaseTaskData[phase].forEach((task, index) => {
+              console.log(`  ├─ ${index + 1}. ${task.task} (${task.resourceType})`);
+              console.log(`  │   Quantity: ${task.quantity} ${task.unit}`);
+              console.log(`  │   Cost: £${task.totalCost?.toFixed(2) || '0.00'}`);
+              console.log(`  │   Supplier: ${task.supplier}`);
             });
+          });
 
-            await storage.createJob({
-              title: jobName,
-              description: jobType,
-              location: `${jobAddress}, ${jobPostcode}`,
-              status: "pending",
-              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-              notes: `Project Type: ${jobType}`,
-              phases: phases.join(', ') || "Data Missing from CSV",
-              uploadId: csvUpload.id,
-              phaseTaskData: JSON.stringify(enhancedData)
-            });
+          // Store enhanced data for accounting integration
+          const enhancedJobData = JSON.stringify({
+            phases: phaseTaskData,
+            financials: {
+              totalLabour: totalLabourCost,
+              totalMaterial: totalMaterialCost,
+              grandTotal: totalLabourCost + totalMaterialCost,
+              weeklyBreakdown
+            },
+            resources: resources.filter(r => r.unitPrice) // Only resources with valid pricing
+          });
 
-            jobsCreated++;
-          }
+          await storage.createJob({
+            title: jobName,
+            description: jobType,
+            location: `${jobAddress}, ${jobPostcode}`,
+            status: "pending",
+            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            notes: `Project Type: ${jobType}`,
+            phases: phases.join(', ') || "Data Missing from CSV",
+            uploadId: csvUpload.id,
+            phaseTaskData: enhancedJobData
+          });
+
+          jobsCreated++;
+
         } else {
           // ORIGINAL FORMAT PARSING - maintain existing functionality
           // Look for "Build Phase" line which indicates start of data section
@@ -2575,22 +1035,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(500).json({ error: "Failed to process CSV jobs" });
       }
     } catch (error) {
-      // Robust error serialization for logging and response
-      const errorDetails = error instanceof Error || (typeof error === 'object' && error !== null) ? {
-        message: (error as any).message || "Unknown error",
-        name: (error as any).name || "UnknownError",
-        stack: (error as any).stack,
-        // Spread any other properties
-        ...(error as any)
-      } : String(error);
-
       console.error("Error uploading CSV:", error);
-      res.status(500).json({
-        error: "Failed to upload CSV file",
-        details: typeof errorDetails === 'object' ? JSON.stringify(errorDetails) : String(errorDetails),
-        // Keep stack for top-level if simple Error
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      try {
+        const fs = await import('fs');
+        const dbUrl = process.env.DATABASE_URL || 'undefined';
+        const logMsg = `[${new Date().toISOString()}] Upload Error: ${error}\nStack: ${error instanceof Error ? error.stack : 'N/A'}\nDB_URL_LEN: ${dbUrl.length}\n`;
+        // Use synchronous append to ensure it's written before response
+        fs.appendFileSync('server_upload_debug.log', logMsg);
+      } catch (logErr) {
+        console.error("Failed to write log:", logErr);
+      }
+      res.status(500).json({ error: "Failed to upload CSV file" });
     }
   });
 
@@ -2661,8 +1116,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log("📋 Fetching all job assignments");
       const assignments = await storage.getJobAssignments();
+      const allJobs = await storage.getJobs();
+
+      // Enrich assignments with matched jobId if available
+      const enrichedAssignments = assignments.map(assignment => {
+        // Find job with matching title (case-insensitive if needed, but exact matches preferred for now)
+        const matchedJob = allJobs.find(job => job.title === assignment.hbxlJob);
+
+        return {
+          ...assignment,
+          jobId: matchedJob?.id // Add the job ID if found
+        };
+      });
+
       console.log("📋 Found", assignments.length, "job assignments");
-      res.json(assignments);
+      res.json(enrichedAssignments);
     } catch (error) {
       console.error("Error fetching job assignments:", error);
       res.status(500).json({ error: "Failed to fetch job assignments" });
@@ -4416,9 +2884,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to backup task progress" });
     }
   });
-
-  // Serve uploaded files
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
   const httpServer = createServer(app);
 
@@ -7435,184 +5900,6 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
         success: false,
         error: 'Failed to get financial summary'
       });
-    }
-  });
-
-
-
-
-  // DEBUG ENDPOINT - Add this to verify production environment
-  app.get("/api/debug-system", async (req, res) => {
-    const results: any = {
-      timestamp: new Date().toISOString(),
-      environment: {
-        nodeEnv: process.env.NODE_ENV,
-        hasOpenAIKey: !!process.env.OPENAI_API_KEY,
-        hasDatabaseUrl: !!process.env.DATABASE_URL
-      },
-      canvas: {
-        status: 'pending',
-        error: null
-      },
-      csvParsing: {
-        status: 'pending',
-        result: null
-      }
-    };
-
-    // Check Canvas (Native Dependencies)
-    try {
-      console.log('🔍 DEBUG: Attempting to import canvas...');
-      const { createCanvas } = await import('canvas');
-      const canvas = createCanvas(100, 100);
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'red';
-      ctx.fillRect(0, 0, 50, 50);
-      results.canvas.status = 'success';
-      results.canvas.message = 'Canvas created successfully';
-    } catch (error: any) {
-      console.error('❌ DEBUG: Canvas import failed:', error);
-      results.canvas.status = 'failed';
-      results.canvas.error = error.message;
-      results.canvas.stack = error.stack;
-    }
-
-    // Check CSV Parsing
-    try {
-      console.log('🔍 DEBUG: Testing CSV parsing...');
-      // Sample data simulation
-      const sampleLines = [
-        "Name,Test Client",
-        "Address,123 Test St",
-        "Post code,TE1 5ST",
-        "Project Type,Test Build",
-        "Order Date,Date Required,Build Phase,Type of Resource,Resource Description"
-      ];
-      const parsed = parseEnhancedCSV(sampleLines);
-      results.csvParsing.status = 'success';
-      results.csvParsing.result = parsed?.metadata;
-    } catch (error: any) {
-      console.error('❌ DEBUG: CSV parsing failed:', error);
-      results.csvParsing.status = 'failed';
-      results.csvParsing.error = error.message;
-    }
-
-    // Check PDF Tools (poppler-utils)
-    try {
-      console.log('🔍 DEBUG: Checking pdftocairo version...');
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
-
-      const { stdout, stderr } = await execAsync('pdftocairo -v');
-      results.pdfTools = {
-        status: 'success',
-        message: 'pdftocairo found',
-        version: stdout || stderr // pdftocairo prints version to stderr often
-      };
-    } catch (error: any) {
-      console.error('❌ DEBUG: pdftocairo check failed:', error);
-      results.pdfTools = {
-        status: 'failed',
-        error: error.message,
-        hint: 'poppler-utils might not be installed in Dockerfile'
-      };
-    }
-
-    res.json(results);
-  });
-
-
-  // AI Chat Endpoint (New SKI)
-  app.post("/api/chat/drawing/:fileId", async (req, res) => {
-    try {
-      const fileId = req.params.fileId;
-      const { message } = req.body;
-
-      if (!message) {
-        return res.status(400).json({ error: "Message is required" });
-      }
-
-      const { ragAgent } = await import("./rag-agent");
-      const answer = await ragAgent.chatAboutDrawing(fileId, message);
-
-      res.json({ answer });
-    } catch (error) {
-      console.error("Chat Error:", error);
-      res.status(500).json({ error: "Failed to process chat request" });
-    }
-  });
-
-  // Manual Job Creation (to bypass CSV requirement)
-  app.post("/api/jobs/manual", async (req, res) => {
-    try {
-      console.log("🛠️  Manually creating a new job...");
-      const timestamp = new Date().getTime().toString().slice(-4);
-      const jobName = `Manual Job ${timestamp}`;
-
-      // Basic shell job
-      const [newJob] = await db.insert(jobs).values({
-        title: jobName,
-        location: "Manual Location",
-        phases: JSON.stringify([]),
-        phaseTaskData: JSON.stringify({ phases: [] }),
-        dueDate: new Date().toISOString(),
-        postcode: "TE1 1ST",
-        projectType: "Manual",
-        status: "pending",
-        contractorId: null
-      }).returning();
-
-      console.log(`✅ Created manual job: ${newJob.id}`);
-      res.json(newJob);
-    } catch (error) {
-      console.error("Manual job creation failed:", error);
-      res.status(500).json({ error: String(error) });
-    }
-  });
-
-  // DELETE FILE - Added by Antigravity to fix "cant delete files"
-  app.delete("/api/files/:id", async (req, res) => {
-    try {
-      const fileId = req.params.id;
-      console.log(`🗑️ Deleting file: ${fileId}`);
-
-      // 1. Get file info
-      const [file] = await db.select().from(jobFiles).where(eq(jobFiles.id, fileId)).limit(1);
-
-      if (!file) {
-        console.warn(`File ${fileId} not found in DB.`);
-        return res.status(404).json({ error: "File not found" });
-      }
-
-      // 2. Delete from Extracted Elements & Rooms (Cascade)
-      await db.delete(extractedElements).where(eq(extractedElements.fileId, fileId));
-      await db.delete(rooms).where(eq(rooms.fileId, fileId));
-
-      // 3. Delete from jobFiles
-      await db.delete(jobFiles).where(eq(jobFiles.id, fileId));
-
-      // 4. Delete physical file
-      if (file.fileUrl) {
-        // Safer way: resolve path
-        const uploadsDir = path.join(process.cwd(), "uploads");
-        const targetPath = path.join(uploadsDir, file.filename || path.basename(file.fileUrl));
-
-        if (fs.existsSync(targetPath)) {
-          try {
-            fs.unlinkSync(targetPath);
-            console.log(`Deleted physical file: ${targetPath}`);
-          } catch (err) {
-            console.error(`Failed to delete physical file: ${targetPath}`, err);
-          }
-        }
-      }
-
-      res.json({ success: true });
-
-    } catch (error) {
-      console.error("Delete File Error:", error);
-      res.status(500).json({ error: String(error) });
     }
   });
 

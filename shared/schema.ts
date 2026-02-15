@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint, numeric, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -11,8 +11,6 @@ export const eventStatusEnum = pgEnum("event_status", ["scheduled", "completed",
 
 // Manus-n8n Integration - Cost Category Types
 export const costCategoryEnum = pgEnum("cost_category", ["LABOUR", "MATERIAL", "PLANT", "SUBCONTRACTOR"]);
-export const tenderStatusEnum = pgEnum("tender_status", ["draft", "sent", "viewed", "submitted", "accepted", "rejected"]);
-
 
 export const contractors = pgTable("contractors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -67,156 +65,8 @@ export const jobCostItems = pgTable("job_cost_items", {
   rate: text("rate").notNull().default("0"), // Unit rate in pence
   total: text("total").notNull().default("0"), // Total cost in pence (qty * rate)
   supplier: text("supplier"), // Supplier name if applicable
-  source: text("source").default("manual"),
   sourceMetadata: text("source_metadata"), // JSON for additional HBXL data
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-export const jobFiles = pgTable("job_files", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  jobId: varchar("job_id").notNull().references(() => jobs.id),
-  filename: text("filename").notNull(),
-  originalName: text("original_name").notNull(),
-  fileUrl: text("file_url").notNull(),
-  filePath: text("file_path"),
-  fileType: text("file_type").notNull(), // "image/png", "application/pdf"
-  uploadedBy: text("uploaded_by").default("user"),
-  extractionStatus: text("extraction_status").default("pending"), // "pending", "processing", "completed", "failed"
-  extractionError: text("extraction_error"), // Error message if extraction failed
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// AI Extraction - Stores elements extracted from drawings by GPT-4 Vision
-export const extractedElements = pgTable("extracted_elements", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  jobId: varchar("job_id").notNull().references(() => jobs.id),
-  fileId: varchar("file_id").notNull().references(() => jobFiles.id),
-  elementType: text("element_type").notNull(), // "door", "window", "wall", "floor", "ceiling", "roof", "structural"
-  elementCode: text("element_code"), // "D01", "W03", "W-BATH-01"
-  description: text("description").notNull(),
-  dimensions: text("dimensions"), // "900x2100mm"
-  quantity: text("quantity").default("1"),
-  unit: text("unit").default("nr"), // "sqm", "nr", "lm"
-  rate: numeric("rate", { precision: 10, scale: 2 }).default("0"), // £45.00
-  total: numeric("total", { precision: 10, scale: 2 }).default("0"), // £1012.50
-  roomName: text("room_name"), // "Lounge", "Bathroom" - groups elements by room
-  location: text("location"), // "Bathroom", "First Floor", etc. (deprecated, use roomName)
-  material: text("material"), // "Softwood", "uPVC", "Plasterboard"
-  notes: text("notes"), // Additional notes from drawing
-  linkedCostItemId: varchar("linked_cost_item_id").references(() => jobCostItems.id), // Link to cost item if matched
-  rawJson: text("raw_json"), // Full AI response for debugging
-  page: integer("page").default(1),
-  bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
-  geometry: text("geometry"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// ============================================================================
-// ROOM-BASED COMMERCIAL MODEL (AGENTS.md Compliant)
-// Hierarchy: JOB -> ROOM -> ELEMENT -> PAYABLE_ITEM
-// HBXL phases are mapped to rooms using QS allocation rules
-// ============================================================================
-
-// Room status enum for tracking room completion
-export const roomStatusEnum = pgEnum("room_status", ["not_started", "in_progress", "complete"]);
-
-// Room Register - Defines rooms within a job (per AGENTS.md 4.2)
-export const rooms = pgTable("rooms", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  jobId: varchar("job_id").notNull().references(() => jobs.id),
-  fileId: varchar("file_id").references(() => jobFiles.id),
-  name: text("name").notNull(),        // e.g., "Bathroom", "Lounge", "External"
-  floor: text("floor"),                 // e.g., "Ground Floor", "First Floor"
-  notes: text("notes"),
-  status: roomStatusEnum("status").notNull().default("not_started"),
-  totalValue: text("total_value").default("0"), // Sum of all payable items in pence
-  page: integer("page").default(1),
-  bbox: text("bbox"), // [ymin, xmin, ymax, xmax] as JSON string
-  geometry: text("geometry"),
-  area: text("area"), // Room area in sqm
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Elements within rooms - informational groupings, NOT assignable (per AGENTS.md 6)
-export const roomElements = pgTable("room_elements", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  roomId: varchar("room_id").notNull().references(() => rooms.id),
-  name: text("name").notNull(),         // e.g., "Wall Construction", "Sanitaryware", "Tiling"
-  measurementSummary: text("measurement_summary"), // e.g., "21.6 sqm"
-  subtotal: text("subtotal").default("0"), // Sum of payable items in pence
-  hbxlSourcePhase: text("hbxl_source_phase"), // Traceability: original HBXL phase
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Payable Items - THE assignable level (per AGENTS.md 7)
-// Assignment is allowed ONLY at this level
-export const payableItems = pgTable("payable_items", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  elementId: varchar("element_id").notNull().references(() => roomElements.id),
-  description: text("description").notNull(),
-  quantity: text("quantity").notNull(),
-  unit: text("unit").notNull(),
-  rate: text("rate").notNull(),         // In pence
-  total: text("total").notNull(),       // In pence
-
-  // New Field for Labour Tender Filtering
-  itemType: text("item_type").default("MATERIAL"), // 'LABOUR' or 'MATERIAL'
-
-  // Assignment fields (only allowed at this level per AGENTS.md 8)
-  assignedContractorId: varchar("assigned_contractor_id").references(() => contractors.id),
-  assignedContractorName: text("assigned_contractor_name"),
-  assignedDate: timestamp("assigned_date"),
-
-  // Status - derived from work, not manual (per AGENTS.md 7)
-  status: roomStatusEnum("status").notNull().default("not_started"),
-
-  // Traceability (per AGENTS.md 11)
-  hbxlSourcePhase: text("hbxl_source_phase"),    // Original HBXL phase
-  hbxlOriginalQty: text("hbxl_original_qty"),    // Original HBXL Quantity
-  roomAllocationPercent: text("room_allocation_percent").default("100"), // Allocation %
-
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// NEW: Tender Submissions Table
-export const tenderSubmissions = pgTable("tender_submissions", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  jobId: varchar("job_id").notNull().references(() => jobs.id),
-  contractorId: varchar("contractor_id"), // Optional if public link
-  contractorName: text("contractor_name").notNull(),
-  contractorEmail: text("contractor_email"),
-  status: tenderStatusEnum("status").default("draft").notNull(),
-  totalPrice: text("total_price").default("0"), // Total labour price submitted
-  submittedAt: timestamp("submitted_at"),
-
-  // JSON blob for storing the granular rates per item
-  // Structure: { [itemId]: { rate: 5000, total: 10000 } } (in pence)
-  lineItemRates: text("line_item_rates"),
-
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Insert schemas for Room-based model
-export const insertRoomSchema = createInsertSchema(rooms).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertRoomElementSchema = createInsertSchema(roomElements).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertPayableItemSchema = createInsertSchema(payableItems).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertTenderSubmissionSchema = createInsertSchema(tenderSubmissions).omit({
-  id: true,
-  createdAt: true,
-  submittedAt: true,
 });
 
 export const csvUploads = pgTable("csv_uploads", {
@@ -225,6 +75,76 @@ export const csvUploads = pgTable("csv_uploads", {
   status: uploadStatusEnum("status").notNull().default("processing"),
   jobsCount: text("jobs_count").notNull().default("0"),
   uploadedAt: timestamp("uploaded_at").defaultNow(),
+});
+
+export const jobFiles = pgTable("job_files", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").references(() => jobs.id),
+  filename: text("filename").notNull(),
+  fileType: text("file_type").notNull(),
+  fileUrl: text("file_url").notNull(), // URL to access the file
+  filePath: text("file_path"), // Server-side path
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+});
+
+export const rooms = pgTable("rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").references(() => jobs.id),
+  name: text("name").notNull(),
+  area: text("area"), // stored as string to match existing code usage
+  perimeter: text("perimeter"),
+  geometry: text("geometry"), // JSON string
+  polygon: text("polygon"), // JSON string
+  floor: text("floor"),
+  status: text("status").default("not_started"),
+  totalValue: text("total_value").default("0"),
+  notes: text("notes"),
+  isLocked: boolean("is_locked").default(false),
+  fittings: text("fittings"), // JSON string: {lights, sockets, switches, extractor_fans, ...}
+  fittingsSource: text("fittings_source"), // "MANUAL" | "DXF_AUTO" | null
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const roomElements = pgTable("room_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").references(() => rooms.id),
+  name: text("name").notNull(),
+  elementType: text("element_type"),
+  subtotal: text("subtotal").default("0"),
+  hbxlSourcePhase: text("hbxl_source_phase"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const payableItems = pgTable("payable_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").references(() => roomElements.id),
+  description: text("description").notNull(),
+  quantity: text("quantity").default("1"),
+  unit: text("unit").default("Each"),
+  rate: text("rate").default("0"),
+  total: text("total").default("0"),
+  hbxlSourcePhase: text("hbxl_source_phase"),
+  hbxlOriginalQty: text("hbxl_original_qty"),
+  roomAllocationPercent: text("room_allocation_percent").default("100"),
+  itemType: text("item_type").default("MATERIAL"), // MATERIAL, LABOUR, PLANT
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const extractedElements = pgTable("extracted_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").references(() => jobs.id),
+  fileId: varchar("file_id").references(() => jobFiles.id), // Link to source file
+  originalId: text("original_id"), // IFC Express ID
+  roomName: text("room_name"),
+  elementType: text("element_type"),
+  description: text("description"),
+  dimensions: text("dimensions"), // e.g. "102mm"
+  bbox: text("bbox"), // JSON string [minX, minY, maxX, maxY]
+  geometry: text("geometry"), // JSON string of points
+  quantity: text("quantity").default("1"),
+  rawJson: text("raw_json"), // Full properties
+  properties: text("properties"), // JSON string (Legacy?)
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const contractorApplications = pgTable("contractor_applications", {
@@ -323,6 +243,31 @@ export const insertJobSchema = createInsertSchema(jobs).omit({
   id: true,
 });
 
+export const insertJobFileSchema = createInsertSchema(jobFiles).omit({
+  id: true,
+  uploadedAt: true,
+});
+
+export const insertRoomSchema = createInsertSchema(rooms).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertRoomElementSchema = createInsertSchema(roomElements).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPayableItemSchema = createInsertSchema(payableItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertExtractedElementSchema = createInsertSchema(extractedElements).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Manus-n8n Integration - Cost Item Schema
 export const insertJobCostItemSchema = createInsertSchema(jobCostItems).omit({
   id: true,
@@ -349,11 +294,6 @@ export const jobImportPayloadSchema = z.object({
     total: z.number(),
     supplier: z.string().optional(),
   })),
-});
-
-export const insertJobFileSchema = createInsertSchema(jobFiles).omit({
-  id: true,
-  createdAt: true,
 });
 
 export const insertCsvUploadSchema = createInsertSchema(csvUploads).omit({
@@ -753,6 +693,16 @@ export type InsertContractorApplication = z.infer<typeof insertContractorApplica
 export type ContractorApplication = typeof contractorApplications.$inferSelect;
 export type InsertContractorReply = z.infer<typeof insertContractorReplySchema>;
 export type ContractorReply = typeof contractorReplies.$inferSelect;
+export type InsertJobFile = z.infer<typeof insertJobFileSchema>;
+export type JobFile = typeof jobFiles.$inferSelect;
+export type InsertRoom = z.infer<typeof insertRoomSchema>;
+export type Room = typeof rooms.$inferSelect;
+export type InsertRoomElement = z.infer<typeof insertRoomElementSchema>;
+export type RoomElement = typeof roomElements.$inferSelect;
+export type InsertPayableItem = z.infer<typeof insertPayableItemSchema>;
+export type PayableItem = typeof payableItems.$inferSelect;
+export type InsertExtractedElement = z.infer<typeof insertExtractedElementSchema>;
+export type ExtractedElement = typeof extractedElements.$inferSelect;
 export type InsertWorkSession = z.infer<typeof insertWorkSessionSchema>;
 export type WorkSession = typeof workSessions.$inferSelect;
 export type JobAssignment = z.infer<typeof jobAssignmentSchema>;
@@ -781,15 +731,15 @@ export type EmailRecord = typeof emailRecords.$inferSelect;
 export type InsertMeeting = z.infer<typeof insertMeetingSchema>;
 export type Meeting = typeof meetings.$inferSelect;
 
+// Job with Files
 export interface JobWithContractor extends Job {
   contractor?: Contractor;
+  files?: JobFile[];
 }
 
 // Manus-n8n Integration Types
 export type InsertJobCostItem = z.infer<typeof insertJobCostItemSchema>;
 export type JobCostItem = typeof jobCostItems.$inferSelect;
-export type InsertJobFile = z.infer<typeof insertJobFileSchema>;
-export type JobFile = typeof jobFiles.$inferSelect;
 export type JobImportPayload = z.infer<typeof jobImportPayloadSchema>;
 
 // Financial Summary Type
@@ -806,13 +756,3 @@ export interface JobWithFinancials extends Job {
   costItems?: JobCostItem[];
   financialBreakdown?: FinancialSummary;
 }
-
-// Room-Based Commercial Model Types (AGENTS.md)
-export type InsertRoom = z.infer<typeof insertRoomSchema>;
-export type Room = typeof rooms.$inferSelect;
-export type InsertRoomElement = z.infer<typeof insertRoomElementSchema>;
-export type RoomElement = typeof roomElements.$inferSelect;
-export type InsertPayableItem = z.infer<typeof insertPayableItemSchema>;
-export type PayableItem = typeof payableItems.$inferSelect;
-export type InsertTenderSubmission = z.infer<typeof insertTenderSubmissionSchema>;
-export type TenderSubmission = typeof tenderSubmissions.$inferSelect;
