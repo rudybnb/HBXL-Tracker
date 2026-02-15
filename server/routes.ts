@@ -18,7 +18,8 @@ import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, insertCon
 import { TelegramService } from "./telegram";
 import VoiceAgent from "./voice-agent";
 import { DxfAgent } from "./agents/dxf-agent";
-import { IfcAgent } from "./agents/ifc-agent";
+// IfcAgent loaded dynamically to avoid crash when web-ifc is not installed
+// import { IfcAgent } from "./agents/ifc-agent";
 import multer from "multer";
 import type { Request as ExpressRequest } from "express";
 import * as fs from "fs";
@@ -178,6 +179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (file.originalname.toLowerCase().endsWith('.ifc')) {
         console.log("🏗️ IFC Upload Detected: Processing with IfcAgent...");
         try {
+          const { IfcAgent } = await import("./agents/ifc-agent");
           const agent = new IfcAgent();
           const result = await agent.process(file.path);
 
