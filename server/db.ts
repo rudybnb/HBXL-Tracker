@@ -12,7 +12,7 @@ const databaseUrl = process.env.DATABASE_URL && !process.env.DATABASE_URL.includ
 // Create a connection pool for better performance with standard Postgres
 const pool = new Pool({
   connectionString: databaseUrl,
-  ssl: true,
+  ssl: { rejectUnauthorized: false },
 });
 
 // Initialize Drizzle with the postgres pool
