@@ -1,5 +1,13 @@
 
-import * as WebIFC from "web-ifc";
+// web-ifc loaded dynamically to avoid crash when not installed (e.g. on Render)
+// import * as WebIFC from "web-ifc";
+let _WebIFC: any = null;
+async function getWebIFC() {
+    if (!_WebIFC) {
+        _WebIFC = await import("web-ifc");
+    }
+    return _WebIFC;
+}
 import * as fs from "fs";
 import * as path from "path";
 import { GeometricRoomDetector } from "./geometric-room-detector";
@@ -125,9 +133,13 @@ export interface IfcExtractionResult {
 }
 
 export class IfcAgent {
-    private ifcApi: WebIFC.IfcAPI;
-    constructor() {
-        this.ifcApi = new WebIFC.IfcAPI();
+    private ifcApi: any;
+    private WebIFC: any;
+
+    // Lazy initialization — called at start of process()
+    private async init() {
+        this.WebIFC = await getWebIFC();
+        this.ifcApi = new this.WebIFC.IfcAPI();
 
         // ROBUST WASM PATH RESOLUTION (The "New Way" Fix)
         // 1. Try node_modules in CWD (Dev)
@@ -153,6 +165,8 @@ export class IfcAgent {
     }
 
     public async process(ifcPath: string): Promise<IfcExtractionResult> {
+        // Lazy-load web-ifc
+        await this.init();
         const logFile = path.join(path.dirname(ifcPath), "ifc-agent.log");
         const log = (msg: string) => {
             try { fs.appendFileSync(logFile, `${new Date().toISOString()} ${msg}\n`); } catch (e) { }
@@ -169,7 +183,7 @@ export class IfcAgent {
             // Pre-load Properties
             const propertyMap = new Map<number, any[]>();
             try {
-                const rels = this.ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELDEFINESBYPROPERTIES);
+                const rels = this.ifcApi.GetLineIDsWithType(modelID, this.WebIFC.IFCRELDEFINESBYPROPERTIES);
                 for (let i = 0; i < rels.size(); i++) {
                     const rel = this.ifcApi.GetLine(modelID, rels.get(i));
                     if (rel.RelatedObjects && rel.RelatingPropertyDefinition) {
@@ -213,23 +227,23 @@ export class IfcAgent {
             // Extract Elements
             const elements: any[] = [];
             const allTypes = [
-                { type: WebIFC.IFCWALL, label: 'wall' }, { type: WebIFC.IFCWALLSTANDARDCASE, label: 'wall' },
-                { type: WebIFC.IFCWINDOW, label: 'window' }, { type: WebIFC.IFCDOOR, label: 'door' },
-                { type: WebIFC.IFCSLAB, label: 'slab' }, { type: WebIFC.IFCCOVERING, label: 'finish' },
-                { type: WebIFC.IFCFURNISHINGELEMENT, label: 'furniture' },
+                { type: this.WebIFC.IFCWALL, label: 'wall' }, { type: this.WebIFC.IFCWALLSTANDARDCASE, label: 'wall' },
+                { type: this.WebIFC.IFCWINDOW, label: 'window' }, { type: this.WebIFC.IFCDOOR, label: 'door' },
+                { type: this.WebIFC.IFCSLAB, label: 'slab' }, { type: this.WebIFC.IFCCOVERING, label: 'finish' },
+                { type: this.WebIFC.IFCFURNISHINGELEMENT, label: 'furniture' },
                 // MEP Elements
-                { type: WebIFC.IFCLIGHTFIXTURE, label: 'light' },
-                { type: WebIFC.IFCOUTLET, label: 'socket' },
-                { type: WebIFC.IFCSWITCHINGDEVICE, label: 'switch' },
-                { type: WebIFC.IFCSANITARYTERMINAL, label: 'sanitary' },
-                { type: WebIFC.IFCFLOWTERMINAL, label: 'plumbing' }, // Fallback/Other
-                { type: WebIFC.IFCELECTRICALELEMENT, label: 'electrical' }, // Fallback/Other
+                { type: this.WebIFC.IFCLIGHTFIXTURE, label: 'light' },
+                { type: this.WebIFC.IFCOUTLET, label: 'socket' },
+                { type: this.WebIFC.IFCSWITCHINGDEVICE, label: 'switch' },
+                { type: this.WebIFC.IFCSANITARYTERMINAL, label: 'sanitary' },
+                { type: this.WebIFC.IFCFLOWTERMINAL, label: 'plumbing' }, // Fallback/Other
+                { type: this.WebIFC.IFCELECTRICALELEMENT, label: 'electrical' }, // Fallback/Other
 
-                { type: WebIFC.IFCBEAM, label: 'structure' },
-                { type: WebIFC.IFCCOLUMN, label: 'structure' }, { type: WebIFC.IFCMEMBER, label: 'structure' },
-                { type: WebIFC.IFCSTAIR, label: 'stair' }, { type: WebIFC.IFCRAILING, label: 'railing' },
-                { type: WebIFC.IFCBUILDINGELEMENTPROXY, label: 'generic' }, { type: WebIFC.IFCROOF, label: 'roof' },
-                { type: WebIFC.IFCSPACE, label: 'room' }
+                { type: this.WebIFC.IFCBEAM, label: 'structure' },
+                { type: this.WebIFC.IFCCOLUMN, label: 'structure' }, { type: this.WebIFC.IFCMEMBER, label: 'structure' },
+                { type: this.WebIFC.IFCSTAIR, label: 'stair' }, { type: this.WebIFC.IFCRAILING, label: 'railing' },
+                { type: this.WebIFC.IFCBUILDINGELEMENTPROXY, label: 'generic' }, { type: this.WebIFC.IFCROOF, label: 'roof' },
+                { type: this.WebIFC.IFCSPACE, label: 'room' }
             ];
 
             for (const t of allTypes) {
@@ -775,9 +789,9 @@ export class IfcAgent {
                     } catch (e) { }
                 }
             };
-            scanType(WebIFC.IFCTEXTLITERAL);
-            scanType(WebIFC.IFCTEXTLITERALWITHEXTENT);
-            scanType(WebIFC.IFCANNOTATION);
+            scanType(this.WebIFC.IFCTEXTLITERAL);
+            scanType(this.WebIFC.IFCTEXTLITERALWITHEXTENT);
+            scanType(this.WebIFC.IFCANNOTATION);
         } catch (e) { }
         return results;
     }
@@ -793,7 +807,7 @@ export class IfcAgent {
                 const line = this.ifcApi.GetLine(modelID, id);
 
                 // Found a Point?
-                if (line.type === WebIFC.IFCCARTESIANPOINT && line.Coordinates) {
+                if (line.type === this.WebIFC.IFCCARTESIANPOINT && line.Coordinates) {
                     const c = line.Coordinates;
                     const x = typeof c[0] === 'number' ? c[0] : (c[0]?.value || 0);
                     const y = typeof c[1] === 'number' ? c[1] : (c[1]?.value || 0);
