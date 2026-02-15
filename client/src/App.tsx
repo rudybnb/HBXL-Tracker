@@ -26,8 +26,6 @@ import CreateAssignment from "@/pages/create-assignment";
 import TelegramTest from "@/pages/telegram-test";
 import PayrollOverview from "@/pages/payroll-overview";
 import LiveClockMonitor from "@/pages/live-clock-monitor";
-import JobTenderView from "@/pages/job-tender-view";
-import RoomWorkPackages from "@/pages/room-work-packages";
 
 import ContractorIdCapture from "@/pages/contractor-id-capture";
 import AdminSettings from "@/pages/admin-settings";
@@ -37,8 +35,7 @@ import TelegramMessages from "@/pages/telegram-messages";
 import ContractCashflow from "@/pages/contract-cashflow";
 import VoiceControl from "@/pages/voice-control";
 import FinancialDashboard from "@/pages/financial-dashboard";
-import SubcontractorTenderView from "@/pages/subcontractor-tender";
-
+import RoomBuilder from "@/pages/room-builder";
 
 import NotFound from "@/pages/not-found";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -103,16 +100,6 @@ function Router() {
             <AdminTaskMonitor />
           </ProtectedRoute>
         )} />
-        <Route path="/jobs/:id/tender" component={() => (
-          <ProtectedRoute requiredRole="admin">
-            <JobTenderView />
-          </ProtectedRoute>
-        )} />
-        <Route path="/jobs/:id/rooms" component={() => (
-          <ProtectedRoute requiredRole="admin">
-            <RoomWorkPackages />
-          </ProtectedRoute>
-        )} />
         <Route path="/contractor-onboarding" component={() => (
           <ProtectedRoute requiredRole="admin">
             <ContractorOnboarding />
@@ -153,12 +140,6 @@ function Router() {
           </ProtectedRoute>
         )} />
         <Route path="/admin/job-assignments" component={() => (
-          <ProtectedRoute requiredRole="admin">
-            <JobAssignments />
-          </ProtectedRoute>
-        )} />
-        {/* Helper to redirect to list */}
-        <Route path="/jobs-list" component={() => (
           <ProtectedRoute requiredRole="admin">
             <JobAssignments />
           </ProtectedRoute>
@@ -231,8 +212,11 @@ function Router() {
           </ProtectedRoute>
         )} />
 
-        {/* Public Tender Link for Subcontractors */}
-        <Route path="/tender/:id" component={SubcontractorTenderView} />
+        <Route path="/jobs/:jobId/room-builder" component={() => (
+          <ProtectedRoute requiredRole="admin">
+            <RoomBuilder />
+          </ProtectedRoute>
+        )} />
 
         <Route component={NotFound} />
       </Switch>
