@@ -2,16 +2,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ProfessionalIFCViewer } from '@/components/professional-ifc-viewer-final-2d';
-import { UploadIfc } from '@/components/upload-ifc';
-import { SimpleIFCViewer } from '@/components/simple-ifc-viewer';
+// IFC viewers removed — not needed for room management + DXF scanning workflow
+// import { ProfessionalIFCViewer } from '@/components/professional-ifc-viewer-final-2d';
+// import { UploadIfc } from '@/components/upload-ifc';
+// import { SimpleIFCViewer } from '@/components/simple-ifc-viewer';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, Plus, Save, Undo, Lock, Unlock, ArrowLeft, Layers, Box, Pencil, Check, X, FileUp, Zap, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import * as THREE from 'three';
-import { ErrorBoundary } from '@/components/error-boundary';
+// import * as THREE from 'three';  // Not needed without IFC viewer
 
 // DB Room Interface
 interface Room {
@@ -296,34 +296,7 @@ export default function RoomBuilder() {
             return { x: svgX, y: svgY };
         }
 
-        const comps = (window as any).COMPONENTS;
-        if (!comps || !canvasRef.current) return null;
-
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-        const camera = comps.camera.get();
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-
-        // Intersect with a virtual plane at Y=0 (or the model's approximate floor)
-        // Since we don't have a guaranteed infinite floor mesh, let's use a mathematical plane.
-        // Plane normal (0, 1, 0), constant 0? 
-        // Note: The viewer might be looking at Y=1200 (Cut plane). 
-        // If we want coordinates on the floor plan, we usually project to Y=0.
-
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        const target = new THREE.Vector3();
-        const hit = raycaster.ray.intersectPlane(plane, target);
-
-        if (hit) {
-            // Returns X, Z (since Y is up) - Map to our 2D schema (x, y) which usually expects X, Y?
-            // Wait, existing rooms in DB: "points" are likely X, Y (2D).
-            // The viewer maps DB rooms: shape (x, y) -> mesh (x, 0, y).
-            // So we should store (x, z) as (x, y).
-            return { x: hit.x, y: hit.z };
-        }
+        // 3D mode fallback (IFC viewer not available in production build)
         return null;
     };
 
@@ -468,56 +441,7 @@ export default function RoomBuilder() {
                 return;
             }
 
-            // 3D VIEWER LOOP (Fallback)
-            const comps = (window as any).COMPONENTS;
-
-            if (canvas && comps && isDrawing) {
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    // Resize canvas to match container if needed
-                    const rect = canvas.parentElement?.getBoundingClientRect();
-                    if (rect) {
-                        canvas.width = rect.width;
-                        canvas.height = rect.height;
-                    }
-
-                    if (currentPoints.length > 0) {
-                        ctx.beginPath();
-                        ctx.strokeStyle = '#2563EB'; // Blue-600
-                        ctx.lineWidth = 3;
-                        ctx.fillStyle = 'rgba(37, 99, 235, 0.2)';
-
-                        const camera = comps.camera.get();
-
-                        currentPoints.forEach((pt, i) => {
-                            // Project World (x, 0, y) -> Screen
-                            const vec = new THREE.Vector3(pt.x, 0, pt.y);
-                            vec.project(camera);
-
-                            const x = (vec.x * .5 + .5) * canvas.width;
-                            const y = (-(vec.y * .5) + .5) * canvas.height;
-
-                            if (i === 0) ctx.moveTo(x, y);
-                            else ctx.lineTo(x, y);
-
-                            // Draw vertex
-                            ctx.fillStyle = 'white';
-                            ctx.fillRect(x - 3, y - 3, 6, 6);
-                            ctx.fillStyle = 'rgba(37, 99, 235, 0.2)'; // Restore
-                        });
-
-                        // Close to mouse? 
-                        // Hard to track mouse pos here without state, but we can close loop visually
-                        if (currentPoints.length > 2) {
-                            ctx.closePath();
-                            ctx.fill();
-                        }
-                        ctx.stroke();
-                    }
-                }
-            }
+            // 3D VIEWER LOOP skipped (IFC viewer not available in production)
             requestAnimationFrame(animate);
         };
         const handle = requestAnimationFrame(animate);
@@ -910,13 +834,12 @@ export default function RoomBuilder() {
                                     Cancel
                                 </Button>
                             )}
-                            <UploadIfc
-                                jobId={jobId!}
-                                onUploadComplete={() => {
-                                    setShowUpload(false);
-                                    queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}`] });
-                                }}
-                            />
+                            <div className="text-center">
+                                <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">📁</div>
+                                <h3 className="font-bold text-lg text-slate-700 mb-2">Upload a Drawing</h3>
+                                <p className="text-sm text-slate-500 mb-4">Upload a DXF or SVG file to get started</p>
+                                <p className="text-xs text-slate-400">Use the QS tab to scan DXF files for fittings</p>
+                            </div>
                         </div>
                     ) : (
                         <>
@@ -945,82 +868,14 @@ export default function RoomBuilder() {
                                     </div>
                                 </div>
                             ) : (
-                                <>
-                                    {/* VIEW MODE TOGGLE - 3D ONLY */}
-                                    <div className="absolute top-4 right-4 z-50 bg-white/90 backdrop-blur rounded flex shadow-sm border border-slate-200">
-                                        <button
-                                            onClick={() => setViewMode('2d')}
-                                            className={`px-3 py-1.5 text-xs font-semibold flex items-center gap-2 rounded-l transition-colors ${viewMode === '2d' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:bg-slate-50'}`}
-                                        >
-                                            <Layers className="w-3 h-3" /> 2D Plan
-                                        </button>
-                                        <div className="w-px bg-slate-200"></div>
-                                        <button
-                                            onClick={() => setViewMode('3d')}
-                                            className={`px-3 py-1.5 text-xs font-semibold flex items-center gap-2 rounded-r transition-colors ${viewMode === '3d' ? 'bg-indigo-100 text-indigo-800' : 'text-slate-500 hover:bg-slate-50'}`}
-                                        >
-                                            <Box className="w-3 h-3" /> 3D Model
-                                        </button>
-                                    </div>
-
-                                    <ErrorBoundary
-                                        fallback={
-                                            <div className="flex flex-col items-center justify-center h-full w-full bg-slate-50 border-2 border-dashed border-red-200">
-                                                <div className="bg-red-50 p-4 rounded-full mb-4 text-red-500 font-bold">3D Viewer Error</div>
-                                                <p className="text-slate-500 mb-4 px-8 text-center text-sm">
-                                                    The 3D viewer encountered a critical error. This often happens with incompatible IFC files.
-                                                    <br />Try uploading a DXF file instead for a guaranteed 2D view.
-                                                </p>
-                                                <Button variant="outline" onClick={() => window.location.reload()}>Reload Page</Button>
-                                            </div>
-                                        }
-                                    >
-                                        {/* CRITICAL SAFETY CHECK: Don't load Viewer if file is clearly meant to be SVG/DXF */}
-                                        {fileUrl && (fileUrl.toLowerCase().endsWith('.svg') || fileUrl.toLowerCase().endsWith('.dxf')) ? (
-                                            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
-                                                <Loader2 className="animate-spin w-8 h-8" />
-                                                <span className="text-xs font-mono">Processing 2D SVG Plan...</span>
-                                            </div>
-                                        ) : viewerCrashed ? (
-                                            <div className="flex flex-col items-center justify-center h-full w-full bg-red-50 border-2 border-dashed border-red-200">
-                                                <div className="bg-red-100 p-4 rounded-full mb-4 text-red-600 font-bold">3D Engine Crash</div>
-                                                <p className="text-slate-600 mb-6 px-8 text-center text-sm max-w-md">
-                                                    The 3D viewer has crashed due to an incompatible file or graphics error.<br />
-                                                    Don't worry - you can replace the model to fix this.
-                                                </p>
-                                                <Button
-                                                    variant="destructive"
-                                                    onClick={() => {
-                                                        setViewerCrashed(false);
-                                                        setShowUpload(true);
-                                                    }}
-                                                >
-                                                    Replace Model (DXF Only)
-                                                </Button>
-
-                                                {/* IN-PLACE UPLOAD FOR CRASH RECOVERY */}
-                                                <div className="mt-4">
-                                                    <UploadIfc
-                                                        jobId={jobId!}
-                                                        accept=".dxf"
-                                                        onUploadComplete={() => {
-                                                            setViewerCrashed(false);
-                                                            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}`] });
-                                                        }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <ProfessionalIFCViewer
-                                                key="viewer-force-2d-v5"
-                                                fileUrl={fileUrl}
-                                                viewMode={viewMode}
-                                                rooms={rooms}
-                                                sliceOffset={committedSliceHeight}
-                                            />
-                                        )}
-                                    </ErrorBoundary>
-                                </>
+                                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-3">
+                                    <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center text-2xl">🏗️</div>
+                                    <span className="text-sm font-medium text-slate-500">No floor plan loaded</span>
+                                    <span className="text-xs text-slate-400">Upload a DXF/SVG drawing to view it here</span>
+                                    <Button variant="outline" size="sm" onClick={() => setShowUpload(true)}>
+                                        <FileUp className="w-4 h-4 mr-2" /> Upload Drawing
+                                    </Button>
+                                </div>
                             )}
                         </>
                     )}
