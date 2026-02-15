@@ -167,6 +167,27 @@ export default function RoomBuilder() {
         }
     });
 
+    const uploadFileMutation = useMutation({
+        mutationFn: async (file: File) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await fetch(`/api/jobs/${jobId}/files`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) throw new Error("Upload failed");
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: [`/api/jobs/${jobId}`] });
+            toast({ title: "Floor Plan Uploaded", description: "You can now define rooms.", variant: "default" });
+            setShowUpload(false);
+        },
+        onError: (err: any) => {
+            toast({ title: "Upload Failed", description: err.message, variant: "destructive" });
+        }
+    });
+
     const updateRoomMutation = useMutation({
         mutationFn: async ({ id, name }: { id: string, name: string }) => {
             const res = await fetch(`/api/rooms/${id}`, {
@@ -485,15 +506,15 @@ export default function RoomBuilder() {
                 <div className="flex px-6 gap-8 text-sm font-medium border-t pt-2">
                     <button onClick={() => setActiveTab('architect')} className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'architect' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                         <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold">1</div>
-                        Architect (Define Rooms)
+                        Upload & Define Rooms
                     </button>
                     <button onClick={() => setActiveTab('qs')} className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'qs' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                         <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold">2</div>
-                        QS (Verify Scope)
+                        Scan Fittings (DXF)
                     </button>
                     <button onClick={() => setActiveTab('tender')} className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'tender' ? 'border-green-600 text-green-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                         <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-xs font-bold">3</div>
-                        Cost & Tender
+                        Review Tender
                     </button>
                 </div>
             </div>
@@ -507,65 +528,99 @@ export default function RoomBuilder() {
                     {/* ARCHITECT TAB CONTENT */}
                     {activeTab === 'architect' && (
                         <div className="flex flex-col h-full animate-in slide-in-from-left-4 fade-in duration-300">
-                            <div className="p-4 border-b bg-gray-50/50">
-                                <h3 className="font-bold text-sm text-blue-900 mb-1">Room Definition</h3>
-                                <p className="text-xs text-gray-500 mb-4">Draw over the floor plan to identify rooms.</p>
+                            {/* STEP 1: UPLOAD REFERENCE */}
+                            <div className="p-4 border-b bg-white">
+                                <h3 className="font-bold text-sm text-slate-900 mb-2 flex items-center gap-2">
+                                    <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-xs">1</div>
+                                    Floor Plan Reference
+                                </h3>
 
-                                <div className="space-y-4">
-                                    <div className="bg-white p-3 rounded border shadow-sm">
-                                        <div className="flex justify-between text-xs font-semibold mb-2">
-                                            <span>Cut Plane Height</span>
-                                            <span>{internalSliceHeight.toFixed(1)}m</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min="0.1" max="5.0" step="0.1"
-                                            value={internalSliceHeight}
-                                            onChange={(e) => setInternalSliceHeight(parseFloat(e.target.value))}
-                                            onMouseUp={() => setCommittedSliceHeight(internalSliceHeight)}
-                                            className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                                        />
-                                    </div>
-
-                                    {isDrawing ? (
-                                        <div className="bg-blue-50 p-3 rounded border border-blue-200 shadow-sm animate-in zoom-in-95">
-                                            <Input
-                                                placeholder="Room Name (e.g. Kitchen)"
-                                                value={roomName}
-                                                onChange={e => setRoomName(e.target.value)}
-                                                className="mb-2 bg-white"
-                                                autoFocus
+                                {!activeFile ? (
+                                    <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg p-4 text-center hover:bg-slate-100 transition-colors">
+                                        <FileUp className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                                        <p className="text-xs text-slate-600 font-medium mb-3">Upload DXF/SVG to start</p>
+                                        <label className="cursor-pointer inline-block">
+                                            <div className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded shadow-sm transition-all">
+                                                Select File
+                                            </div>
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept=".dxf,.svg,.ifc"
+                                                onChange={(e) => {
+                                                    const f = e.target.files?.[0];
+                                                    if (f) uploadFileMutation.mutate(f);
+                                                }}
                                             />
-                                            <div className="flex justify-between items-center mb-3">
-                                                <span className="text-xs text-blue-700 font-mono font-medium">Area: {tempArea.toFixed(2)}m²</span>
-                                                <Button variant="ghost" size="sm" onClick={handleUndo} className="h-6 text-xs hover:bg-blue-100"><Undo className="w-3 h-3 mr-1" /> Undo Point</Button>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <Button onClick={handleSave} size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700">Save Room</Button>
-                                                <Button variant="secondary" size="sm" onClick={resetDrawing}>Cancel</Button>
+                                        </label>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded border border-slate-200 shadow-sm">
+                                        <div className="w-8 h-8 bg-white rounded border flex items-center justify-center text-slate-600 shadow-sm">
+                                            <Layers className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs font-bold truncate text-slate-800">{activeFile.originalName || activeFile.fileUrl.split('/').pop()}</div>
+                                            <div className="text-[10px] text-green-600 font-medium flex items-center gap-1">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                                                Active Reference
                                             </div>
                                         </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <Button onClick={() => setIsDrawing(true)} className="w-full bg-slate-900 hover:bg-slate-800 text-white shadow-sm">
-                                                <Plus className="w-4 h-4 mr-2" /> Add New Room
-                                            </Button>
-
-                                            {/* REPLACE MODEL BUTTON */}
-                                            {fileUrl && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => setShowUpload(true)}
-                                                    className="w-full text-slate-400 hover:text-slate-600 font-normal text-xs"
-                                                >
-                                                    Replace Model (DXF/IFC)
-                                                </Button>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
+                                        <label className="cursor-pointer p-1.5 hover:bg-white rounded transition-colors text-slate-400 hover:text-blue-600" title="Change Plan">
+                                            <FileUp className="w-4 h-4" />
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept=".dxf,.svg,.ifc"
+                                                onChange={(e) => {
+                                                    const f = e.target.files?.[0];
+                                                    if (f) uploadFileMutation.mutate(f);
+                                                }}
+                                            />
+                                        </label>
+                                    </div>
+                                )}
                             </div>
+
+                            {/* STEP 2: DRAW ROOMS (Only visual if file exists) */}
+                            {activeFile && (
+                                <div className="p-4 border-b bg-gray-50/50">
+                                    <h3 className="font-bold text-sm text-blue-900 mb-2 flex items-center gap-2">
+                                        <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-xs">2</div>
+                                        Define Rooms
+                                    </h3>
+
+                                    <div className="space-y-4">
+                                        {/* Cut Plane Control (For IFC/3D context, though we focus on 2D now) */}
+                                        {/* <div className="bg-white p-3 rounded border shadow-sm">...</div> */}
+                                        {/* Hiding Cut Plane for simplicity unless needed */}
+
+                                        {isDrawing ? (
+                                            <div className="bg-blue-50 p-3 rounded border border-blue-200 shadow-sm animate-in zoom-in-95">
+                                                <Input
+                                                    placeholder="Name (e.g. Kitchen)"
+                                                    value={roomName}
+                                                    onChange={e => setRoomName(e.target.value)}
+                                                    className="mb-2 bg-white h-8 text-xs"
+                                                    autoFocus
+                                                />
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="text-[10px] text-blue-700 font-mono font-medium">Area: {tempArea.toFixed(2)}m²</span>
+                                                    <Button variant="ghost" size="sm" onClick={handleUndo} className="h-6 text-[10px] hover:bg-blue-100 px-2"><Undo className="w-3 h-3 mr-1" /> Undo</Button>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <Button onClick={handleSave} size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700 h-8 text-xs">Save</Button>
+                                                    <Button variant="secondary" size="sm" onClick={resetDrawing} className="h-8 text-xs">Cancel</Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <Button onClick={() => setIsDrawing(true)} className="w-full bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 shadow-sm h-9 text-xs font-semibold">
+                                                <Plus className="w-3.5 h-3.5 mr-2" /> Draw New Room
+                                            </Button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex-1 overflow-auto p-2 space-y-2 bg-slate-50">
                                 {rooms.length === 0 && (
