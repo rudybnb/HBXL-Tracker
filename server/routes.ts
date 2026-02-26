@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { DatabaseStorage } from "./database-storage";
+import * as fs from "fs";
+import * as path from "path";
 
 // Session interface for type safety
 interface SessionRequest extends Express.Request {
@@ -53,6 +55,10 @@ const jobFileStorage = multer.diskStorage({
 const uploadJobFile = multer({ storage: jobFileStorage });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Register pre-award tender routes (additive)
+  const { registerTenderRoutes } = await import("./tender-routes");
+  registerTenderRoutes(app);
+
   // TEMPORARY: One-off migration to add DXF fittings columns
   app.get("/api/migrate-dxf", async (req, res) => {
     try {
@@ -67,7 +73,241 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Stats endpoint
+
+
+  app.post("/api/upload-csv", uploadJobFile.single('csvFile'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const filePath = req.file.path;
+      console.log(`📂 Processing CSV upload: ${filePath}`);
+
+      // 1. Parse CSV to Extract Job Info
+      const { parseEnhancedCSV } = await import("./enhanced-csv-parser");
+      // Read file content
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+
+      let jobData: any = {};
+      try {
+        // Attempt enhanced parsing first
+        const parsed = parseEnhancedCSV(fileContent);
+        if (parsed && parsed.jobs && parsed.jobs.length > 0) {
+          // Use the first job found
+          const firstJob = parsed.jobs[0];
+          const cName = firstJob.name || "Unknown Client";
+          const cAddr = firstJob.address || "Unknown Address";
+          const cPCode = firstJob.postcode || "";
+
+          jobData = {
+            title: `${cName} - ${cAddr}`, // Composed Title
+            clientName: cName,
+            address: cAddr,
+            postcode: cPCode,
+            location: cPCode || "TBD",
+            projectType: firstJob.projectType || "Standard",
+            status: "active",
+            sourceFile: req.file.filename,
+            phaseTaskData: JSON.stringify({ phases: parsed.phases || {} })
+          };
+        } else {
+          // Fallback
+          console.warn("Enhanced CSV parser returned no jobs.");
+          jobData = {
+            title: `Job from ${req.file.originalname}`,
+            location: "TBD",
+            status: "active",
+            sourceFile: req.file.filename
+          };
+        }
+      } catch (parseError) {
+        console.error("CSV Parse Error:", parseError);
+        jobData = {
+          title: `Job from ${req.file.originalname}`,
+          location: "Unknown",
+          status: "active",
+          sourceFile: req.file.filename
+        };
+      }
+
+      // 2. Create Job in Database
+      const { jobs } = await import("@shared/schema");
+      const { db } = await import("./db");
+
+      const [createdJob] = await db.insert(jobs).values(jobData).returning();
+      console.log(`✅ Created Job: ${createdJob.title} (${createdJob.id})`);
+
+      // 3. Send CSV to Port 8000 (Geometry Service)
+      const projectId = createdJob.id;
+
+      const formData = new FormData();
+      const blob = new Blob([fileContent], { type: 'text/csv' });
+      formData.append('file', blob, 'hbxl_scope.csv');
+
+      console.log(`📤 Sending CSV to Port 8000 for project: ${projectId}`);
+      try {
+        const port8000Url = `http://localhost:8000/projects/${projectId}/csv`; // Corrected endpoint
+        const p8Response = await fetch(port8000Url, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (p8Response.ok) {
+          const p8Data = await p8Response.json();
+          console.log("✅ Port 8000 Processing Success:", p8Data);
+
+          // 4. Sync Packages back to Port 5000
+          console.log("🔄 Syncing Packages from Port 8000...");
+          // We can reuse the sync logic by calling the sync URL internally or replicating logic.
+          // Or just making an HTTP call to ourselves.
+          const selfSyncUrl = `http://localhost:5000/api/jobs/${projectId}/sync-packages`;
+          try {
+            const syncRes = await fetch(selfSyncUrl, { method: 'POST' });
+            if (syncRes.ok) {
+              console.log("✅ Package Sync Successful");
+            } else {
+              console.error("❌ Package Sync Failed:", await syncRes.text());
+            }
+          } catch (syncErr) {
+            console.error("❌ Package Sync Exception:", syncErr);
+          }
+
+        } else {
+          console.error("❌ Port 8000 Processing Failed:", await p8Response.text());
+          // Non-fatal? Job is created, but no packages.
+        }
+      } catch (fetchError) {
+        console.error("❌ Port 8000 Unreachable:", fetchError);
+      }
+
+      res.json({
+        success: true,
+        message: "Job created and processed",
+        upload: { id: Date.now().toString(), filename: req.file.originalname, status: "processed" },
+        jobsCreated: 1,
+        jobId: createdJob.id
+      });
+
+    } catch (e: any) {
+      console.error("Upload Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/contractor-applications", async (req, res) => {
+    try {
+      const result = await storage.getContractorApplications();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Contractor Management Endpoints
+  app.get("/api/contractors", async (req, res) => {
+    try {
+      const result = await storage.getContractors();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/contractors", async (req, res) => {
+    try {
+      // Validate or allow flexible input
+      // Schema validation handled by DB insert mainly, or add Zod parse here if needed
+      const result = await storage.createContractor(req.body);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/contractor-login", async (req, res) => {
+    try {
+      const { username } = req.body;
+      const allContractors = await storage.getContractors();
+
+      // Simple login: match Name or First Name
+      const match = allContractors.find(c =>
+        c.name.toLowerCase() === username.toLowerCase() ||
+        c.name.split(' ')[0].toLowerCase() === username.toLowerCase()
+      );
+
+      if (match) {
+        const parts = match.name.split(' ');
+        const firstName = parts[0];
+        const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
+
+        return res.json({
+          id: match.id,
+          username: match.name,
+          firstName,
+          lastName,
+          email: match.email,
+          role: 'contractor'
+        });
+      }
+
+      res.status(401).json({ error: "Invalid credentials" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  app.post("/api/debug/create-contractor", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { contractorApplications } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const email = "test@example.com";
+      const existing = await db.select().from(contractorApplications).where(eq(contractorApplications.email, email));
+
+      if (existing.length === 0) {
+        await db.insert(contractorApplications).values({
+          firstName: "Test",
+          lastName: "Contractor",
+          email: email,
+          phone: "07777777777",
+          telegramId: "@testcontractor",
+          fullAddress: "123 Test St",
+          city: "Test City",
+          postcode: "TE1 1ST",
+          cisStatus: "Gross",
+          utrNumberDetails: "1234567890",
+          bankName: "Test Bank",
+          accountHolderName: "Test Contractor",
+          sortCode: "12-34-56",
+          accountNumber: "12345678",
+          emergencyName: "Emergency Contact",
+          emergencyPhone: "07777777777",
+          relationship: "Partner",
+          primaryTrade: "Testing",
+          yearsExperience: "5",
+          status: "approved",
+          submittedAt: new Date(),
+          hasRightToWork: "true",
+          passportNumber: "123456789",
+          passportPhotoUploaded: "true",
+          hasPublicLiability: "true",
+          isCisRegistered: "true",
+          hasValidCscs: "true",
+          hasOwnTools: "true"
+        });
+        return res.json({ success: true, message: "Created Test Contractor" });
+      }
+      return res.json({ success: true, message: "Test Contractor already exists" });
+    } catch (e: any) {
+      console.error("Debug create error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Jobs
   app.get("/api/stats", async (req, res) => {
     try {
       const stats = await storage.getStats();
@@ -78,11 +318,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+  app.post("/api/debug/create-job", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { jobs } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const title = "Test Job";
+      const existing = await db.select().from(jobs).where(eq(jobs.title, title));
+
+      if (existing.length === 0) {
+        await db.insert(jobs).values({
+          title: title,
+          location: "Test Location, TE1 1ST",
+          dueDate: "01/01/2026",
+          status: "pending",
+          phases: "First Fix, Second Fix, Final Fix",
+          phaseTaskData: JSON.stringify({
+            "First Fix": [{ task: "Wiring", hours: 10 }],
+            "Second Fix": [{ task: "Sockets", hours: 5 }],
+            "Final Fix": [{ task: "Testing", hours: 2 }]
+          }),
+          contractorName: "Unassigned",
+          // Manus fields
+          clientName: "Test Client",
+          projectType: "New Build",
+          address: "1 Test Street",
+          postcode: "TE1 1ST",
+          quotedAmount: "500000",
+          financialSummary: JSON.stringify({ labour: 100, material: 50, plant: 10, subcontractor: 0, total: 160 })
+        });
+        return res.json({ success: true, message: "Created Test Job with Phases" });
+      }
+      return res.json({ success: true, message: "Test Job already exists" });
+    } catch (e: any) {
+      console.error("Debug create job error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/debug/jobs", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { jobs } = await import("@shared/schema");
+      const all = await db.select().from(jobs);
+      res.json({ count: all.length, jobs: all });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Jobs endpoints
   app.get("/api/jobs", async (req, res) => {
     try {
       const { status, search } = req.query;
+      console.log(`GET /api/jobs: Fetching... query:`, req.query);
       let jobs = await storage.getJobs();
+      console.log(`GET /api/jobs: Found ${jobs.length} jobs.`);
 
       if (status && status !== '') {
         jobs = jobs.filter(job => job.status === status);
@@ -103,6 +396,1821 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to fetch jobs" });
     }
   });
+
+  // Helper: Get External Link for Agent Workflow
+  app.get("/api/jobs/:id/external-link", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { jobs } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, req.params.id));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      const key = job.externalJobKey || job.externalCode;
+
+      const url = key
+        ? `http://localhost:8000/?project_id=${encodeURIComponent(key)}&source=jt5000`
+        : `http://localhost:8000/`;
+
+      res.json({ url });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Output of Sync Packages removed. It is handled by the new API-Driven logic below.
+  // See importFromExport and the other sync-packages definition.
+
+  // NEW: Scan for jobs from Port 8000 shared folder
+
+  // ============================================================
+  // NEW: Data Contract Import Logic (Deterministic & Idempotent)
+  // Uses GET /api/projects/:id/export (returns manifest + rooms + tender)
+  // ============================================================
+
+  // Geometry helpers for computing area/perimeter from polygon points
+  const shoelaceArea = (pts: number[][]): number => {
+    if (pts.length < 3) return 0;
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      a += pts[i][0] * pts[j][1];
+      a -= pts[j][0] * pts[i][1];
+    }
+    return Math.abs(a / 2);
+  };
+
+  const polygonPerimeter = (pts: number[][]): number => {
+    if (pts.length < 2) return 0;
+    let p = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      const dx = pts[j][0] - pts[i][0];
+      const dy = pts[j][1] - pts[i][1];
+      p += Math.sqrt(dx * dx + dy * dy);
+    }
+    return p;
+  };
+
+  // ── normaliseUnit: canonical m2 for ROOM_QTO items ──
+  const normaliseUnit = (raw: string): string => {
+    const trimmed = raw.trim().toLowerCase();
+    if (['m²', 'sqm', 'm2', 'sq m', 'square metres', 'square meters'].includes(trimmed)) {
+      return 'm2';
+    }
+    return trimmed;
+  };
+
+  // ── slugify: deterministic room key from name ──
+  const slugify = (name: string): string =>
+    (name || 'unknown').trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+
+  const importFromExport = async (exportData: any) => {
+    const { db } = await import("./db");
+    const { jobs, packages, packageItems, rooms } = await import("@shared/schema");
+    const { eq, and } = await import("drizzle-orm");
+
+    const manifest = exportData.manifest;
+    const tenderData = exportData.tender;
+    const roomsData = exportData.rooms;
+    const scopeV1 = exportData.scope_v1;
+
+    // 1. Validate: REQUIRE project_id
+    const projectId = manifest?.project_id;
+    if (!projectId) {
+      console.error("[IMPORT] REJECTED: No project_id in manifest");
+      return { success: false, reason: "missing_project_id" };
+    }
+
+    console.log(`[IMPORT] Processing project_id=${projectId}, display=${manifest.display_name}`);
+
+    // 2. Upsert Job (Strict Identity via externalJobKey = project_id)
+    let [existingJob] = await db.select().from(jobs).where(eq(jobs.externalJobKey, projectId));
+
+    // Legacy fallback: check externalCode
+    if (!existingJob) {
+      [existingJob] = await db.select().from(jobs).where(eq(jobs.externalCode, projectId));
+    }
+
+    // A3 FIX: Do NOT fall back to display_name for location.
+    // location should be the actual site address, not the client name.
+    const siteAddress = (manifest.site_address || "").trim();
+    const postcode = (manifest.postcode || "").trim();
+    const locationStr = [siteAddress, postcode].filter(Boolean).join(", ") || "";
+
+    const jobData = {
+      title: manifest.display_name || projectId.replace(/[_-]/g, ' '),
+      clientName: manifest.display_name || projectId.replace(/[_-]/g, ' '),
+      externalJobKey: projectId,
+      externalCode: projectId,
+      externalSource: "AG_8000",
+      externalManifestPath: `/api/projects/${projectId}/export`,
+      location: locationStr,
+      postcode: postcode,
+      status: "pending" as "pending",
+      dueDate: new Date().toISOString()
+    };
+
+    let jobId: string;
+    if (existingJob) {
+      jobId = existingJob.id;
+      await db.update(jobs).set(jobData).where(eq(jobs.id, jobId));
+      console.log(`[IMPORT] Updated existing job ${jobId}`);
+    } else {
+      const [newJob] = await db.insert(jobs).values(jobData).returning();
+      jobId = newJob.id;
+      console.log(`[IMPORT] Created new job ${jobId}`);
+    }
+
+    // 3. Import Rooms — A4 FIX: Use room_uid as stable key, replace imported rooms
+    let roomCount = 0;
+    const roomsList: any[] = roomsData?.rooms || [];
+
+    // Delete ALL previously imported rooms (source='IFC8000') for this job.
+    // Also delete legacy rooms with source=null that have generic names (from old imports).
+    // Manual rooms (source='MANUAL') are LEFT UNTOUCHED.
+    if (roomsList.length > 0) {
+      const { isNull, or } = await import("drizzle-orm");
+      await db.delete(rooms).where(and(
+        eq(rooms.jobId, jobId),
+        or(
+          eq(rooms.source, "IFC8000"),
+          isNull(rooms.source) // Legacy rooms from pre-fix imports
+        )
+      ));
+      console.log(`[IMPORT] Cleared previous imported/legacy rooms for job ${jobId}`);
+    }
+
+    for (const room of roomsList) {
+      // Field mapping: rooms_normalized.json uses room_name, area_m2, perimeter_m, room_uid
+      const roomName = room.room_name || room.name || `Room ${roomCount + 1}`;
+      const roomUid = room.room_uid || null;
+
+      // A1 FIX: Read area_m2 and perimeter_m (the actual field names from Port 8000)
+      let areaVal = room.area_m2 || room.area || room.floor_area || 0;
+      let perimVal = room.perimeter_m || room.perimeter || 0;
+
+      // Polygon: Port 8000 uses [[x,y],[x,y]], Port 5000 needs [{x,y},{x,y}]
+      const rawPolygon: number[][] | null = room.polygon || null;
+      let polygonForDb: string | null = null;
+
+      if (rawPolygon && Array.isArray(rawPolygon) && rawPolygon.length >= 3) {
+        // Convert [[x,y]] to [{x,y}] for Port 5000 canvas renderer
+        const objPolygon = rawPolygon.map((pt: any) => {
+          if (Array.isArray(pt)) return { x: pt[0], y: pt[1] };
+          return pt; // Already {x,y} format
+        });
+        polygonForDb = JSON.stringify(objPolygon);
+
+        // Compute area/perimeter from polygon if not provided
+        if (!areaVal || areaVal === 0) {
+          areaVal = shoelaceArea(rawPolygon);
+        }
+        if (!perimVal || perimVal === 0) {
+          perimVal = polygonPerimeter(rawPolygon);
+        }
+      }
+
+      const roomValues = {
+        jobId: jobId,
+        name: roomName,
+        area: String(Number(areaVal).toFixed(2)),
+        perimeter: String(Number(perimVal).toFixed(2)),
+        polygon: polygonForDb,
+        geometry: polygonForDb, // backwards compat
+        floor: room.storey_code || room.floor || "0",
+        status: "not_started" as string,
+        externalRoomKey: roomUid,
+        source: "IFC8000",
+        fittings: room.fittings ? JSON.stringify(room.fittings) : null,
+        fittingsSource: room.fittings_source || null,
+      };
+
+      // Always insert fresh (we deleted IFC8000 rooms above)
+      await db.insert(rooms).values(roomValues);
+      roomCount++;
+      console.log(`[IMPORT]   Room: ${roomName} (uid=${roomUid}, area=${areaVal}, perim=${perimVal})`);
+    }
+    console.log(`[IMPORT] Imported ${roomCount} rooms with polygons & metrics`);
+
+    // 4. Sync Packages from tender.rooms (each room = 1 package, keyed by room_uid)
+    let pkgCount = 0;
+    const tenderRooms: any[] = tenderData?.rooms || [];
+
+    for (const room of tenderRooms) {
+      // Use room_uid as the stable package key; fall back to ROOM_ + slug(name)
+      const roomUid = room.room_uid;
+      const originalId = roomUid
+        ? roomUid
+        : `ROOM_${slugify(room.room_name || 'unknown')}`;
+
+      // Upsert Package by originalId (stable across regenerations)
+      let [existingPkg] = await db.select().from(packages).where(and(
+        eq(packages.jobId, jobId),
+        eq(packages.originalId, originalId)
+      ));
+
+      let packageId: string;
+      const pkgValues = {
+        name: room.room_name,
+        type: 'ROOM' as string,
+        source: 'ROOM_QTO',
+        status: 'pending' as 'pending'
+      };
+
+      if (existingPkg) {
+        packageId = existingPkg.id;
+        await db.update(packages).set(pkgValues).where(eq(packages.id, packageId));
+      } else {
+        const [newPkg] = await db.insert(packages).values({
+          ...pkgValues,
+          jobId: jobId,
+          originalId: originalId
+        }).returning();
+        packageId = newPkg.id;
+      }
+
+      pkgCount++;
+
+    }
+
+    // 4.5 Sync SCOPE_ENGINE_V1 Packages if present
+    if (scopeV1 && scopeV1.packages) {
+      for (const scopePkg of scopeV1.packages) {
+        const originalId = scopePkg.external_id;
+
+        // Upsert Package
+        let [existingPkg] = await db.select().from(packages).where(and(
+          eq(packages.jobId, jobId),
+          eq(packages.originalId, originalId)
+        ));
+
+        let packageId: string;
+        const pkgValues = {
+          name: scopePkg.name,
+          type: 'ROOM' as string,
+          source: scopePkg.source || 'ROOM_SCOPE_LABOUR_V1',
+          status: 'pending' as 'pending'
+        };
+
+        if (existingPkg) {
+          packageId = existingPkg.id;
+          await db.update(packages).set(pkgValues).where(eq(packages.id, packageId));
+        } else {
+          const [newPkg] = await db.insert(packages).values({
+            ...pkgValues,
+            jobId: jobId,
+            originalId: originalId
+          }).returning();
+          packageId = newPkg.id;
+        }
+
+        pkgCount++;
+
+        // Sync Items for Scope V1
+        const currentItems = await db.select().from(packageItems).where(eq(packageItems.packageId, packageId));
+        const items = scopePkg.items || [];
+
+        for (const item of items) {
+          const desc = item.description || "Item";
+          const trade = item.trade || "General";
+          const fix = item.fix_stage || item.fix || "";
+
+          // Match by description + trade + fix + canonical_key
+          const match = currentItems.find((ci: any) =>
+            ci.description === desc && ci.trade === trade && ci.fix === fix
+          );
+
+          const itemVals = {
+            quantity: String(item.qty || 0),
+            qtyTotal: String(item.qty || 0),
+            unit: normaliseUnit(item.unit || ""),
+            trade: trade,
+            fix: fix,
+            source: item.source || "DICT",
+            unitPrice: String(item.unit_price ?? 0),
+            totalPrice: String(item.total_price ?? 0),
+            pricingSource: item.pricing_source || "unknown",
+            currency: item.currency || "GBP",
+            labourOnly: String(item.labour_only ?? true),
+            notes: item.notes || "",
+            flagsJson: item.meta_json || null
+          };
+
+          if (match) {
+            await db.update(packageItems).set(itemVals).where(eq(packageItems.id, match.id));
+          } else {
+            await db.insert(packageItems).values({
+              ...itemVals,
+              packageId: packageId,
+              description: desc,
+              completedQuantity: "0"
+            });
+          }
+        }
+      }
+    }
+
+    // 5. ADDITIVE: Sync IFC Packages from budget ledger (non-room Build Phases)
+    const ifcPackages: any[] = tenderData?.ifc_packages || [];
+    for (const ifcPkg of ifcPackages) {
+      const ifcName = ifcPkg.name || "Unknown Package";
+      const buildPhase = ifcPkg.build_phase || "";
+      const originalId = `ifc:${buildPhase}`;
+
+      let [existingIfc] = await db.select().from(packages).where(and(
+        eq(packages.jobId, jobId),
+        eq(packages.originalId, originalId)
+      ));
+
+      let ifcPackageId: string;
+      const ifcVals = {
+        name: ifcName,
+        type: 'IFC_PACKAGE' as string,
+        source: 'CSV_BOQ',
+        status: 'pending' as 'pending'
+      };
+
+      if (existingIfc) {
+        ifcPackageId = existingIfc.id;
+        await db.update(packages).set(ifcVals).where(eq(packages.id, ifcPackageId));
+      } else {
+        const [newIfc] = await db.insert(packages).values({
+          ...ifcVals,
+          jobId: jobId,
+          originalId: originalId
+        }).returning();
+        ifcPackageId = newIfc.id;
+      }
+      pkgCount++;
+
+      // Sync items from IFC package rows
+      const currentIItems = await db.select().from(packageItems).where(eq(packageItems.packageId, ifcPackageId));
+      const ifcItems: any[] = ifcPkg.items || [];
+
+      for (const row of ifcItems) {
+        const desc = row.description || "Item";
+        const trade = buildPhase;
+        const match = currentIItems.find((ci: any) => ci.description === desc && ci.trade === trade);
+
+        const iVals = {
+          quantity: String(row.qty || 0),
+          qtyTotal: String(row.qty || 0),
+          unit: "",
+          trade: trade,
+          fix: "",
+          source: "CSV",
+          unitPrice: String(row.rate || 0),
+          totalPrice: String(row.line_total || 0),
+          pricingSource: "hbxl",
+          currency: row.currency || "GBP",
+          labourOnly: String(row.resource_type === "Labour"),
+          notes: row.resource_type || "",
+          flagsJson: row.isAllowance ? {
+            allowance: true,
+            keywords: row.matchedKeywords || []
+          } : null
+        };
+
+        if (match) {
+          await db.update(packageItems).set(iVals).where(eq(packageItems.id, match.id));
+        } else {
+          await db.insert(packageItems).values({
+            ...iVals,
+            packageId: ifcPackageId,
+            description: desc,
+            completedQuantity: "0"
+          });
+        }
+      }
+    }
+
+    // 6. ADDITIVE: Sync ROOM_QTO packages (m² floor area for contractor pricing)
+    const roomQto = exportData.room_qto;
+    const rawQtoPackages: any[] = roomQto?.packages || [];
+    let qtoCount = 0;
+
+    // CLEANUP: Remove stale packages with old 'room_qto:' prefix scheme.
+    // The old code used originalId='room_qto:<uid>', now we use just '<uid>'.
+    {
+      const { like } = await import('drizzle-orm');
+      const stalePkgs = await db.select().from(packages).where(and(
+        eq(packages.jobId, jobId),
+        like(packages.originalId, 'room_qto:%')
+      ));
+      if (stalePkgs.length > 0) {
+        for (const sp of stalePkgs) {
+          await db.delete(packageItems).where(eq(packageItems.packageId, sp.id));
+        }
+        await db.delete(packages).where(and(
+          eq(packages.jobId, jobId),
+          like(packages.originalId, 'room_qto:%')
+        ));
+        console.log(`[IMPORT] ROOM_QTO: Cleaned ${stalePkgs.length} stale 'room_qto:' packages`);
+      }
+    }
+
+    // Deduplicate by stable key before processing
+    // Use SAME originalId scheme as Step 4 so ROOM_QTO upserts the packages
+    // already created from tender.rooms (avoids duplication).
+    const qtoByKey = new Map<string, any>();
+    for (const p of rawQtoPackages) {
+      const name = p.name || 'Unknown Room';
+      const eid = p.external_id || '';
+      const key = eid ? eid : `ROOM_${slugify(name)}`;
+      qtoByKey.set(key, { ...p, _originalId: key });
+    }
+    const qtoPackages = Array.from(qtoByKey.values());
+    if (rawQtoPackages.length !== qtoPackages.length) {
+      console.log(`[IMPORT] ROOM_QTO: Deduplicated ${rawQtoPackages.length} → ${qtoPackages.length} packages`);
+    }
+
+    for (const qtoPkg of qtoPackages) {
+      const qtoName = qtoPkg.name || "Unknown Room";
+      const originalId = qtoPkg._originalId;
+
+      let [existingQto] = await db.select().from(packages).where(and(
+        eq(packages.jobId, jobId),
+        eq(packages.originalId, originalId)
+      ));
+
+      let qtoPackageId: string;
+      const qtoVals = {
+        name: qtoName,
+        type: 'ROOM' as string,
+        source: 'ROOM_QTO',
+        status: 'pending' as 'pending'
+      };
+
+      if (existingQto) {
+        qtoPackageId = existingQto.id;
+        await db.update(packages).set(qtoVals).where(eq(packages.id, qtoPackageId));
+      } else {
+        const [newQto] = await db.insert(packages).values({
+          ...qtoVals,
+          jobId: jobId,
+          originalId: originalId
+        }).returning();
+        qtoPackageId = newQto.id;
+      }
+      qtoCount++;
+
+      // Replace ALL items with authoritative ROOM_QTO data.
+      // Step 4 (tender rooms) may have inserted items with different trade/fix
+      // values. ROOM_QTO is the enriched, definitive source — wipe and re-insert.
+      await db.delete(packageItems).where(eq(packageItems.packageId, qtoPackageId));
+
+      const qtoItems: any[] = qtoPkg.items || [];
+      for (const item of qtoItems) {
+        const desc = item.description || "Floor area";
+        const meta = item.meta_json || {};
+        await db.insert(packageItems).values({
+          packageId: qtoPackageId,
+          description: desc,
+          quantity: String(item.qty ?? 0),
+          qtyTotal: String(item.qty ?? 0),
+          unit: normaliseUnit(item.unit || "m2"),
+          trade: item.trade || "QTO",
+          fix: item.fix_stage || item.fix || "",
+          source: item.source || meta.source || "QTO",
+          unitPrice: "0",
+          totalPrice: "0",
+          pricingSource: "contractor",
+          currency: "GBP",
+          labourOnly: "true",
+          completedQuantity: "0",
+          notes: `Source: ${meta.source || "unknown"} | ${meta.ifcSpaceGlobalId || ""}`
+        });
+      }
+    }
+
+    if (qtoCount > 0) {
+      console.log(`[IMPORT] ROOM_QTO: synced ${qtoCount} floor-area packages`);
+      pkgCount += qtoCount;
+    }
+
+    console.log(`[IMPORT] Done: job=${jobId}, rooms=${roomCount}, packages=${pkgCount}`);
+    return { success: true, jobId, projectId, rooms: roomCount, packages: pkgCount };
+  };
+
+  // 0. DIRECT Import (accepts full export payload — bypasses Port 8000 fetch)
+  app.post("/api/import/direct", async (req, res) => {
+    try {
+      const exportData = req.body;
+      if (!exportData || !exportData.manifest) {
+        return res.status(400).json({ error: "Request body must be a full export payload with manifest" });
+      }
+      console.log(`[IMPORT-DIRECT] Importing project_id=${exportData.manifest.project_id}...`);
+      const result = await importFromExport(exportData);
+      console.log(`[IMPORT-DIRECT] Result:`, result);
+      res.json(result);
+    } catch (e: any) {
+      console.error("[IMPORT-DIRECT] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 1. Specific Import Endpoint (by project_id)
+  app.post("/api/import/geometry-project", async (req, res) => {
+    const { project_id } = req.body;
+    if (!project_id) return res.status(400).json({ error: "Missing project_id" });
+
+    console.log(`[IMPORT] Importing project_id=${project_id} from Port 8000...`);
+
+    try {
+      // Use new export endpoint
+      const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(project_id)}/export`;
+      console.log(`[IMPORT] Fetching export: ${exportUrl}`);
+      const resp = await fetch(exportUrl);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error(`[IMPORT] Export fetch failed: ${resp.status} ${errText}`);
+        return res.status(resp.status).json({ error: `Failed to fetch export from 8000: ${errText}` });
+      }
+
+      const exportData = await resp.json();
+      console.log(`[IMPORT] Export received. project_id=${exportData?.manifest?.project_id}, tender_rooms=${exportData?.tender?.rooms?.length || 0}`);
+      const result = await importFromExport(exportData);
+      console.log(`[IMPORT] Result:`, result);
+      res.json(result);
+    } catch (e: any) {
+      console.error("[IMPORT] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 2. Webhook (Triggered by 8000)
+  app.post("/api/import/from-8000", async (req, res) => {
+    const { job_key, project_id } = req.body;
+    const pid = project_id || job_key;
+    if (!pid) return res.status(400).json({ error: "Missing project_id or job_key" });
+
+    console.log(`[WEBHOOK] Triggered by 8000 for project_id=${pid}`);
+
+    try {
+      const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(pid)}/export`;
+      const resp = await fetch(exportUrl);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.error(`[WEBHOOK] Export fetch failed: ${resp.status}`);
+        return res.status(resp.status).json({ error: errText });
+      }
+      const exportData = await resp.json();
+      const result = await importFromExport(exportData);
+      console.log(`[WEBHOOK] Import result:`, result);
+      res.json(result);
+    } catch (e: any) {
+      console.error("[WEBHOOK] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 3. Scan & Import All (API-Driven — uses new /api/projects endpoint, no folder heuristics)
+  app.post("/api/jobs/scan-from-8000", async (req, res) => {
+    try {
+      // 1. List Projects from 8000 using NEW strict endpoint
+      console.log("[SCAN] Listing projects via http://localhost:8000/api/projects...");
+      const listResp = await fetch("http://localhost:8000/api/projects");
+      if (!listResp.ok) return res.status(502).json({ error: "Cannot connect to Geometry Service (Port 8000)" });
+
+      const projects: any[] = await listResp.json();
+      console.log(`[SCAN] Found ${projects.length} valid projects on Port 8000.`);
+
+      // Optional: only import specific project_id if provided in body
+      const { project_id } = req.body || {};
+
+      const results: any[] = [];
+      let imported = 0;
+      let errors = 0;
+
+      const toImport = project_id
+        ? projects.filter((p: any) => p.project_id === project_id)
+        : projects;
+
+      if (project_id && toImport.length === 0) {
+        return res.status(404).json({ error: `Project ${project_id} not found on Port 8000` });
+      }
+
+      for (const p of toImport) {
+        const pid = p.project_id;
+        if (!pid) {
+          console.warn(`[SCAN] Skipping project with no project_id`);
+          continue;
+        }
+
+        console.log(`[SCAN] Importing project: ${pid} (${p.display_name})...`);
+
+        try {
+          const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(pid)}/export`;
+          const exportResp = await fetch(exportUrl);
+          if (!exportResp.ok) {
+            console.error(`[SCAN] Export fetch failed for ${pid}: ${exportResp.status}`);
+            errors++;
+            results.push({ project_id: pid, success: false, error: `export fetch ${exportResp.status}` });
+            continue;
+          }
+
+          const exportData = await exportResp.json();
+          const result = await importFromExport(exportData);
+          results.push({ project_id: pid, ...result });
+
+          if (result.success) {
+            imported++;
+          } else {
+            errors++;
+          }
+        } catch (e: any) {
+          console.error(`[SCAN] Error importing ${pid}:`, e.message);
+          errors++;
+          results.push({ project_id: pid, success: false, error: e.message });
+        }
+      }
+
+      const msg = project_id
+        ? `Imported project ${project_id}. Packages: ${results[0]?.packages ?? 0}.`
+        : `Scanned ${projects.length} projects. Imported ${imported}. Errors: ${errors}.`;
+
+      // CLEANUP: Delete ghost/orphan jobs that are NOT in the valid project list
+      if (!project_id) {
+        try {
+          const { db } = await import("./db");
+          const { jobs, packages, packageItems, rooms } = await import("@shared/schema");
+          const { eq, isNull, or, notInArray, and, sql } = await import("drizzle-orm");
+
+          const validProjectIds = projects.map((p: any) => p.project_id).filter(Boolean);
+          console.log(`[CLEANUP] Valid project IDs: ${validProjectIds.join(', ')}`);
+
+          // Find all AG_8000 jobs
+          const allAGJobs = await db.select().from(jobs).where(eq(jobs.externalSource, "AG_8000"));
+
+          const ghostJobs = allAGJobs.filter(j => {
+            // Ghost if no externalJobKey
+            if (!j.externalJobKey) return true;
+            // Ghost if externalJobKey not in valid projects
+            if (!validProjectIds.includes(j.externalJobKey)) return true;
+            // Ghost if title is just "-" or looks like CSV header
+            if (j.title === "-" || j.title === " - " || (j.title && j.title.includes(",") && j.title.includes("Address"))) return true;
+            return false;
+          });
+
+          if (ghostJobs.length > 0) {
+            console.log(`[CLEANUP] Found ${ghostJobs.length} ghost jobs to delete:`);
+            for (const ghost of ghostJobs) {
+              console.log(`[CLEANUP]   Deleting: ${ghost.id} title="${ghost.title}" extKey="${ghost.externalJobKey}"`);
+
+              // Delete package items -> packages -> rooms -> job
+              const ghostPkgs = await db.select().from(packages).where(eq(packages.jobId, ghost.id));
+              for (const pkg of ghostPkgs) {
+                await db.delete(packageItems).where(eq(packageItems.packageId, pkg.id));
+              }
+              await db.delete(packages).where(eq(packages.jobId, ghost.id));
+              await db.delete(rooms).where(eq(rooms.jobId, ghost.id));
+              await db.delete(jobs).where(eq(jobs.id, ghost.id));
+            }
+            console.log(`[CLEANUP] Deleted ${ghostJobs.length} ghost jobs.`);
+          } else {
+            console.log(`[CLEANUP] No ghost jobs found. DB is clean.`);
+          }
+        } catch (cleanupErr: any) {
+          console.error(`[CLEANUP] Error during cleanup (non-fatal):`, cleanupErr.message);
+        }
+      }
+
+      console.log(`[SCAN] Complete: ${msg}`);
+      res.json({ success: true, count: projects.length, imported, errors, results, message: msg });
+    } catch (e: any) {
+      console.error("[SCAN] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 4. Sync Packages for a specific Job (finds external key, fetches export, imports)
+  app.post("/api/jobs/:id/sync-packages", async (req, res) => {
+    const dbMod = await import("./db");
+    const schema = await import("@shared/schema");
+    const eqFn = (await import("drizzle-orm")).eq;
+
+    const [job] = await dbMod.db.select().from(schema.jobs).where(eqFn(schema.jobs.id, req.params.id));
+    if (!job) return res.status(404).json({ error: "Job not found" });
+
+    const p8Id = job.externalJobKey || job.externalCode;
+    if (!p8Id) return res.status(400).json({
+      error: "Job has no external link (externalJobKey). Import it first via 'Sync from Port 8000'.",
+      jobId: job.id,
+      jobKey: null
+    });
+
+    console.log(`[SYNC-PKG] Syncing packages for job ${req.params.id} (external: ${p8Id})...`);
+
+    try {
+      const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(p8Id)}/export?mode=SCOPE_ENGINE_V1`;
+      const resp = await fetch(exportUrl);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        return res.status(resp.status).json({ error: `Failed to fetch export: ${errText}` });
+      }
+
+      const exportData = await resp.json();
+      const result = await importFromExport(exportData);
+      console.log(`[SYNC-PKG] Result:`, result);
+      res.json(result);
+    } catch (e: any) {
+      console.error("[SYNC-PKG] Error:", e);
+      res.status(500).json({ error: e.message });
+
+    }
+  });
+
+
+  // GET Packages for a Job
+  app.get("/api/jobs/:id/packages", async (req, res) => {
+    try {
+      const { packages: packagesTable, packageItems } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, inArray } = await import("drizzle-orm");
+
+      const jobId = req.params.id;
+      if (!jobId) return res.status(400).json({ error: "Missing Job ID" });
+
+      // Return DB Packages
+      const pkgs = await db.select().from(packagesTable).where(eq(packagesTable.jobId, jobId));
+
+      // Admin grouped view: ?grouped=true returns ROOM vs IFC_PACKAGE with items + budget
+      if (req.query.grouped === 'true') {
+        let itemList: any[] = [];
+        if (pkgs.length > 0) {
+          const pkgIds = pkgs.map(p => p.id);
+          itemList = await db.select().from(packageItems).where(inArray(packageItems.packageId, pkgIds));
+        }
+
+        const roomPkgs = pkgs.filter((p: any) => !p.type || p.type === 'ROOM');
+        const ifcPkgs = pkgs.filter((p: any) => p.type === 'IFC_PACKAGE');
+
+        const attachItems = (pkg: any) => ({
+          ...pkg,
+          items: itemList.filter(i => i.packageId === pkg.id)
+        });
+
+        // Budget summary from IFC packages
+        let budgetSummary = { labour: 0, material: 0, plant: 0, total: 0 };
+        ifcPkgs.forEach((pkg: any) => {
+          const items = itemList.filter(i => i.packageId === pkg.id);
+          items.forEach((item: any) => {
+            const total = parseFloat(item.totalPrice || '0');
+            const notes = (item.notes || '').toLowerCase();
+            if (notes.includes('labour')) budgetSummary.labour += total;
+            else if (notes.includes('plant')) budgetSummary.plant += total;
+            else budgetSummary.material += total;
+            budgetSummary.total += total;
+          });
+        });
+
+        return res.json({
+          jobId,
+          roomPackages: roomPkgs.map(attachItems),
+          ifcPackages: ifcPkgs.map(attachItems),
+          budgetSummary,
+          totalPackages: pkgs.length,
+          totalRoomPackages: roomPkgs.length,
+          totalIfcPackages: ifcPkgs.length
+        });
+      }
+
+      // Default: flat list (backwards compatible)
+      res.json(pkgs);
+    } catch (e: any) {
+      console.error("Get Packages Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============================================================
+  // TENDER DATA: Admin Tender View (Room items + Budget Ledger)
+  // ============================================================
+  app.get("/api/jobs/:id/tender-data", async (req, res) => {
+    try {
+      const { packages: packagesTable, packageItems, jobs } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, inArray } = await import("drizzle-orm");
+
+      const jobId = req.params.id;
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      // Get all packages
+      const allPkgs = await db.select().from(packagesTable).where(eq(packagesTable.jobId, jobId));
+      const roomPkgs = allPkgs.filter((p: any) => !p.type || p.type === 'ROOM');
+      const budgetPkgs = allPkgs.filter((p: any) => p.type === 'IFC_PACKAGE');
+
+      // Get all items
+      let allItems: any[] = [];
+      if (allPkgs.length > 0) {
+        const pkgIds = allPkgs.map(p => p.id);
+        allItems = await db.select().from(packageItems).where(inArray(packageItems.packageId, pkgIds));
+      }
+
+      // Build room tender structure (Items grouped by Fix type)
+      const roomTender = roomPkgs.map(pkg => {
+        const items = allItems.filter(i => i.packageId === pkg.id);
+
+        // Group items by fix type
+        const firstFixItems = items.filter(i => (i.fix || '').toLowerCase().includes('first'));
+        const secondFixItems = items.filter(i => (i.fix || '').toLowerCase().includes('second'));
+        const otherItems = items.filter(i => {
+          const fix = (i.fix || '').toLowerCase();
+          return !fix.includes('first') && !fix.includes('second');
+        });
+
+        // Calculate subtotals
+        const calcSubtotal = (list: any[]) => list.reduce((sum, i) => {
+          const qty = parseFloat(i.quantity) || 0;
+          const up = parseFloat(i.unitPrice) || 0;
+          return sum + (qty * up);
+        }, 0);
+
+        const firstFixTotal = Math.round(calcSubtotal(firstFixItems) * 100) / 100;
+        const secondFixTotal = Math.round(calcSubtotal(secondFixItems) * 100) / 100;
+        const otherTotal = Math.round(calcSubtotal(otherItems) * 100) / 100;
+        const roomTotal = Math.round((firstFixTotal + secondFixTotal + otherTotal) * 100) / 100;
+
+        const formatItems = (list: any[]) => list.map(i => ({
+          id: i.id,
+          description: i.description,
+          qty: parseFloat(i.quantity) || 0,
+          unit: i.unit || '',
+          unitPrice: parseFloat(i.unitPrice) || 0,
+          totalPrice: Math.round((parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0) * 100) / 100,
+          completedQty: parseFloat(i.completedQuantity) || 0,
+          trade: i.trade || '',
+          fix: i.fix || '',
+          pricingSource: i.pricingSource || 'MANUAL_REQUIRED',
+          source: i.source || '',
+        }));
+
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          type: pkg.type,
+          sections: [
+            { title: "First Fix", items: formatItems(firstFixItems), subtotal: firstFixTotal },
+            { title: "Second Fix", items: formatItems(secondFixItems), subtotal: secondFixTotal },
+            ...(otherItems.length > 0 ? [{ title: "Other", items: formatItems(otherItems), subtotal: otherTotal }] : [])
+          ],
+          roomTotal
+        };
+      });
+
+      // Build budget phases summary
+      const budgetPhases = budgetPkgs.map(pkg => {
+        const items = allItems.filter(i => i.packageId === pkg.id);
+        let labour = 0, material = 0, plant = 0;
+        items.forEach(i => {
+          const total = parseFloat(i.totalPrice || i.total || '0');
+          const notes = (i.notes || i.trade || '').toLowerCase();
+          const desc = (i.description || '').toLowerCase();
+          if (notes.includes('labour') || desc.includes('hours')) labour += total;
+          else if (notes.includes('plant') || desc.includes('week') || desc.includes('day')) plant += total;
+          else material += total;
+        });
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          itemCount: items.length,
+          labour: Math.round(labour * 100) / 100,
+          material: Math.round(material * 100) / 100,
+          plant: Math.round(plant * 100) / 100,
+          total: Math.round((labour + material + plant) * 100) / 100
+        };
+      });
+
+      // Get budget ledger from job if stored
+      const budgetLedger = (job as any).budgetLedger ? JSON.parse((job as any).budgetLedger) : null;
+
+      // Calculate totals
+      const tenderTotal = roomTender.reduce((s, r) => s + r.roomTotal, 0);
+      const budgetTotal = budgetLedger ? budgetLedger.totals.grand : budgetPhases.reduce((s, p) => s + p.total, 0);
+      const variance = Math.round((tenderTotal - budgetTotal) * 100) / 100;
+
+      res.json({
+        jobId,
+        jobTitle: job.title,
+        roomTender,
+        budgetPhases,
+        budgetLedger,
+        summary: {
+          tenderTotal: Math.round(tenderTotal * 100) / 100,
+          budgetTotal: Math.round(budgetTotal * 100) / 100,
+          variance,
+          labourTotal: budgetLedger?.totals?.labour || budgetPhases.reduce((s, p) => s + p.labour, 0),
+          materialTotal: budgetLedger?.totals?.material || budgetPhases.reduce((s, p) => s + p.material, 0),
+          plantTotal: budgetLedger?.totals?.plant || budgetPhases.reduce((s, p) => s + p.plant, 0),
+        },
+        roomCount: roomTender.length,
+        budgetPhaseCount: budgetPhases.length,
+      });
+    } catch (e: any) {
+      console.error("Get Tender Data Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============================================================
+  // TENDER LIFECYCLE ENDPOINTS
+  // ============================================================
+
+  // GET /api/job-assignments/:id/tender — Contractor tender view (ROOM + IFC_PACKAGE + assignment pricing)
+  app.get("/api/job-assignments/:id/tender", async (req, res) => {
+    try {
+      const { jobAssignments, packages: packagesTable, packageItems, assignmentTenderItems } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, inArray, and } = await import("drizzle-orm");
+
+      const assignmentId = req.params.id;
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, assignmentId));
+      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+      const jobId = assignment.jobId;
+      if (!jobId) return res.status(400).json({ error: "Assignment has no jobId" });
+
+      const allPkgs = await db.select().from(packagesTable).where(eq(packagesTable.jobId, jobId));
+      const assignedPkgIds = assignment.assignedPackages || [];
+
+      // ── ROOM packages: prefer assigned, fallback to all ROOM ──
+      let roomPkgs = allPkgs.filter((p: any) =>
+        (!p.type || p.type === 'ROOM') &&
+        (assignedPkgIds.length === 0 || assignedPkgIds.includes(p.id))
+      );
+      if (roomPkgs.length === 0) {
+        roomPkgs = allPkgs.filter((p: any) => !p.type || p.type === 'ROOM');
+      }
+
+      // ── IFC / BUDGET packages: include assigned ones, or all if none assigned ──
+      let ifcPkgs = allPkgs.filter((p: any) =>
+        p.type === 'IFC_PACKAGE' &&
+        (assignedPkgIds.length === 0 || assignedPkgIds.includes(p.id))
+      );
+      if (ifcPkgs.length === 0 && assignedPkgIds.length === 0) {
+        ifcPkgs = allPkgs.filter((p: any) => p.type === 'IFC_PACKAGE');
+      }
+
+      const combinedPkgs = [...roomPkgs, ...ifcPkgs];
+      if (combinedPkgs.length === 0) return res.json({ assignmentId, tenderStatus: assignment.tenderStatus || 'DRAFT', packages: [], ifcPackages: [] });
+
+      // Get all items for ALL packages (room + ifc)
+      const pkgIds = combinedPkgs.map(p => p.id);
+      const allItems = await db.select().from(packageItems).where(inArray(packageItems.packageId, pkgIds));
+
+      // Get assignment-scoped pricing overrides
+      const itemIds = allItems.map(i => i.id);
+      let tenderPrices: any[] = [];
+      if (itemIds.length > 0) {
+        tenderPrices = await db.select().from(assignmentTenderItems)
+          .where(and(
+            eq(assignmentTenderItems.assignmentId, assignmentId),
+            inArray(assignmentTenderItems.packageItemId, itemIds)
+          ));
+      }
+      const priceMap = new Map(tenderPrices.map(tp => [tp.packageItemId, tp]));
+
+      // Helper: format items with merged pricing
+      const formatItems = (list: any[]) => list.map(i => {
+        const override = priceMap.get(i.id);
+        const qty = parseFloat(i.quantity) || 0;
+        const basePrice = parseFloat(i.unitPrice) || 0;
+        // Use override if present, otherwise fallback to budget price for direct assignments
+        const unitPrice = override ? (parseFloat(override.unitPrice) || 0) : basePrice;
+        const totalPrice = Math.round(qty * unitPrice * 100) / 100;
+        return {
+          id: i.id,
+          description: i.description,
+          qty,
+          unit: i.unit || '',
+          trade: i.trade || '',
+          fix: i.fix || '',
+          unitPrice,
+          totalPrice,
+          hasOverride: !!override,
+          budgetRate: basePrice,
+          budgetTotal: Math.round(qty * basePrice * 100) / 100,
+          notes: i.notes || '',
+        };
+      });
+
+      const calcSubtotal = (list: any[]) => list.reduce((s: number, i: any) => s + i.totalPrice, 0);
+
+      // ── Build ROOM packages → sections (First Fix / Second Fix) ──
+      const pkgData = roomPkgs.map(pkg => {
+        const items = allItems.filter(i => i.packageId === pkg.id);
+        const firstFixItems = items.filter(i => (i.fix || '').toLowerCase().includes('first'));
+        const secondFixItems = items.filter(i => (i.fix || '').toLowerCase().includes('second'));
+        const otherItems = items.filter(i => {
+          const fix = (i.fix || '').toLowerCase();
+          return !fix.includes('first') && !fix.includes('second');
+        });
+
+        const ffi = formatItems(firstFixItems);
+        const sfi = formatItems(secondFixItems);
+        const oi = formatItems(otherItems);
+
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          type: pkg.type || 'ROOM',
+          sections: [
+            { title: "First Fix", items: ffi, subtotal: Math.round(calcSubtotal(ffi) * 100) / 100 },
+            { title: "Second Fix", items: sfi, subtotal: Math.round(calcSubtotal(sfi) * 100) / 100 },
+            ...(oi.length > 0 ? [{ title: "Other", items: oi, subtotal: Math.round(calcSubtotal(oi) * 100) / 100 }] : [])
+          ],
+          roomTotal: Math.round((calcSubtotal(ffi) + calcSubtotal(sfi) + calcSubtotal(oi)) * 100) / 100,
+        };
+      });
+
+      // ── Build IFC/BUDGET packages → flat items (no fix sections) ──
+      const ifcData = ifcPkgs.map(pkg => {
+        const items = allItems.filter(i => i.packageId === pkg.id);
+        const formatted = formatItems(items);
+        const pkgTotal = Math.round(calcSubtotal(formatted) * 100) / 100;
+        const budgetTotal = Math.round(formatted.reduce((s, i) => s + i.budgetTotal, 0) * 100) / 100;
+
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          type: 'IFC_PACKAGE',
+          items: formatted,
+          packageTotal: pkgTotal,
+          budgetTotal,
+        };
+      });
+
+      const roomTotal = Math.round(pkgData.reduce((s, p) => s + p.roomTotal, 0) * 100) / 100;
+      const ifcTotal = Math.round(ifcData.reduce((s, p) => s + p.packageTotal, 0) * 100) / 100;
+      const tenderTotal = Math.round((roomTotal + ifcTotal) * 100) / 100;
+
+      res.json({
+        assignmentId,
+        contractorName: assignment.contractorName,
+        tenderStatus: assignment.tenderStatus || 'DRAFT',
+        packages: pkgData,
+        ifcPackages: ifcData,
+        tenderTotal,
+        roomTotal,
+        ifcTotal,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/assignment-items/:itemId/unit-price — Save contractor pricing (assignment-scoped)
+  app.patch("/api/assignment-items/:itemId/unit-price", async (req, res) => {
+    try {
+      const { assignmentTenderItems, jobAssignments, packageItems } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, and } = await import("drizzle-orm");
+
+      const { itemId } = req.params;
+      const { unitPrice, assignmentId } = req.body;
+
+      if (!assignmentId) return res.status(400).json({ error: "assignmentId is required" });
+      if (unitPrice === undefined) return res.status(400).json({ error: "unitPrice is required" });
+
+      const numPrice = parseFloat(unitPrice);
+      if (isNaN(numPrice) || numPrice < 0) return res.status(400).json({ error: "unitPrice must be a valid number >= 0" });
+
+      // Verify assignment exists and is in SENT_FOR_PRICING state
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, assignmentId));
+      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+      if ((assignment.tenderStatus || 'DRAFT') !== 'SENT_FOR_PRICING') {
+        return res.status(403).json({ error: `Cannot edit prices — tender status is '${assignment.tenderStatus}', must be 'SENT_FOR_PRICING'` });
+      }
+
+      // Verify item exists
+      const [item] = await db.select().from(packageItems).where(eq(packageItems.id, itemId));
+      if (!item) return res.status(404).json({ error: "Package item not found" });
+
+      const qty = parseFloat(item.quantity || '0');
+      const totalPrice = Math.round(qty * numPrice * 100) / 100;
+
+      // Upsert into assignment_tender_items
+      const existing = await db.select().from(assignmentTenderItems)
+        .where(and(
+          eq(assignmentTenderItems.assignmentId, assignmentId),
+          eq(assignmentTenderItems.packageItemId, itemId)
+        ));
+
+      if (existing.length > 0) {
+        await db.update(assignmentTenderItems).set({
+          unitPrice: String(numPrice),
+          totalPrice: String(totalPrice),
+          updatedAt: new Date(),
+        }).where(eq(assignmentTenderItems.id, existing[0].id));
+      } else {
+        await db.insert(assignmentTenderItems).values({
+          assignmentId,
+          packageItemId: itemId,
+          unitPrice: String(numPrice),
+          totalPrice: String(totalPrice),
+        });
+      }
+
+      res.json({ success: true, itemId, unitPrice: numPrice, totalPrice, qty });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/job-assignments/:id/send-for-pricing — Admin releases tender to contractor
+  app.post("/api/job-assignments/:id/send-for-pricing", async (req, res) => {
+    try {
+      const { jobAssignments } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, req.params.id));
+      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+      const currentStatus = assignment.tenderStatus || 'DRAFT';
+      if (currentStatus !== 'DRAFT') {
+        return res.status(400).json({ error: `Cannot send for pricing — current status is '${currentStatus}', must be 'DRAFT'` });
+      }
+
+      await db.update(jobAssignments).set({
+        tenderStatus: 'SENT_FOR_PRICING',
+        updatedAt: new Date(),
+      }).where(eq(jobAssignments.id, req.params.id));
+
+      res.json({ success: true, tenderStatus: 'SENT_FOR_PRICING' });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/job-assignments/:id/submit-tender — Contractor submits completed tender
+  app.post("/api/job-assignments/:id/submit-tender", async (req, res) => {
+    try {
+      const { jobAssignments, assignmentTenderItems, packageItems, packages: packagesTable } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, inArray, and } = await import("drizzle-orm");
+
+      const assignmentId = req.params.id;
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, assignmentId));
+      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+      const currentStatus = assignment.tenderStatus || 'DRAFT';
+      if (currentStatus !== 'SENT_FOR_PRICING') {
+        return res.status(400).json({ error: `Cannot submit — current status is '${currentStatus}', must be 'SENT_FOR_PRICING'` });
+      }
+
+      const jobId = assignment.jobId;
+      if (!jobId) return res.status(400).json({ error: "Assignment has no jobId" });
+
+      const allPkgs = await db.select().from(packagesTable).where(eq(packagesTable.jobId, jobId));
+      const roomPkgs = allPkgs.filter((p: any) => !p.type || p.type === 'ROOM');
+      const pkgIds = roomPkgs.map(p => p.id);
+
+      let allItems: any[] = [];
+      if (pkgIds.length > 0) {
+        allItems = await db.select().from(packageItems).where(inArray(packageItems.packageId, pkgIds));
+      }
+
+      const tenderPrices = await db.select().from(assignmentTenderItems)
+        .where(eq(assignmentTenderItems.assignmentId, assignmentId));
+      const pricedSet = new Set(tenderPrices.map(tp => tp.packageItemId));
+      const unpricedItems = allItems.filter(i => !pricedSet.has(i.id));
+
+      const total = tenderPrices.reduce((s, tp) => s + (parseFloat(tp.totalPrice || '0')), 0);
+
+      await db.update(jobAssignments).set({
+        tenderStatus: 'SUBMITTED',
+        updatedAt: new Date(),
+      }).where(eq(jobAssignments.id, assignmentId));
+
+      res.json({
+        success: true,
+        tenderStatus: 'SUBMITTED',
+        totalItems: allItems.length,
+        pricedItems: pricedSet.size,
+        unpricedItems: unpricedItems.length,
+        tenderTotal: Math.round(total * 100) / 100,
+        warnings: unpricedItems.length > 0
+          ? [`${unpricedItems.length} items have no unit price (treated as £0.00)`]
+          : [],
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/job-assignments/:id/approve-tender — Admin approves submitted tender
+  app.post("/api/job-assignments/:id/approve-tender", async (req, res) => {
+    try {
+      const { jobAssignments } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, req.params.id));
+      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+      const currentStatus = assignment.tenderStatus || 'DRAFT';
+      if (currentStatus !== 'SUBMITTED') {
+        return res.status(400).json({ error: `Cannot approve — current status is '${currentStatus}', must be 'SUBMITTED'` });
+      }
+
+      await db.update(jobAssignments).set({
+        tenderStatus: 'APPROVED',
+        updatedAt: new Date(),
+      }).where(eq(jobAssignments.id, req.params.id));
+
+      res.json({ success: true, tenderStatus: 'APPROVED' });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============================================================
+  // PARSE CSV: Upload and parse HBXL CSV into budget ledger
+  // ============================================================
+  app.post("/api/jobs/:id/parse-csv", async (req, res) => {
+    try {
+      const { jobs } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+      const { parseHBXLCSV } = await import("./csv-budget-parser");
+      const fs = await import("fs");
+      const path = await import("path");
+
+      const jobId = req.params.id;
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      // Try to find CSV: either from request body or from known path
+      let csvContent = '';
+
+      if (req.body?.csvContent) {
+        csvContent = req.body.csvContent;
+      } else {
+        // Try to find HBXL CSV in the shared input folder
+        const csvPath = path.resolve('c:/Users/rudyb/Sculpt Drawings Upload/server/input/hbxl_scope.csv');
+        if (fs.existsSync(csvPath)) {
+          csvContent = fs.readFileSync(csvPath, 'utf-8');
+        } else {
+          return res.status(400).json({ error: "No CSV content provided and no CSV found in shared folder" });
+        }
+      }
+
+      const ledger = parseHBXLCSV(csvContent);
+
+      // Store on job record
+      await db.update(jobs).set({
+        budgetLedger: JSON.stringify(ledger)
+      } as any).where(eq(jobs.id, jobId));
+
+      console.log(`[CSV] Parsed ${ledger.lineCount} lines for job ${jobId}. Totals: L=${ledger.totals.labour} M=${ledger.totals.material} P=${ledger.totals.plant} G=${ledger.totals.grand}`);
+
+      res.json({
+        success: true,
+        lineCount: ledger.lineCount,
+        errorCount: ledger.errorCount,
+        totals: ledger.totals,
+        phaseSummaries: ledger.phaseSummaries,
+        clientName: ledger.clientName,
+      });
+    } catch (e: any) {
+      console.error("Parse CSV Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ============================================================
+  // UPDATE UNIT PRICE: Contractor or Admin sets price on an item
+  // ============================================================
+  app.patch("/api/package-items/:id/unit-price", async (req, res) => {
+    try {
+      const { packageItems } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+
+      const itemId = req.params.id;
+      const { unitPrice, pricingSource } = req.body;
+
+      if (unitPrice === undefined) {
+        return res.status(400).json({ error: "unitPrice is required" });
+      }
+
+      const numPrice = parseFloat(unitPrice);
+      if (isNaN(numPrice)) {
+        return res.status(400).json({ error: "unitPrice must be a valid number" });
+      }
+
+      // Fetch item to calculate total
+      const [item] = await db.select().from(packageItems).where(eq(packageItems.id, itemId));
+      if (!item) return res.status(404).json({ error: "Item not found" });
+
+      const qty = parseFloat(item.quantity || '0');
+      const totalPrice = Math.round(qty * numPrice * 100) / 100;
+
+      await db.update(packageItems).set({
+        unitPrice: String(numPrice),
+        totalPrice: String(totalPrice),
+        pricingSource: pricingSource || 'manual',
+        currency: 'GBP',
+      }).where(eq(packageItems.id, itemId));
+
+      res.json({
+        success: true,
+        itemId,
+        unitPrice: numPrice,
+        totalPrice,
+        qty,
+      });
+    } catch (e: any) {
+      console.error("Update Unit Price Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Update Package Item Progress (Contractor)
+
+
+  // Update Package Item Progress (Contractor)
+  app.post("/api/package-items/:id/progress", async (req, res) => {
+    try {
+      const { packageItems, progressLogs } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq } = await import("drizzle-orm");
+
+      const itemId = req.params.id;
+      const { completedQuantity } = req.body; // e.g. 5
+
+      if (completedQuantity === undefined) return res.status(400).json({ error: "Missing completedQuantity" });
+
+      const [item] = await db.select().from(packageItems).where(eq(packageItems.id, itemId));
+      if (!item) return res.status(404).json({ error: "Item not found" });
+
+      const oldQty = parseFloat(item.completedQuantity || "0");
+      const newQty = parseFloat(String(completedQuantity));
+      const delta = newQty - oldQty;
+
+      // Update Item
+      await db.update(packageItems)
+        .set({ completedQuantity: String(newQty) })
+        .where(eq(packageItems.id, itemId));
+
+      // Log Progress for History (if changed)
+      if (delta !== 0) {
+        await db.insert(progressLogs).values({
+          packageItemId: itemId,
+          qtyDone: String(delta),
+          note: "Contractor update",
+          // createdAt not needed as defaultNow() handles it
+        });
+      }
+
+      res.json({ success: true, old: oldQty, new: newQty, delta });
+    } catch (e: any) {
+      console.error("Progress Update Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get Job Assignment Details (for Contractor App - Granular Tasks)
+  app.get("/api/job-assignments/:id/details", async (req, res) => {
+    try {
+      const { jobAssignments, packages, packageItems } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { eq, inArray } = await import("drizzle-orm");
+
+      const assignmentId = req.params.id;
+      const [assignment] = await db.select().from(jobAssignments).where(eq(jobAssignments.id, assignmentId));
+
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+
+      // Fetch Packages
+      let packageList = [];
+      let itemList = [];
+
+      // 1. Resolve Job ID (Always try, helpful for fallback)
+      let targetJobId = (assignment as any).jobId;
+      if (!targetJobId && assignment.hbxlJob) {
+        const { jobs } = await import("@shared/schema");
+        const allJobs = await db.select().from(jobs);
+        const searchKey = assignment.hbxlJob.trim().toLowerCase();
+
+        const jobByTitle = allJobs.find(j => j.title.trim().toLowerCase() === searchKey);
+        if (jobByTitle) {
+          targetJobId = jobByTitle.id;
+        } else {
+          const jobByCode = allJobs.find(j => j.externalCode && j.externalCode.trim().toLowerCase() === searchKey);
+          if (jobByCode) {
+            targetJobId = jobByCode.id;
+          } else {
+            const jobPartial = allJobs.find(j => j.title.trim().toLowerCase().includes(searchKey) || searchKey.includes(j.title.trim().toLowerCase()));
+            if (jobPartial) targetJobId = jobPartial.id;
+          }
+        }
+      }
+
+      if (targetJobId) {
+        console.log(`[DEBUG] Resolved Job ID: ${targetJobId}`);
+      } else {
+        console.warn(`[DEBUG] Could not resolve Job ID for assignment ${assignmentId}`);
+      }
+
+      // 2. Fetch Packages
+      const pkgIds = assignment.assignedPackages || [];
+
+      if (pkgIds.length > 0) {
+        // Try ID match first
+        packageList = await db.select().from(packages).where(inArray(packages.id, pkgIds));
+
+        // If mismatch and we have a Job ID, try matching by NAME (Legacy/UI issue support)
+        if (packageList.length === 0 && targetJobId) {
+          console.log(`[DEBUG] No packages found by ID. Trying Name match for Job ${targetJobId} with:`, pkgIds);
+          const jobPackages = await db.select().from(packages).where(eq(packages.jobId, targetJobId));
+          packageList = jobPackages.filter(p => pkgIds.includes(p.name));
+        }
+
+        if (packageList.length > 0) {
+          const foundIds = packageList.map(p => p.id);
+          itemList = await db.select().from(packageItems).where(inArray(packageItems.packageId, foundIds));
+        }
+      } else if (targetJobId) {
+        // Fallback: No specific packages assigned, return ALL for job
+        packageList = await db.select().from(packages).where(eq(packages.jobId, targetJobId));
+        if (packageList.length > 0) {
+          const allPkgIds = packageList.map(p => p.id);
+          itemList = await db.select().from(packageItems).where(inArray(packageItems.packageId, allPkgIds));
+        }
+      }
+
+      // FILTER: Contractor app only sees ROOM packages.
+      // IFC_PACKAGE types (Foundations, External Walls, etc.) are internal budget phases
+      // with items like "Bricklayer (Hours)", "Wheelbarrow (Week)" — not contractor tasks.
+      // Admin can request full dataset with ?includeBudget=true
+      const includeBudget = req.query.includeBudget === 'true';
+
+      // Admin: return ALL packages for the job (ROOM + IFC_PACKAGE)
+      if (includeBudget && targetJobId) {
+        const allJobPkgs = await db.select().from(packages).where(eq(packages.jobId, targetJobId));
+        if (allJobPkgs.length > 0) {
+          packageList = allJobPkgs;
+          const allIds = allJobPkgs.map(p => p.id);
+          itemList = await db.select().from(packageItems).where(inArray(packageItems.packageId, allIds));
+        }
+      }
+
+      let filteredPackages = includeBudget
+        ? packageList  // Admin: ALL packages (already fetched above)
+        : packageList.filter((p: any) => !p.type || p.type === 'ROOM'); // Contractor: ROOM only
+
+      // FALLBACK: If assigned packages were all IFC_PACKAGE (stale/wrong assignment),
+      // and the job has ROOM packages, return ALL ROOM packages for the job instead.
+      if (!includeBudget && filteredPackages.length === 0 && targetJobId) {
+        console.log(`[DEBUG] Assignment ${assignmentId} has 0 ROOM packages after filter. Falling back to ALL ROOM packages for job ${targetJobId}`);
+        const allJobPkgs = await db.select().from(packages).where(eq(packages.jobId, targetJobId));
+        const roomPkgs = allJobPkgs.filter((p: any) => !p.type || p.type === 'ROOM');
+        if (roomPkgs.length > 0) {
+          filteredPackages = roomPkgs;
+          // Also fetch items for the fallback packages
+          const fallbackIds = roomPkgs.map(p => p.id);
+          itemList = await db.select().from(packageItems).where(inArray(packageItems.packageId, fallbackIds));
+        }
+      }
+
+      // Structure Response — FLAT packages array with items (matches task-progress.tsx schema)
+      const result = {
+        ...assignment,
+        packages: filteredPackages.map(p => {
+          const pItems = itemList.filter(i => i.packageId === p.id);
+          if (pItems.length === 0) {
+            // Return a placeholder so the UI shows *something*
+            return {
+              ...p,
+              items: [{
+                id: `placeholder-${p.id}`,
+                packageId: p.id,
+                description: "No tasks found for this area",
+                quantity: "1",
+                completedQuantity: "0",
+                unit: "check",
+                trade: "System",
+                source: "DEBUG"
+              }]
+            };
+          }
+          return {
+            ...p,
+            items: pItems
+          };
+        })
+      };
+
+      res.json(result);
+    } catch (e: any) {
+      console.error("Get Assignment Details Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+
+  // DEPRECATED ROUTES BELOW (Keep for legacy compatibility if strict cleanup not requested)
+  app.post("/api/jobs/:id/refresh-from-8000", (req, res) => {
+    // Forward to sync packages logic which is now handled by upload-csv
+    // But allow manual refresh too
+    res.redirect(307, `/api/jobs/${req.params.id}/sync-packages`);
+  });
+
+  // GET Contractor Assignments (Contractor App View)
+  app.get("/api/contractor-assignments/:name", async (req, res) => {
+    try {
+      const { inArray } = await import("drizzle-orm");
+      const { packages } = await import("@shared/schema");
+      const { db } = await import("./db");
+
+      const name = req.params.name.toLowerCase();
+
+      // Fetch all assignments (inefficient but works for small scale)
+      const allAssignments = await storage.getJobAssignments();
+
+      const filtered = allAssignments.filter(a =>
+        a.contractorName.toLowerCase().includes(name)
+      );
+
+      // Collect all package IDs
+      const allPkgIds = filtered.flatMap(a => a.assignedPackages || []);
+
+      let pkgMap = new Map();
+      if (allPkgIds.length > 0) {
+        const pkgs = await db.select().from(packages).where(inArray(packages.id, allPkgIds));
+        pkgs.forEach(p => pkgMap.set(p.id, p));
+      }
+
+      // Map response
+      const response = filtered.map(a => {
+        const assignmentPkgs = (a.assignedPackages || []).map(id => pkgMap.get(id)?.name).filter(Boolean);
+
+        return {
+          ...a,
+          // Override buildPhases with Package Names for frontend compatibility
+          buildPhases: assignmentPkgs.length > 0 ? assignmentPkgs : (a.buildPhases || [])
+        };
+      });
+
+      res.json(response);
+    } catch (e: any) {
+      console.error("Get Contractor Assignments Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+  // Job Assignments Management
+
+  app.get("/api/job-assignments", async (req, res) => {
+    try {
+      const result = await storage.getJobAssignments();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+
+
+
+  const { db } = await import("./db");
+  const { jobs, rooms, packages, packageAssignments } = await import("@shared/schema"); // Dynamic import
+  const { eq } = await import("drizzle-orm");
+
+  // ... (logic) ...
+
+  app.post("/api/job-assignments", async (req, res) => {
+    try {
+      const { db } = await import("./db"); // Ensure db import
+      const { packageAssignments, contractors } = await import("@shared/schema");
+
+      const fs = await import("fs");
+      const path = await import("path");
+      const logFile = path.join(process.cwd(), "assignment_debug.log");
+
+      const log = (msg: string) => {
+        try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`); } catch (e) { }
+      };
+
+      log(`Received POST /api/job-assignments. Body keys: ${Object.keys(req.body).join(', ')}`);
+      // log(`Body: ${JSON.stringify(req.body)}`); // Verbose, maybe skip
+
+      // Manually construct object to ensure strict schema compliance
+      const assignmentData: any = {
+        contractorName: req.body.contractorName,
+        email: req.body.email,
+        phone: req.body.phone,
+        workLocation: req.body.workLocation,
+        hbxlJob: req.body.hbxlJob,
+        buildPhases: Array.isArray(req.body.buildPhases) ? req.body.buildPhases : [], // Legacy support
+        assignedPackages: Array.isArray(req.body.assignedPackages) ? req.body.assignedPackages : [], // NEW
+        startDate: req.body.startDate,
+        endDate: req.body.endDate,
+        specialInstructions: req.body.specialInstructions,
+        status: req.body.status || 'assigned',
+        sendTelegramNotification: !!req.body.sendTelegramNotification
+      };
+
+      // Add optional fields only if present
+      if (req.body.jobId) assignmentData.jobId = req.body.jobId;
+      if (req.body.latitude) assignmentData.latitude = req.body.latitude;
+      if (req.body.longitude) assignmentData.longitude = req.body.longitude;
+
+      log(`Constructed Data: ${JSON.stringify(assignmentData)}`);
+
+      // 1. Create Main Assignment Record
+      const result = await storage.createJobAssignment(assignmentData);
+
+      // 2. Link Packages (package_assignments table)
+      // We need contractorId. Assignment might not have it directly if matched by name?
+      // But frontend sends 'selectedContractors' ID list in loop?
+      // Actually, createJobAssignment stores 'contractorName'. It doesn't strictly link ID in that fn.
+      // But we need contractorId for packageAssignments.
+      // Try to find contractor by email?
+
+      // 2. Link Packages (package_assignments table)
+      let contractorId = null;
+      if (req.body.email) {
+        const cList = await storage.getContractors();
+        const c = cList.find(c => c.email === req.body.email);
+        if (c) contractorId = c.id;
+      }
+
+      if (contractorId && assignmentData.assignedPackages && assignmentData.assignedPackages.length > 0) {
+        for (const pkgId of assignmentData.assignedPackages) {
+          // Just insert
+          await db.insert(packageAssignments).values({
+            packageId: pkgId,
+            contractorId: contractorId,
+            status: 'assigned'
+          });
+        }
+      }
+
+      // 3. Send Telegram Notification
+      if (assignmentData.sendTelegramNotification) {
+        try {
+          const { TelegramService } = await import("./telegram");
+          const telegramService = new TelegramService();
+          await telegramService.sendJobAssignment({
+            contractorName: assignmentData.contractorName,
+            phone: assignmentData.phone,
+            hbxlJob: assignmentData.hbxlJob,
+            buildPhases: assignmentData.assignedPackages.length > 0 ?
+              [`${assignmentData.assignedPackages.length} Packages`] : // Summary for msg
+              assignmentData.buildPhases,
+            workLocation: assignmentData.workLocation,
+            startDate: assignmentData.startDate
+          });
+          console.log('📱 Telegram notification sent for assignment');
+        } catch (telegramError) {
+          console.error("⚠️ Failed to send Telegram notification:", telegramError);
+        }
+      }
+
+      log(`Result: Success (ID: ${result.id})`);
+      res.json(result);
+    } catch (e: any) {
+      console.error("Job Assignment Create Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/debug/import-job-json", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { jobs, rooms } = await import("@shared/schema"); // Dynamic import
+      const { eq } = await import("drizzle-orm");
+
+      const data = req.body;
+      const projectId = data.project?.project_id || "default_project";
+
+      console.log(`Importing Job JSON for ${projectId}`);
+
+      // 1. Find or Create Job
+      let job = (await db.select().from(jobs).where(eq(jobs.title, projectId)))[0];
+
+      // Extract phases from packages
+      const phasesSet = new Set<string>();
+      const phaseTaskData: any = {};
+
+      if (data.packages) {
+        for (const pkg of data.packages) {
+          if (pkg.sections) {
+            for (const section of pkg.sections) {
+              if (section.fix_phase) {
+                phasesSet.add(section.fix_phase);
+                if (!phaseTaskData[section.fix_phase]) phaseTaskData[section.fix_phase] = [];
+
+                // Add items to phase task data
+                if (section.items) {
+                  for (const item of section.items) {
+                    phaseTaskData[section.fix_phase].push({
+                      task: `${pkg.package_name} - ${section.trade} - ${item.description}`,
+                      qty: item.qty,
+                      unit: item.unit
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const phasesList = Array.from(phasesSet).join(", "); // "FIRST_FIX, SECOND_FIX"
+
+      const jobUpdates = {
+        title: projectId,
+        clientName: data.project?.client?.full_name || "Unknown",
+        address: data.project?.site?.address || "Unknown",
+        postcode: data.project?.site?.postcode,
+        phases: phasesList,
+        phaseTaskData: JSON.stringify(phaseTaskData),
+        status: "active"
+      };
+
+      if (job) {
+        await db.update(jobs).set(jobUpdates).where(eq(jobs.id, job.id));
+        console.log("Updated existing job phases");
+      } else {
+        // Create new if not exists (though default_project likely exists)
+        // We use 'title' as identifier here for simplicity
+        const [newJob] = await db.insert(jobs).values({
+          ...jobUpdates,
+          location: jobUpdates.address,
+          dueDate: new Date().toISOString()
+        }).returning();
+        job = newJob;
+        console.log("Created new job");
+      }
+
+      // 2. Create Rooms/Packages
+      if (data.packages && job) {
+        // Delete existing rooms for this job to avoid duplicates? 
+        // Maybe safer to valid duplicates for now or just append.
+        // We'll append.
+
+        for (const pkg of data.packages) {
+          const fittings: any = {};
+          if (pkg.sections) {
+            for (const sec of pkg.sections) {
+              for (const item of sec.items || []) {
+                fittings[item.description] = item.qty;
+              }
+            }
+          }
+
+          await db.insert(rooms).values({
+            jobId: job.id,
+            name: pkg.package_name,
+            area: String(pkg.geometry?.area_m2 || 0),
+            perimeter: String(pkg.geometry?.perimeter_m || 0),
+            status: "not_started",
+            fittings: JSON.stringify(fittings),
+            fittingsSource: pkg.source || "MANUAL",
+            floor: "0",
+            polygon: JSON.stringify([]),
+            geometry: JSON.stringify([])
+          });
+        }
+      }
+
+      res.json({ success: true, message: `Imported Job ${projectId} with ${phasesSet.size} phases and ${data.packages?.length} packages` });
+
+    } catch (e: any) {
+      console.error("Import Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get specific job assignment (for admin preview)
+  app.get("/api/job-assignments/:id", async (req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { jobAssignments } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const assignment = await db.select().from(jobAssignments).where(eq(jobAssignments.id, req.params.id));
+      if (assignment.length === 0) return res.status(404).json({ error: "Assignment not found" });
+
+      res.json(assignment[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
 
   app.get("/api/jobs/:id", async (req, res) => {
     try {
@@ -135,15 +2243,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/jobs/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const success = await storage.deleteJob(id);
-      if (success) {
+      const { db } = await import("./db");
+      const { jobs, packages, packageItems, jobAssignments, packageAssignments } = await import("@shared/schema");
+      const { eq, inArray } = await import("drizzle-orm");
+
+      console.log(`🗑️ Deleting Job ${id} and related data...`);
+
+      // 1. Get Job Packages to delete their items and assignments
+      const jobPackages = await db.select({ id: packages.id }).from(packages).where(eq(packages.jobId, id));
+      const jobPackageIds = jobPackages.map(p => p.id);
+
+      if (jobPackageIds.length > 0) {
+        // Delete items linked to these packages
+        await db.delete(packageItems).where(inArray(packageItems.packageId, jobPackageIds));
+
+        // Delete assignments linked to these packages (if any)
+        try {
+          if (packageAssignments) await db.delete(packageAssignments).where(inArray(packageAssignments.packageId, jobPackageIds));
+        } catch (e) {
+          console.warn("Could not delete package_assignments (table might differ or not exist)", e);
+        }
+      }
+
+      // 2. Delete Packages
+      await db.delete(packages).where(eq(packages.jobId, id));
+
+      // 3. Delete Job
+      const deleted = await db.delete(jobs).where(eq(jobs.id, id)).returning();
+
+      if (deleted.length > 0) {
+        console.log(`✅ Job ${id} deleted.`);
         res.status(200).json({ message: "Job deleted successfully" });
       } else {
         res.status(404).json({ error: "Job not found" });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting job:", error);
-      res.status(500).json({ error: "Failed to delete job" });
+      res.status(500).json({ error: `Failed to delete job: ${error.message}` });
     }
   });
 
@@ -226,11 +2362,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 rawJson: JSON.stringify(el)
               });
             }
+            if (result.svgPath) {
+              finalFileUrl = `/api/files/${result.svgPath}`;
+              finalFileType = 'image/svg+xml';
+            }
           } else {
             console.error("❌ IFC Processing Failed:", result.error);
+            return res.status(500).json({ error: result.error || "IFC Processing Failed" });
           }
-        } catch (ifcError) {
+        } catch (ifcError: any) {
           console.error("❌ Critical Error in IfcAgent:", ifcError);
+          return res.status(500).json({ error: `IFC Agent Error: ${ifcError.message || ifcError}` });
         }
       }
 
@@ -389,8 +2531,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // --- DXF MICROSERVICE INTEGRATION ---
-  // Proxies DXF file + room polygons to Python scanner at localhost:8000
-  const DXF_SCANNER_URL = process.env.DXF_SCANNER_URL || "http://localhost:8000";
+  // Proxies DXF file + room polygons to Python scanner
+  const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 
   app.post("/api/jobs/:jobId/scan-dxf", uploadJobFile.single('file'), async (req, res) => {
     try {
@@ -435,7 +2577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       formData.append('file', blob, file.originalname);
       formData.append('rooms_json', JSON.stringify(roomsForScanner));
 
-      const scanResponse = await fetch(`${DXF_SCANNER_URL}/scan-dxf-fittings`, {
+      const scanResponse = await fetch(`${PYTHON_API_URL}/scan-dxf-fittings`, {
         method: 'POST',
         body: formData,
       });
@@ -1380,49 +3522,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/job-assignments", async (req, res) => {
-    try {
-      console.log("📋 Creating job assignment:", req.body);
 
-      // Add GPS coordinates based on workLocation (postcode)
-      if (req.body.workLocation) {
-        const coordinates = getPostcodeCoordinates(req.body.workLocation);
-        if (coordinates) {
-          req.body.latitude = coordinates.latitude;
-          req.body.longitude = coordinates.longitude;
-          console.log(`📍 Added GPS coordinates for ${req.body.workLocation}: ${coordinates.latitude}, ${coordinates.longitude}`);
-        } else {
-          console.log(`⚠️ No GPS coordinates found for postcode: ${req.body.workLocation}`);
-        }
-      }
-
-      const validatedAssignment = insertJobAssignmentSchema.parse(req.body);
-      const assignment = await storage.createJobAssignment(validatedAssignment);
-
-      // Send Telegram notification if requested
-      if (req.body.sendTelegramNotification) {
-        try {
-          const telegramService = new TelegramService();
-          await telegramService.sendJobAssignment({
-            contractorName: req.body.contractorName,
-            phone: req.body.phone,
-            hbxlJob: req.body.hbxlJob,
-            buildPhases: req.body.buildPhases,
-            workLocation: req.body.workLocation,
-            startDate: req.body.startDate
-          });
-          console.log('📱 Telegram notification sent for assignment');
-        } catch (telegramError) {
-          console.error("⚠️ Failed to send Telegram notification:", telegramError);
-        }
-      }
-
-      res.status(201).json(assignment);
-    } catch (error) {
-      console.error("Error creating job assignment:", error);
-      res.status(500).json({ error: "Failed to create job assignment" });
-    }
-  });
 
   // Get single job assignment by ID
   app.get("/api/job-assignments/:id", async (req, res) => {
@@ -5902,6 +8002,38 @@ Be friendly, professional, and efficient. Use natural conversation - don't make 
         success: false,
         error: 'Failed to get financial summary'
       });
+    }
+  });
+
+  // JOB ASSIGNMENTS ROUTES (MOVED HERE)
+  app.get("/api/job-assignments", async (req, res) => {
+    try {
+      const { jobAssignments } = await import("@shared/schema");
+      const { db } = await import("./db");
+      const { desc } = await import("drizzle-orm");
+
+      const result = await db.select().from(jobAssignments).orderBy(desc(jobAssignments.createdAt));
+      res.json(result);
+    } catch (e: any) {
+      console.error("Get Assignments Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/job-assignments", async (req, res) => {
+    try {
+      const { jobAssignments, insertJobAssignmentSchema } = await import("@shared/schema");
+      const { db } = await import("./db");
+
+      // Parse payload (strips unknown fields)
+      const body = insertJobAssignmentSchema.parse(req.body);
+
+      const [created] = await db.insert(jobAssignments).values(body).returning();
+
+      res.status(201).json(created);
+    } catch (e: any) {
+      console.error("Create Assignment Error:", e);
+      res.status(500).json({ error: e.message });
     }
   });
 

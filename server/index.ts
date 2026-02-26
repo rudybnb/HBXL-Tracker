@@ -4,13 +4,33 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false }));
 
-// Reverse proxy for Python API (port 8000) - forwards /api/telegram/* requests
+// Enable CORS for request from port 8000
+// Enable CORS for request from port 8000
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const allowedOrigins = ["http://localhost:8000", "http://127.0.0.1:8000"];
+  const origin = req.headers.origin as string;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
+
+// Reverse proxy for Python API - forwards /api/telegram/* requests
 app.use('/api/telegram', async (req, res, next) => {
   try {
-    const pythonApiUrl = `http://localhost:8000${req.originalUrl}`;
+    const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+    const pythonApiUrl = `${PYTHON_API_URL}${req.originalUrl}`;
 
     // Build clean headers (remove problematic headers)
     const cleanHeaders: Record<string, string> = {
