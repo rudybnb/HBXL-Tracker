@@ -102,6 +102,7 @@
     "ws": "^8.18.0",
     "xlsx": "^0.18.5",
     "xlsx-populate": "^1.21.0",
+    "web-ifc": "^0.0.53",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0"
   },
