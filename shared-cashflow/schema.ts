@@ -63,45 +63,45 @@ export const contractorApplications = pgTable("contractor_applications", {
   fullAddress: text("full_address").notNull(),
   city: text("city").notNull(),
   postcode: text("postcode").notNull(),
-
+  
   // Right to Work & Documentation
   hasRightToWork: text("has_right_to_work").notNull().default("false"),
   passportNumber: text("passport_number").notNull(),
   passportPhotoUploaded: text("passport_photo_uploaded").notNull().default("false"),
   hasPublicLiability: text("has_public_liability").notNull().default("false"),
-
+  
   // CIS & Tax Information
   cisStatus: text("cis_status").notNull(),
   utrNumberDetails: text("utr_number_details").notNull(),
   isCisRegistered: text("is_cis_registered").notNull().default("false"),
   hasValidCscs: text("has_valid_cscs").notNull().default("false"),
-
+  
   // Banking Details
   bankName: text("bank_name").notNull(),
   accountHolderName: text("account_holder_name").notNull(),
   sortCode: text("sort_code").notNull(),
   accountNumber: text("account_number").notNull(),
-
+  
   // Emergency Contact
   emergencyName: text("emergency_name").notNull(),
   emergencyPhone: text("emergency_phone").notNull(),
   relationship: text("relationship").notNull(),
-
+  
   // Trade & Tools
   primaryTrade: text("primary_trade").notNull(),
   yearsExperience: text("years_experience").notNull(),
   hasOwnTools: text("has_own_tools").notNull().default("false"),
   toolsList: text("tools_list"),
-
+  
   // Admin-only fields
   adminCisVerification: text("admin_cis_verification"), // Admin fills CIS verification details
   adminPayRate: text("admin_pay_rate"), // Admin sets pay rate
   adminNotes: text("admin_notes"), // Admin internal notes
-
+  
   // Login credentials (set by admin when approving contractor)
   username: text("username"), // Unique login username
   password: text("password"), // Hashed password
-
+  
   // Metadata
   status: text("status").notNull().default("pending"),
   submittedAt: timestamp("submitted_at").defaultNow(),
@@ -116,7 +116,7 @@ export const workSessions = pgTable("work_sessions", {
   totalHours: text("total_hours"), // e.g., "08:11:19"
   startLatitude: text("start_latitude"),
   startLongitude: text("start_longitude"),
-  endLatitude: text("end_latitude"),
+  endLatitude: text("end_latitude"), 
   endLongitude: text("end_longitude"),
   status: sessionStatusEnum("status").default("active"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -155,25 +155,25 @@ export const projectCashFlow = pgTable("project_cash_flow", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   jobId: varchar("job_id").references(() => jobs.id).notNull(),
   weekEnding: text("week_ending").notNull(), // Format: "2025-08-15"
-
+  
   // Income
   clientPayments: decimal("client_payments", { precision: 12, scale: 2 }).default("0.00"),
   retentionReleased: decimal("retention_released", { precision: 12, scale: 2 }).default("0.00"),
   variationOrders: decimal("variation_orders", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   // Expenses
   laborCosts: decimal("labor_costs", { precision: 12, scale: 2 }).default("0.00"),
   materialCosts: decimal("material_costs", { precision: 12, scale: 2 }).default("0.00"),
   equipmentCosts: decimal("equipment_costs", { precision: 12, scale: 2 }).default("0.00"),
   subcontractorCosts: decimal("subcontractor_costs", { precision: 12, scale: 2 }).default("0.00"),
   overheadCosts: decimal("overhead_costs", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   // Calculated fields
   totalIncome: decimal("total_income", { precision: 12, scale: 2 }).default("0.00"),
   totalExpenses: decimal("total_expenses", { precision: 12, scale: 2 }).default("0.00"),
   netCashFlow: decimal("net_cash_flow", { precision: 12, scale: 2 }).default("0.00"),
   cumulativeCashFlow: decimal("cumulative_cash_flow", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -183,23 +183,23 @@ export const cashFlowForecasts = pgTable("cash_flow_forecasts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   jobId: varchar("job_id").references(() => jobs.id).notNull(),
   forecastWeek: text("forecast_week").notNull(), // Format: "2025-08-22"
-
+  
   // Forecasted Income
   expectedClientPayments: decimal("expected_client_payments", { precision: 12, scale: 2 }).default("0.00"),
   expectedRetention: decimal("expected_retention", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   // Forecasted Expenses
   projectedLaborCosts: decimal("projected_labor_costs", { precision: 12, scale: 2 }).default("0.00"),
   projectedMaterialCosts: decimal("projected_material_costs", { precision: 12, scale: 2 }).default("0.00"),
   projectedEquipmentCosts: decimal("projected_equipment_costs", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   // Calculated projections
   forecastedNetFlow: decimal("forecasted_net_flow", { precision: 12, scale: 2 }).default("0.00"),
   projectedCumulative: decimal("projected_cumulative", { precision: 12, scale: 2 }).default("0.00"),
-
+  
   confidenceLevel: text("confidence_level").default("medium"), // low, medium, high
   notes: text("notes"),
-
+  
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -379,136 +379,3 @@ export type InsertContractorApplication = z.infer<typeof insertContractorApplica
 export type InsertProjectCashFlow = z.infer<typeof insertProjectCashFlowSchema>;
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 export type InsertClientPayment = z.infer<typeof insertClientPaymentSchema>;
-
-// --- Appended Missing Schemas ---
-
-export const inspectionNotifications = pgTable("inspection_notifications", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
-  assignmentId: text("assignment_id").notNull(),
-  contractorName: text("contractor_name").notNull(),
-  notificationType: text("notification_type").notNull(),
-  notificationSent: boolean("notification_sent").default(false).notNull(),
-  inspectionCompleted: boolean("inspection_completed").default(false).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  completedAt: timestamp("completed_at"),
-});
-
-export const insertInspectionNotificationSchema = createInsertSchema(inspectionNotifications).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const taskProgress = pgTable("task_progress", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
-  contractorName: text("contractor_name").notNull(),
-  assignmentId: text("assignment_id").notNull(),
-  taskId: text("task_id").notNull(),
-  phase: text("phase").notNull(),
-  taskDescription: text("task_description").notNull(),
-  completed: boolean("completed").notNull().default(false),
-  startTime: timestamp("start_time"),
-  endTime: timestamp("end_time"),
-  notes: text("notes"),
-  completedAt: timestamp("completed_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const insertTaskProgressSchema = createInsertSchema(taskProgress).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export const projectCashflowWeekly = pgTable("project_cashflow_weekly", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
-  projectId: text("project_id").notNull(),
-  projectName: text("project_name").notNull(),
-  weekStartDate: text("week_start_date").notNull(),
-  weekEndDate: text("week_end_date").notNull(),
-  weekNumber: text("week_number").notNull(),
-  forecastedLabourCost: text("forecasted_labour_cost").default("0").notNull(),
-  forecastedMaterialCost: text("forecasted_material_cost").default("0").notNull(),
-  forecastedTotalSpend: text("forecasted_total_spend").default("0").notNull(),
-  actualLabourCost: text("actual_labour_cost").default("0").notNull(),
-  actualMaterialCost: text("actual_material_cost").default("0").notNull(),
-  actualTotalSpend: text("actual_total_spend").default("0").notNull(),
-  cumulativeSpend: text("cumulative_spend").default("0").notNull(),
-  remainingBudget: text("remaining_budget").default("0").notNull(),
-  projectCompletionPercent: text("project_completion_percent").default("0").notNull(),
-  budgetUsedPercent: text("budget_used_percent").default("0").notNull(),
-  labourVariance: text("labour_variance").default("0").notNull(),
-  materialVariance: text("material_variance").default("0").notNull(),
-  totalVariance: text("total_variance").default("0").notNull(),
-  labourDataSource: text("labour_data_source").default("work_sessions").notNull(),
-  materialDataSource: text("material_data_source").default("manual").notNull(),
-  dataValidated: boolean("data_validated").default(false).notNull(),
-  validatedBy: text("validated_by"),
-  validatedAt: timestamp("validated_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const insertProjectCashflowWeeklySchema = createInsertSchema(projectCashflowWeekly).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export const materialPurchases = pgTable("material_purchases", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
-  projectId: text("project_id").notNull(),
-  projectName: text("project_name").notNull(),
-  purchaseWeek: text("purchase_week").notNull(),
-  supplierName: text("supplier_name").notNull(),
-  invoiceNumber: text("invoice_number").notNull(),
-  purchaseDate: text("purchase_date").notNull(),
-  itemDescription: text("item_description").notNull(),
-  quantity: text("quantity").notNull(),
-  unitCost: text("unit_cost").notNull(),
-  totalCost: text("total_cost").notNull(),
-  category: text("category").notNull(),
-  dataSource: text("data_source").notNull().default("uploaded_invoice"),
-  invoiceFileUrl: text("invoice_file_url"),
-  uploadedBy: text("uploaded_by").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-export const insertMaterialPurchaseSchema = createInsertSchema(materialPurchases).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const projectMaster = pgTable("project_master", {
-  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
-  projectName: text("project_name").notNull().unique(),
-  clientName: text("client_name").notNull(),
-  projectType: text("project_type").notNull(),
-  startDate: text("start_date").notNull(),
-  estimatedEndDate: text("estimated_end_date").notNull(),
-  actualEndDate: text("actual_end_date"),
-  totalBudget: text("total_budget").notNull(),
-  quotedPrice: text("quoted_price").notNull(),
-  labourBudget: text("labour_budget").notNull(),
-  materialBudget: text("material_budget").notNull(),
-  weeklyBreakdown: text("weekly_breakdown"),
-  supplierBreakdown: text("supplier_breakdown"),
-  resourceBreakdown: text("resource_breakdown"),
-  status: text("status").default("active").notNull(),
-  completionPercent: text("completion_percent").default("0").notNull(),
-  budgetDataSource: text("budget_data_source").notNull(),
-  createdBy: text("created_by").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const insertProjectMasterSchema = createInsertSchema(projectMaster).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export type TaskProgress = typeof taskProgress.$inferSelect;
-export type InsertTaskProgress = z.infer<typeof insertTaskProgressSchema>;
-export type InspectionNotification = typeof inspectionNotifications.$inferSelect;
-export type InsertInspectionNotification = z.infer<typeof insertInspectionNotificationSchema>;

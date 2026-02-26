@@ -1,16 +1,10 @@
-
 import { defineConfig } from "drizzle-kit";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL, ensure the database is provisioned");
-}
-
 export default defineConfig({
-  out: "./migrations-cashflow",
   schema: "./shared-cashflow/schema.ts",
+  out: "./migrations-cashflow",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    url: process.env.DATABASE_URL_CASHFLOW || process.env.DATABASE_URL!,
   },
 });

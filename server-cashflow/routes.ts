@@ -1,11 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { DatabaseStorage } from "./database-storage";
-import { db } from "./db";
-import { sql } from "drizzle-orm";
 
 const storage = new DatabaseStorage();
-import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "../shared-cashflow/schema";
+import { insertJobSchema, insertContractorSchema, jobAssignmentSchema, insertContractorApplicationSchema, insertWorkSessionSchema, insertAdminSettingSchema, insertJobAssignmentSchema, JobWithContractor, WorkSession } from "@shared/schema";
 import { TelegramService } from "./telegram";
 import multer from "multer";
 import type { Request as ExpressRequest } from "express";
@@ -33,27 +31,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
-
   // Jobs endpoints
   app.get("/api/jobs", async (req, res) => {
     try {
       const { status, search } = req.query;
       let jobs = await storage.getJobs();
-
+      
       if (status && status !== '') {
         jobs = jobs.filter(job => job.status === status);
       }
-
+      
       if (search && typeof search === 'string') {
         const searchLower = search.toLowerCase();
-        jobs = jobs.filter(job =>
+        jobs = jobs.filter(job => 
           job.title.toLowerCase().includes(searchLower) ||
           job.location.toLowerCase().includes(searchLower) ||
           (job.contractor?.name.toLowerCase().includes(searchLower))
         );
       }
-
+      
       res.json(jobs);
     } catch (error) {
       console.error("Error fetching jobs:", error);
@@ -80,7 +76,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!validation.success) {
         return res.status(400).json({ error: "Invalid job data", details: validation.error.errors });
       }
-
+      
       const job = await storage.createJob(validation.data);
       res.status(201).json(job);
     } catch (error) {
@@ -119,7 +115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!validation.success) {
         return res.status(400).json({ error: "Invalid contractor data", details: validation.error.errors });
       }
-
+      
       const contractor = await storage.createContractor(validation.data);
       res.status(201).json(contractor);
     } catch (error) {
@@ -133,48 +129,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const uploadId = req.params.id;
       console.log("🗑️ COMPLETE CLEANUP starting for upload:", uploadId);
-
+      
       // MANDATORY RULE 3: CSV DATA SUPREMACY - When CSV deleted, ALL job data must be removed
       // Only GPS coordinates and contractor rates should persist per user requirement
-
+      
       // 1. Delete all jobs created from this CSV upload
       const jobs = await storage.getJobs();
       const jobsToDelete = jobs.filter(job => job.uploadId === uploadId);
       console.log(`🗑️ Found ${jobsToDelete.length} jobs to delete for upload: ${uploadId}`);
-
+      
       for (const job of jobsToDelete) {
         console.log(`🗑️ Deleting job: ${job.id} (${job.title})`);
         await storage.deleteJob(job.id);
       }
-
+      
       // 2. Delete ALL job assignments (contractor dashboard should be empty)
       const allAssignments = await storage.getAllJobAssignments();
       console.log(`🗑️ Found ${allAssignments.length} total assignments to check`);
-
+      
       for (const assignment of allAssignments) {
         console.log(`🗑️ Deleting assignment: ${assignment.id} for contractor: ${assignment.contractorName}`);
         await storage.deleteJobAssignment(assignment.id);
       }
-
+      
       // 3. Delete ALL inspection notifications (site inspections should disappear)
       await storage.deleteAllInspectionNotifications();
       console.log("🗑️ Deleted all inspection notifications");
-
+      
       // 4. Delete ALL contractor reports related to assignments
       await storage.deleteAllContractorReports();
       console.log("🗑️ Deleted all contractor reports");
-
+      
       // 5. Delete ALL admin inspections
       await storage.deleteAllAdminInspections();
       console.log("🗑️ Deleted all admin inspections");
-
+      
       // 6. Finally delete the CSV upload record
       await storage.deleteCsvUpload(uploadId);
       console.log("🗑️ Deleted CSV upload record");
-
+      
       console.log("✅ COMPLETE CLEANUP finished - Only GPS coordinates and contractor rates remain");
-      res.json({
-        success: true,
+      res.json({ 
+        success: true, 
         message: "Complete cleanup successful - all job data permanently removed",
         preserved: "GPS coordinates and contractor rates maintained"
       });
@@ -198,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       let csvContent: string;
-
+      
       // Handle both Excel and CSV files
       if (req.file.originalname.toLowerCase().endsWith('.xlsx')) {
         console.log('📊 Processing Excel file:', req.file.originalname);
@@ -206,7 +202,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-
+        
         // Convert to CSV format to maintain compatibility with existing parsing logic
         csvContent = XLSX.utils.sheet_to_csv(worksheet);
         console.log('🔄 Converted Excel to CSV format');
@@ -215,16 +211,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         csvContent = req.file.buffer.toString();
         console.log('📄 Processing CSV file:', req.file.originalname);
       }
-
+      
       console.log('🔍 Raw Content:', csvContent.substring(0, 500) + '...');
-
+      
       try {
         // Manual parsing for your specific CSV format
         const lines = csvContent.split('\n').map(line => line.trim()).filter(line => line);
         console.log('🔍 CSV Lines:', lines.slice(0, 10));
-
+        
         let jobsCreated = 0; // Initialize counter
-
+        
         // Extract header information (first 4 lines)
         let jobName = "Data Missing from CSV";
         let jobAddress = "Data Missing from CSV";
@@ -256,10 +252,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Parse data section - supports both formats
         // Check if this is the new enhanced format with Order Date, Build Phase, etc.
-        const enhancedFormatIndex = lines.findIndex(line =>
+        const enhancedFormatIndex = lines.findIndex(line => 
           line.includes('Order Date') && line.includes('Build Phase') && line.includes('Resource Description')
         );
-
+        
         if (enhancedFormatIndex !== -1) {
           // ENHANCED FORMAT PARSING - for accounting integration
           const resources: any[] = [];
@@ -267,16 +263,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let totalMaterialCost = 0;
           const phaseTaskData: { [key: string]: any[] } = {};
           const weeklyBreakdown: { [key: string]: { labour: number; material: number; total: number } } = {};
-
+          
           console.log('🎯 Using ENHANCED CSV parsing for accounting format');
-
+          
           for (let i = enhancedFormatIndex + 1; i < lines.length; i++) {
             const line = lines[i];
             if (!line || line.trim() === '') continue;
-
+            
             const parts = line.split(',').map(p => p.trim());
             if (parts.length < 8) continue;
-
+            
             const resource: any = {
               orderDate: parts[0] || '',
               requiredDate: parts[1] || '',
@@ -286,23 +282,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
               description: parts[5] || '',
               quantity: parseInt(parts[7]) || 0
             };
-
+            
             // Extract price using regex - MANDATORY RULE: authentic data only
             const priceMatch = resource.description.match(/£(\d+\.?\d*)/);
             const unitMatch = resource.description.match(/£\d+\.?\d*\/(\w+)/);
-
+            
             if (priceMatch && resource.quantity > 0) {
               resource.unitPrice = parseFloat(priceMatch[1]);
               resource.unit = unitMatch ? unitMatch[1] : 'Each';
               resource.totalCost = resource.unitPrice * resource.quantity;
-
+              
               // Track costs by type for accounting
               if (resource.resourceType.toLowerCase() === 'labour') {
                 totalLabourCost += resource.totalCost;
               } else if (resource.resourceType.toLowerCase() === 'material') {
                 totalMaterialCost += resource.totalCost;
               }
-
+              
               // Build phase task structure for compatibility
               if (resource.buildPhase && resource.buildPhase !== 'General') {
                 if (!phaseTaskData[resource.buildPhase]) {
@@ -320,7 +316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 });
                 phases.push(resource.buildPhase);
               }
-
+              
               // Weekly cash flow breakdown
               if (resource.orderDate) {
                 if (!weeklyBreakdown[resource.orderDate]) {
@@ -333,10 +329,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 }
               }
             }
-
+            
             resources.push(resource);
           }
-
+          
           console.log('🎯 Enhanced parsing results:', {
             phases: phases.filter((p, i, arr) => arr.indexOf(p) === i), // Remove duplicates
             resourceCount: resources.length,
@@ -345,7 +341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             grandTotal: totalLabourCost + totalMaterialCost,
             weeklyBreakdown
           });
-
+          
           // Store enhanced data for accounting integration
           const enhancedJobData = JSON.stringify({
             phases: phaseTaskData,
@@ -357,7 +353,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
             resources: resources.filter(r => r.unitPrice) // Only resources with valid pricing
           });
-
+          
           await storage.createJob({
             title: jobName,
             location: `${jobAddress}, ${jobPostcode}`,
@@ -366,116 +362,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
             uploadId: csvUpload.id,
             phaseTaskData: enhancedJobData
           });
-
+          
           jobsCreated++;
-
+          
         } else {
           // ORIGINAL FORMAT PARSING - maintain existing functionality
           // Look for "Build Phase" line which indicates start of data section
-          let dataHeaderIndex = lines.findIndex(line =>
-            line.includes('Build Phase') && (line.includes('Order Quantity') || line.split(',').length >= 3)
+        let dataHeaderIndex = lines.findIndex(line => 
+          line.includes('Build Phase') && (line.includes('Order Quantity') || line.split(',').length >= 3)
+        );
+        
+        // Fallback: look for any line with "Build Phase" or similar phase indicators
+        if (dataHeaderIndex === -1) {
+          dataHeaderIndex = lines.findIndex(line => 
+            line.includes('Build Phase') || line.includes('Phase') || 
+            line.includes('Order') || line.includes('Date')
           );
-
-          // Fallback: look for any line with "Build Phase" or similar phase indicators
-          if (dataHeaderIndex === -1) {
-            dataHeaderIndex = lines.findIndex(line =>
-              line.includes('Build Phase') || line.includes('Phase') ||
-              line.includes('Order') || line.includes('Date')
-            );
-          }
-
-          let phaseTaskData: Record<string, Array<{ description: string, quantity: number, task: string }>> = {};
-
-          if (dataHeaderIndex >= 0) {
-            // NEW IMPROVED PARSING: Handle the cleaner CSV structure
-            // Column structure: [Empty, Phase/Task Description, Empty, Quantity]
-            console.log('🎯 Using IMPROVED CSV parsing for cleaner format');
-
-            let currentPhase = "";
-
-            // Process lines after the "Build Phase" header
-            for (let i = dataHeaderIndex + 1; i < lines.length; i++) {
-              const line = lines[i];
-              if (!line || line.trim() === '') continue;
-
-              const columns = line.split(',').map(col => col.trim());
-
-              // Skip lines with less than 3 columns
-              if (columns.length < 3) continue;
-
-              const col1 = columns[0] || ''; // Usually empty for tasks
-              const col2 = columns[1] || ''; // Phase name or task description 
-              const col3 = columns[2] || ''; // Task description (if col2 is phase)
-              const col4 = columns[3] || '0'; // Quantity
-
-              // Check if this is a phase line (col2 has phase name, col3 is empty)
-              if (col2 && !col3 && col1 === '') {
-                currentPhase = col2;
-                if (!phases.includes(currentPhase)) {
-                  phases.push(currentPhase);
-                }
-                if (!phaseTaskData[currentPhase]) {
-                  phaseTaskData[currentPhase] = [];
-                }
+        }
+        
+        let phaseTaskData: Record<string, Array<{description: string, quantity: number, task: string}>> = {};
+        
+        if (dataHeaderIndex >= 0) {
+          // NEW IMPROVED PARSING: Handle the cleaner CSV structure
+          // Column structure: [Empty, Phase/Task Description, Empty, Quantity]
+          console.log('🎯 Using IMPROVED CSV parsing for cleaner format');
+          
+          let currentPhase = "";
+          
+          // Process lines after the "Build Phase" header
+          for (let i = dataHeaderIndex + 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || line.trim() === '') continue;
+            
+            const columns = line.split(',').map(col => col.trim());
+            
+            // Skip lines with less than 3 columns
+            if (columns.length < 3) continue;
+            
+            const col1 = columns[0] || ''; // Usually empty for tasks
+            const col2 = columns[1] || ''; // Phase name or task description 
+            const col3 = columns[2] || ''; // Task description (if col2 is phase)
+            const col4 = columns[3] || '0'; // Quantity
+            
+            // Check if this is a phase line (col2 has phase name, col3 is empty)
+            if (col2 && !col3 && col1 === '') {
+              currentPhase = col2;
+              if (!phases.includes(currentPhase)) {
+                phases.push(currentPhase);
               }
-              // Check if this is a task line (col3 has task description)
-              else if (col3 && currentPhase) {
-                const taskDescription = col3.replace(/"/g, '').trim(); // Clean quotes
-                const quantity = parseInt(col4) || 0;
-
-                if (taskDescription && taskDescription !== '') {
-                  phaseTaskData[currentPhase].push({
-                    description: taskDescription,
-                    quantity: quantity,
-                    task: `Install ${taskDescription.toLowerCase()}`
-                  });
-                }
+              if (!phaseTaskData[currentPhase]) {
+                phaseTaskData[currentPhase] = [];
+              }
+            } 
+            // Check if this is a task line (col3 has task description)
+            else if (col3 && currentPhase) {
+              const taskDescription = col3.replace(/"/g, '').trim(); // Clean quotes
+              const quantity = parseInt(col4) || 0;
+              
+              if (taskDescription && taskDescription !== '') {
+                phaseTaskData[currentPhase].push({
+                  description: taskDescription,
+                  quantity: quantity,
+                  task: `Install ${taskDescription.toLowerCase()}`
+                });
               }
             }
-
-            console.log('🎯 IMPROVED parsing results:', {
-              phases: phases,
-              phaseTaskDataKeys: Object.keys(phaseTaskData),
-              totalTasks: Object.values(phaseTaskData).reduce((sum, tasks) => sum + tasks.length, 0)
-            });
           }
-
-          console.log('🎯 Extracted Phase Task Data:', Object.keys(phaseTaskData).map(phase =>
-            `${phase}: ${phaseTaskData[phase].length} tasks`
-          ));
-
-          console.log('🎯 CSV Data Extracted:', { jobName, jobAddress, jobPostcode, jobType, phases });
-
-          const jobs = [{
-            title: jobName,
-            description: jobType,
-            location: `${jobAddress}, ${jobPostcode}`,
-            status: "pending" as const,
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-            notes: `Project Type: ${jobType}`,
-            phases: phases.join(', ') || "Data Missing from CSV",
-            uploadId: csvUpload.id,
-            phaseTaskData: JSON.stringify(phaseTaskData)
-          }];
-
-          const createdJobs = await storage.createJobsFromCsv(jobs, csvUpload.id);
-
-          await storage.updateCsvUpload(csvUpload.id, {
-            status: "processed",
-            jobsCount: createdJobs.length.toString()
+          
+          console.log('🎯 IMPROVED parsing results:', {
+            phases: phases,
+            phaseTaskDataKeys: Object.keys(phaseTaskData),
+            totalTasks: Object.values(phaseTaskData).reduce((sum, tasks) => sum + tasks.length, 0)
           });
+        }
+        
+        console.log('🎯 Extracted Phase Task Data:', Object.keys(phaseTaskData).map(phase => 
+          `${phase}: ${phaseTaskData[phase].length} tasks`
+        ));
 
-          res.json({
-            upload: await storage.getCsvUploads().then(uploads => uploads.find(u => u.id === csvUpload.id)),
-            jobsCreated: createdJobs.length
-          });
+        console.log('🎯 CSV Data Extracted:', { jobName, jobAddress, jobPostcode, jobType, phases });
 
-          // Check for enhanced CSV format and integrate with existing workflow
-          const enhancedData = parseEnhancedCSV(lines);
-          if (enhancedData) {
-            console.log('🎯 Enhanced CSV format detected - integrating financial data');
-            // Enhanced data is already processed, continue with existing job creation
-          }
+        const jobs = [{
+          title: jobName,
+          description: jobType,
+          location: `${jobAddress}, ${jobPostcode}`,
+          status: "pending" as const,
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          notes: `Project Type: ${jobType}`,
+          phases: phases.join(', ') || "Data Missing from CSV",
+          uploadId: csvUpload.id,
+          phaseTaskData: JSON.stringify(phaseTaskData)
+        }];
+
+        const createdJobs = await storage.createJobsFromCsv(jobs, csvUpload.id);
+          
+        await storage.updateCsvUpload(csvUpload.id, {
+          status: "processed",
+          jobsCount: createdJobs.length.toString()
+        });
+
+        res.json({
+          upload: await storage.getCsvUploads().then(uploads => uploads.find(u => u.id === csvUpload.id)),
+          jobsCreated: createdJobs.length
+        });
+
+        // Check for enhanced CSV format and integrate with existing workflow
+        const enhancedData = parseEnhancedCSV(lines);
+        if (enhancedData) {
+          console.log('🎯 Enhanced CSV format detected - integrating financial data');
+          // Enhanced data is already processed, continue with existing job creation
+        }
 
         }
       } catch (error) {
@@ -507,12 +503,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!validation.success) {
         return res.status(400).json({ error: "Invalid assignment data", details: validation.error.errors });
       }
-
+      
       const job = await storage.assignJob(validation.data);
       if (!job) {
         return res.status(404).json({ error: "Job or contractor not found" });
       }
-
+      
       res.json(job);
     } catch (error) {
       console.error("Error assigning job:", error);
@@ -525,9 +521,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { contractorName } = req.params;
       console.log("🔍 Fetching assignments for contractor:", contractorName);
-
+      
       const assignments = await storage.getContractorAssignments(contractorName);
-
+      
       // Add GPS coordinates to assignments that don't have them OR update with current coordinates
       const updatedAssignments = assignments.map(assignment => {
         const coordinates = getPostcodeCoordinates(assignment.workLocation || '');
@@ -542,7 +538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         return assignment;
       });
-
+      
       console.log("📋 Found assignments:", updatedAssignments.length);
       res.json(updatedAssignments);
     } catch (error) {
@@ -569,7 +565,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!location || typeof location !== 'string') {
       return null;
     }
-
+    
     // Simple postcode-to-GPS lookup for common UK postcodes
     const postcodeMap: { [key: string]: { latitude: string; longitude: string } } = {
       'DA17 5DB': { latitude: '51.4851', longitude: '0.1540' },
@@ -592,29 +588,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'ME7': { latitude: '51.388800', longitude: '0.548900' },
       // Add more as needed
     };
-
+    
     // Clean and normalize location string
     let cleanLocation = location
       .replace(/["\\\n]/g, '') // Remove quotes and escape characters
       .trim()
       .toUpperCase();
-
+    
     // Debug logging
     console.log(`🔎 GPS lookup for "${location}": cleaned to "${cleanLocation}"`);
-
+    
     // Try to extract postcode pattern (letters followed by numbers and letters)
     const postcodePattern = /([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})/;
     const postcodeMatch = cleanLocation.match(postcodePattern);
-
+    
     if (postcodeMatch) {
       const extractedPostcode = postcodeMatch[1].trim();
       console.log(`🎯 Extracted postcode: ${extractedPostcode}`);
-
+      
       if (postcodeMap[extractedPostcode]) {
         console.log(`✅ Found coordinates for ${extractedPostcode}`);
         return postcodeMap[extractedPostcode];
       }
-
+      
       // Try partial match with area code only
       const postcodePrefix = extractedPostcode.split(' ')[0];
       if (postcodeMap[postcodePrefix]) {
@@ -622,13 +618,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return postcodeMap[postcodePrefix];
       }
     }
-
+    
     // Fallback: try direct match with entire location string
     if (postcodeMap[cleanLocation]) {
       console.log(`✅ Found direct match for ${cleanLocation}`);
       return postcodeMap[cleanLocation];
     }
-
+    
     console.log(`❌ No GPS coordinates found for: ${cleanLocation}`);
     return null;
   }
@@ -636,7 +632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/job-assignments", async (req, res) => {
     try {
       console.log("📋 Creating job assignment:", req.body);
-
+      
       // Add GPS coordinates based on workLocation (postcode)
       if (req.body.workLocation) {
         const coordinates = getPostcodeCoordinates(req.body.workLocation);
@@ -648,10 +644,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`⚠️ No GPS coordinates found for postcode: ${req.body.workLocation}`);
         }
       }
-
+      
       const validatedAssignment = insertJobAssignmentSchema.parse(req.body);
       const assignment = await storage.createJobAssignment(validatedAssignment);
-
+      
       // Send Telegram notification if requested
       if (req.body.sendTelegramNotification) {
         try {
@@ -669,7 +665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("⚠️ Failed to send Telegram notification:", telegramError);
         }
       }
-
+      
       res.status(201).json(assignment);
     } catch (error) {
       console.error("Error creating job assignment:", error);
@@ -682,12 +678,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       console.log("🔍 Fetching job assignment by ID:", id);
-
+      
       const assignment = await storage.getJobAssignment(id);
       if (!assignment) {
         return res.status(404).json({ error: "Assignment not found" });
       }
-
+      
       console.log("📋 Found assignment:", assignment.id, assignment.contractorName);
       res.json(assignment);
     } catch (error) {
@@ -701,12 +697,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       console.log("📝 Updating job assignment:", id, "with:", req.body);
-
+      
       const updated = await storage.updateJobAssignment(id, req.body);
       if (!updated) {
         return res.status(404).json({ error: "Assignment not found" });
       }
-
+      
       res.status(200).json(updated);
     } catch (error) {
       console.error("Error updating job assignment:", error);
@@ -719,9 +715,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       console.log("🗑️ Deleting job assignment:", id);
-
+      
       await storage.deleteJobAssignment(id);
-
+      
       res.status(200).json({ message: "Assignment deleted successfully" });
     } catch (error) {
       console.error("Error deleting job assignment:", error);
@@ -733,9 +729,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/telegram-webhook", async (req, res) => {
     try {
       console.log('🔔 Telegram webhook received:', JSON.stringify(req.body, null, 2));
-
+      
       const { message } = req.body;
-
+      
       if (!message || !message.text) {
         return res.status(200).json({ ok: true, message: "No text message" });
       }
@@ -743,36 +739,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contractorName = message.from?.first_name || "Unknown Contractor";
       const contractorPhone = message.contact?.phone_number;
       const messageText = message.text.toLowerCase();
-
+      
       // Check if this is a contractor reply (not from admin)
       const isContractorReply = message.from?.id !== 7617462316; // Not Rudy's ID
-
+      
       if (isContractorReply && (
-        messageText.includes('hello') ||
-        messageText.includes('hi') ||
-        messageText.includes('work') ||
+        messageText.includes('hello') || 
+        messageText.includes('hi') || 
+        messageText.includes('work') || 
         messageText.includes('job') ||
         messageText.includes('ready') ||
         messageText.includes('start')
       )) {
         console.log('🎯 Contractor reply detected from:', contractorName);
-
+        
         // Generate unique ID and send onboarding form
         const telegramService = new TelegramService();
         const result = await telegramService.sendOnboardingForm(contractorName, contractorPhone);
-
+        
         if (result.success) {
           console.log('✅ Auto-sent onboarding form with ID:', result.contractorId);
-
+          
           console.log('📋 Contractor Details Captured:');
           console.log('   Name:', contractorName);
           console.log('   Telegram ID:', message.from?.id);
           console.log('   Generated Contractor ID:', result.contractorId);
         }
       }
-
+      
       res.status(200).json({ ok: true });
-
+      
     } catch (error) {
       console.error('❌ Telegram webhook error:', error);
       res.status(200).json({ ok: true, error: String(error) });
@@ -783,14 +779,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/reprocess-hbxl-csv", async (req, res) => {
     try {
       console.log('🔄 Re-processing authentic HBXL CSV file to extract missing electrical tasks...');
-
+      
       // Since the original CSV file content isn't stored, ask user to re-upload
       // the complete HBXL file with all 21 electrical tasks
-      res.status(400).json({
+      res.status(400).json({ 
         error: "Original CSV content not stored. Please re-upload the complete 'Job 49 Flat2 1 Bedroom 1Smart Schedule Export.csv' file with all 21 electrical tasks.",
         suggestion: "Use the CSV upload interface to upload the complete HBXL file again."
       });
-
+      
     } catch (error) {
       console.error('❌ Error re-processing HBXL CSV:', error);
       res.status(500).json({ error: 'Failed to re-process HBXL CSV file' });
@@ -801,7 +797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/uploaded-jobs", async (req, res) => {
     try {
       console.log('📋 Extracting ONLY authentic CSV task data...');
-
+      
       // Get the actual job from database with stored phase task data
       const storedJobs = await storage.getJobs();
       // Prioritize jobs with extracted task data, then fall back to the original upload
@@ -813,27 +809,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phaseTaskDataLength: job.phaseTaskData ? job.phaseTaskData.length : 0,
         hasTaskData: !!job.phaseTaskData && job.phaseTaskData.trim() !== '{}' && job.phaseTaskData.trim() !== ''
       })));
-
+      
       // Priority: 1) Jobs with extracted task data, 2) The authentic HBXL job
       let csvUploadJob = storedJobs.find(job => job.phaseTaskData && job.phaseTaskData.trim() !== '{}' && job.phaseTaskData.trim() !== '');
       if (!csvUploadJob) {
         // Use the authentic HBXL job "Job 49 Flat2 1 Bedroom 1Smart Schedule Export.csv"
         csvUploadJob = storedJobs.find(job => job.uploadId === 'f9126100-d429-4384-865f-55df43e9e8ec');
       }
-
+      
       console.log('🎯 Selected job:', {
         id: csvUploadJob?.id,
         title: csvUploadJob?.title,
         hasTaskData: !!csvUploadJob?.phaseTaskData
       });
-
+      
       if (!csvUploadJob) {
         return res.json([]);
       }
-
+      
       // Check if we have stored phase task data in the job
-      let phaseData: Record<string, Array<{ description: string, quantity: number, task: string }>> = {};
-
+      let phaseData: Record<string, Array<{description: string, quantity: number, task: string}>> = {};
+      
       if (csvUploadJob.phaseTaskData) {
         try {
           phaseData = JSON.parse(csvUploadJob.phaseTaskData);
@@ -841,7 +837,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.warn('⚠️ Failed to parse stored phase task data');
         }
       }
-
+      
       // If no stored task data, create fallback structure showing data missing
       if (Object.keys(phaseData).length === 0) {
         const phases = csvUploadJob.phases ? csvUploadJob.phases.split(', ') : [];
@@ -853,7 +849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }];
         });
       }
-
+      
       const uploadedJobs = [{
         id: "flat2-job",
         name: csvUploadJob.title,
@@ -864,10 +860,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phaseData: phaseData,
         uploadId: csvUploadJob.uploadId
       }];
-
+      
       console.log('✅ Returning authentic CSV data only - no assumptions made');
       res.json(uploadedJobs);
-
+      
     } catch (error) {
       console.error('❌ Error fetching authentic CSV data:', error);
       res.status(500).json({ error: 'Failed to fetch CSV data' });
@@ -879,21 +875,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { contractorName, contractorPhone } = req.body;
       console.log('📱 Onboarding form request for:', contractorName);
-
+      
       if (!contractorName) {
-        return res.status(400).json({
-          success: false,
-          error: 'Contractor name is required'
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Contractor name is required' 
         });
       }
-
+      
       const telegramService = new TelegramService();
       const result = await telegramService.sendOnboardingForm(contractorName, contractorPhone);
-
+      
       if (result.success) {
         console.log('✅ Onboarding form sent successfully with ID:', result.contractorId);
-        res.json({
-          success: true,
+        res.json({ 
+          success: true, 
           message: `Onboarding form sent to ${contractorName}`,
           contractorId: result.contractorId,
           messageId: result.messageId,
@@ -901,17 +897,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } else {
         console.log('⚠️ Onboarding form failed:', result.error);
-        res.json({
-          success: false,
+        res.json({ 
+          success: false, 
           message: `Failed to send onboarding form: ${result.error}`,
           error: result.error
         });
       }
-
+      
     } catch (error) {
       console.error('❌ Onboarding form error:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to send onboarding form',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -922,31 +918,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/send-contractor-hello", async (req, res) => {
     try {
       console.log('📱 Contractor hello message request');
-
+      
       const telegramService = new TelegramService();
       const result = await telegramService.sendContractorHello('James Carpenter');
-
+      
       if (result.success) {
         console.log('✅ Contractor hello message sent successfully');
-        res.json({
-          success: true,
+        res.json({ 
+          success: true, 
           message: 'Hello message sent from James Carpenter',
           messageId: result.messageId,
           simulated: result.simulated
         });
       } else {
         console.log('⚠️ Contractor hello message failed:', result.error);
-        res.json({
-          success: false,
+        res.json({ 
+          success: false, 
           message: `Failed to send hello message: ${result.error}`,
           error: result.error
         });
       }
-
+      
     } catch (error) {
       console.error('❌ Contractor hello message error:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to send hello message',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -957,7 +953,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/send-telegram-notification", async (req, res) => {
     try {
       const { contractorName, phone, hbxlJob, buildPhases, workLocation, startDate } = req.body;
-
+      
       console.log('📱 Telegram notification request:', {
         contractorName,
         phone,
@@ -969,7 +965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use imported TelegramService
       const telegramService = new TelegramService();
-
+      
       // Send real Telegram notification
       const result = await telegramService.sendJobAssignment({
         contractorName,
@@ -979,11 +975,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         workLocation,
         startDate
       });
-
+      
       if (result.success) {
         console.log('✅ Telegram notification sent successfully');
-        res.json({
-          success: true,
+        res.json({ 
+          success: true, 
           message: `Notification sent to ${contractorName} (${phone})`,
           details: {
             job: hbxlJob,
@@ -996,17 +992,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } else {
         console.log('⚠️ Telegram notification failed:', result.error);
-        res.json({
-          success: false,
+        res.json({ 
+          success: false, 
           message: `Failed to send notification: ${result.error}`,
           details: { error: result.error }
         });
       }
-
+      
     } catch (error) {
       console.error('❌ Telegram notification error:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to send notification',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1017,14 +1013,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/telegram/test", async (req, res) => {
     try {
       const telegramService = new TelegramService();
-
+      
       const result = await telegramService.testConnection();
       res.json(result);
-
+      
     } catch (error) {
       console.error('❌ Telegram test error:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to test Telegram connection',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1035,23 +1031,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/telegram/send-custom", async (req, res) => {
     try {
       const { chatId, message } = req.body;
-
+      
       if (!chatId || !message) {
-        return res.status(400).json({
-          success: false,
-          error: 'chatId and message are required'
+        return res.status(400).json({ 
+          success: false, 
+          error: 'chatId and message are required' 
         });
       }
 
       const telegramService = new TelegramService();
       const result = await telegramService.sendCustomMessage(chatId, message);
-
+      
       res.json(result);
-
+      
     } catch (error) {
       console.error('❌ Custom message error:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to send custom message',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1062,23 +1058,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/telegram/recent-messages", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 10;
-
+      
       const telegramService = new TelegramService();
       const result = await telegramService.getRecentMessages(limit);
-
+      
       if (result.success) {
         // Filter to show messages from specific users or with relevant content
         const relevantMessages = result.messages?.filter((msg: any) => {
           const senderName = msg.from?.first_name?.toLowerCase() || '';
           const messageText = msg.text?.toLowerCase() || '';
-
+          
           // Look for messages from Marius or containing work-related keywords
-          return senderName.includes('marius') ||
-            messageText.includes('work') ||
-            messageText.includes('job') ||
-            messageText.includes('ready') ||
-            messageText.includes('hello') ||
-            messageText.includes('hi');
+          return senderName.includes('marius') || 
+                 messageText.includes('work') || 
+                 messageText.includes('job') ||
+                 messageText.includes('ready') ||
+                 messageText.includes('hello') ||
+                 messageText.includes('hi');
         }) || [];
 
         res.json({
@@ -1090,11 +1086,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.json(result);
       }
-
+      
     } catch (error) {
       console.error('❌ Error getting recent messages:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to get recent messages',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1106,13 +1102,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const telegramService = new TelegramService();
       const result = await telegramService.getRecentMessages();
-
+      
       res.json(result);
-
+      
     } catch (error) {
       console.error('❌ Error getting messages:', error);
-      res.status(500).json({
-        success: false,
+      res.status(500).json({ 
+        success: false, 
         error: 'Failed to get messages',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1123,19 +1119,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/contractor-login", async (req, res) => {
     try {
       const { username, password } = req.body;
-
+      
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password required" });
       }
-
+      
       // Find contractor by username and password
       const applications = await storage.getContractorApplications();
-      const contractor = applications.find(app =>
-        app.username === username &&
+      const contractor = applications.find(app => 
+        app.username === username && 
         app.password === password &&
         app.status === "approved"
       );
-
+      
       if (contractor) {
         // Remove sensitive data before sending response
         const { password: _, ...contractorData } = contractor;
@@ -1191,7 +1187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/contractor-applications", async (req, res) => {
     try {
       console.log("📋 Received contractor application submission:", req.body);
-
+      
       // Convert boolean values from strings if needed
       const processedData = {
         ...req.body,
@@ -1202,20 +1198,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasValidCscs: req.body.hasValidCscs?.toString() || "false",
         hasOwnTools: req.body.hasOwnTools?.toString() || "false"
       };
-
+      
       const validation = insertContractorApplicationSchema.safeParse(processedData);
       if (!validation.success) {
         console.error("❌ Validation failed:", validation.error.errors);
-        return res.status(400).json({
-          error: "Invalid application data",
-          details: validation.error.errors
+        return res.status(400).json({ 
+          error: "Invalid application data", 
+          details: validation.error.errors 
         });
       }
-
+      
       const application = await storage.createContractorApplication(validation.data);
-
+      
       console.log("✅ Contractor application created successfully:", application.id);
-
+      
       // Send notification to admin (your Telegram)
       try {
         const telegramService = new TelegramService();
@@ -1228,13 +1224,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `📍 ${application.city}, ${application.postcode}\n\n` +
           `🔗 **View Application:** http://localhost:5000/admin/applications/${application.id}\n\n` +
           `⏰ Submitted: ${new Date().toLocaleString()}`;
-
+        
         await telegramService.sendCustomMessage("7617462316", message);
         console.log("📱 Admin notification sent successfully");
       } catch (telegramError) {
         console.error("⚠️ Failed to send admin notification:", telegramError);
       }
-
+      
       res.status(201).json(application);
     } catch (error) {
       console.error("Error creating contractor application:", error);
@@ -1246,22 +1242,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const updates = req.body;
-
+      
       // Get the original application before updating
       const originalApplication = await storage.getContractorApplication(id);
       if (!originalApplication) {
         return res.status(404).json({ error: "Application not found" });
       }
-
+      
       const updated = await storage.updateContractorApplication(id, updates);
       if (!updated) {
         return res.status(404).json({ error: "Application not found" });
       }
-
+      
       // Send Telegram notification if status changed to approved or rejected
       if (updates.status && updates.status !== originalApplication.status) {
         const telegramService = new TelegramService();
-
+        
         if (updates.status === 'approved') {
           console.log('📱 Sending approval notification for:', updated.firstName, updated.lastName);
           await telegramService.sendApprovalNotification({
@@ -1284,7 +1280,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-
+      
       res.json(updated);
     } catch (error) {
       console.error("Error updating contractor application:", error);
@@ -1308,7 +1304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/work-sessions", async (req, res) => {
     try {
       console.log("🕐 Creating work session:", req.body);
-
+      
       // Convert string dates to Date objects for validation
       const sessionData = {
         ...req.body,
@@ -1320,7 +1316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (sessionData.jobSiteLocation && (sessionData.jobSiteLocation.includes('Work Site:') || sessionData.jobSiteLocation === 'Unknown Location')) {
         // Get all jobs to find the proper location
         const jobs = await storage.getJobs();
-
+        
         // Find the active job location for this contractor
         for (const job of jobs) {
           if (job.contractorName === sessionData.contractorName && job.location) {
@@ -1329,7 +1325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             break;
           }
         }
-
+        
         // Fallback: Use first available job location if contractor-specific job not found
         if (sessionData.jobSiteLocation.includes('Work Site:') || sessionData.jobSiteLocation === 'Unknown Location') {
           const anyJob = jobs.find(job => job.location);
@@ -1339,19 +1335,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
       }
-
+      
       console.log("🔍 Work session data before validation:", JSON.stringify(sessionData, null, 2));
-
+      
       const validationResult = insertWorkSessionSchema.safeParse(sessionData);
       if (!validationResult.success) {
         console.error("❌ Work session validation failed:", validationResult.error.errors);
-        return res.status(400).json({
-          error: "Invalid work session data",
+        return res.status(400).json({ 
+          error: "Invalid work session data", 
           details: validationResult.error.errors,
           receivedData: sessionData
         });
       }
-
+      
       const session = await storage.createWorkSession(validationResult.data);
       console.log("✅ Work session created successfully:", session.id);
       res.status(201).json(session);
@@ -1380,31 +1376,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log("🕐 Fetching active session for:", req.params.contractorName);
       let session = await storage.getActiveWorkSession(req.params.contractorName);
-
+      
       // Automatic 5pm logout enforcement
       if (session && session.status === 'active') {
         const now = new Date();
         const currentHour = now.getHours();
-
+        
         // Force logout if it's 5pm or later
         if (currentHour >= 17) {
           console.log(`🕐 Auto-logout at ${currentHour}:${now.getMinutes().toString().padStart(2, '0')} - ending session for ${req.params.contractorName}`);
-
+          
           // Calculate end time as 5:00 PM sharp
           const endTime = new Date(session.startTime);
           endTime.setHours(17, 0, 0, 0);
-
+          
           // Update session to completed
           const updateData = {
             endTime,
             status: 'completed' as const
           };
-
+          
           session = await storage.updateWorkSession(session.id, updateData);
           console.log(`✅ Session auto-completed for ${req.params.contractorName}`);
         }
       }
-
+      
       if (session) {
         res.json(session);
       } else {
@@ -1419,23 +1415,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/work-sessions/:id", async (req, res) => {
     try {
       console.log("🕐 Updating work session with GPS tracking:", req.params.id);
-      console.log("📍 GPS Data:", {
-        startLat: req.body.startLatitude,
+      console.log("📍 GPS Data:", { 
+        startLat: req.body.startLatitude, 
         startLng: req.body.startLongitude,
-        endLat: req.body.endLatitude,
-        endLng: req.body.endLongitude
+        endLat: req.body.endLatitude, 
+        endLng: req.body.endLongitude 
       });
-
+      
       // Convert string dates to Date objects if provided
       const updateData = {
         ...req.body,
         startTime: req.body.startTime ? new Date(req.body.startTime) : undefined,
         endTime: req.body.endTime ? new Date(req.body.endTime) : undefined
       };
-
+      
       // Calculate GPS distance if both coordinates provided
-      if (updateData.startLatitude && updateData.startLongitude &&
-        updateData.endLatitude && updateData.endLongitude) {
+      if (updateData.startLatitude && updateData.startLongitude && 
+          updateData.endLatitude && updateData.endLongitude) {
         const distance = calculateGPSDistance(
           parseFloat(updateData.startLatitude),
           parseFloat(updateData.startLongitude),
@@ -1444,7 +1440,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         console.log(`📍 GPS Movement: ${distance.toFixed(0)}m during work session`);
       }
-
+      
       const session = await storage.updateWorkSession(req.params.id, updateData);
       if (session) {
         console.log("✅ Work session completed with GPS tracking");
@@ -1463,10 +1459,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const R = 6371000; // Earth's radius in meters
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c; // Distance in meters
   }
 
@@ -1477,16 +1473,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/update-location", async (req, res) => {
     try {
       const { contractorName, latitude, longitude } = req.body;
-
+      
       if (!contractorName || !latitude || !longitude) {
         return res.status(400).json({ error: "Missing required fields" });
       }
-
+      
       // Store current location using shared tracker
       updateContractorLocation(contractorName, parseFloat(latitude), parseFloat(longitude));
-
+      
       res.json({ success: true, message: "Location updated successfully" });
-
+      
     } catch (error) {
       console.error("Error updating location:", error);
       res.status(500).json({ error: "Failed to update location" });
@@ -1498,18 +1494,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const contractorName = decodeURIComponent(req.params.name);
       const location = getContractorLocation(contractorName);
-
+      
       if (!location) {
         return res.status(404).json({ error: "Location not found" });
       }
-
+      
       res.json({
         contractorName,
         latitude: location.latitude,
         longitude: location.longitude,
         lastUpdate: location.lastUpdate
       });
-
+      
     } catch (error) {
       console.error("Error getting contractor location:", error);
       res.status(500).json({ error: "Failed to get location" });
@@ -1520,23 +1516,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/check-proximity", async (req, res) => {
     try {
       const { userLatitude, userLongitude, contractorName } = req.body;
-
+      
       console.log(`🔍 MULTI-SITE GPS Check for ${contractorName}:`);
       console.log(`📍 User Location: ${userLatitude}, ${userLongitude}`);
-
+      
       // Update contractor's current location for real-time tracking
       if (contractorName && userLatitude && userLongitude) {
         updateContractorLocation(contractorName, parseFloat(userLatitude), parseFloat(userLongitude));
       }
-
+      
       // Check proximity to ALL job sites
       const allJobs = await storage.getJobs();
       console.log(`🔍 Found ${allJobs.length} total jobs in database`);
-
+      
       let nearestJobSite = null;
       let nearestDistance = Infinity;
       let authorizedSites = [];
-
+      
       for (const job of allJobs) {
         if (job.location) {
           console.log(`🏗️ Checking job: ${job.title} at ${job.location}`);
@@ -1546,14 +1542,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`📍 GPS coordinates for ${job.location}: ${jobSiteCoords.latitude}, ${jobSiteCoords.longitude}`);
             const jobSiteLat = parseFloat(jobSiteCoords.latitude);
             const jobSiteLon = parseFloat(jobSiteCoords.longitude);
-
+            
             const distance = calculateGPSDistance(
               parseFloat(userLatitude),
               parseFloat(userLongitude),
               jobSiteLat,
               jobSiteLon
             );
-
+            
             // Track nearest job site
             if (distance < nearestDistance) {
               nearestDistance = distance;
@@ -1564,7 +1560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 jobId: job.id
               };
             }
-
+            
             // Check if within login range (3.5km = 3500m) of this site
             if (distance <= 3500) {
               authorizedSites.push({
@@ -1577,34 +1573,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
       }
-
+      
       const withinRange = authorizedSites.length > 0;
-
+      
       if (withinRange) {
         console.log(`✅ AUTHORIZED: ${contractorName} can clock in at ${authorizedSites.length} site(s)`);
         authorizedSites.forEach(site => {
           console.log(`   📍 ${site.location} (${site.jobTitle}) - ${site.distance}m away`);
         });
       } else {
-        const nearestInfo = nearestJobSite ?
+        const nearestInfo = nearestJobSite ? 
           `${Math.round(nearestDistance)}m from ${nearestJobSite.location}` :
           'no job sites found';
         console.log(`❌ TOO FAR: ${contractorName} not within 3500m (3.5km) of any job site - ${nearestInfo}`);
       }
-
+      
       res.json({
         withinRange,
         authorizedSites,
         nearestJobSite,
         allowedDistance: 3500, // 3.5km in meters
-        message: withinRange ?
+        message: withinRange ? 
           `Access granted to ${authorizedSites.length} job site(s)` :
           `Must be within 100m of a job site to clock in`
       });
-
+      
     } catch (error) {
       console.error("Error in multi-site proximity check:", error);
-      res.status(500).json({
+      res.status(500).json({ 
         error: "Failed to check proximity",
         withinRange: false,
         authorizedSites: []
@@ -1740,18 +1736,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin-inspections/batch", async (req, res) => {
     try {
       const { inspections } = req.body;
-
+      
       if (!Array.isArray(inspections)) {
         return res.status(400).json({ error: "Inspections must be an array" });
       }
-
+      
       const createdInspections = [];
-
+      
       for (const inspectionData of inspections) {
         const inspection = await storage.createAdminInspection({
           assignmentId: inspectionData.assignmentId,
           inspectorName: inspectionData.inspectedBy,
-          inspectionType: "task_inspection",
+          inspectionType: "task_inspection", 
           workQualityRating: (inspectionData.inspectionStatus === 'approved' ? 5 : 3).toString(),
           weatherConditions: "Not specified",
           progressComments: `Task: ${inspectionData.taskName} - ${inspectionData.inspectionStatus}`,
@@ -1761,10 +1757,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           photoUrls: [],
           status: "completed"
         });
-
+        
         createdInspections.push(inspection);
       }
-
+      
       console.log(`📋 Created ${createdInspections.length} task-based admin inspections`);
       res.status(201).json(createdInspections);
     } catch (error) {
@@ -1791,7 +1787,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/progress-monitor/check-milestones", async (req, res) => {
     try {
       const { assignmentId } = req.body;
-
+      
       if (!assignmentId) {
         return res.status(400).json({ error: "Assignment ID is required" });
       }
@@ -1799,7 +1795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { ProgressMonitor } = await import("./progress-monitor");
       const progressMonitor = new ProgressMonitor();
       await progressMonitor.checkProgressMilestones(assignmentId);
-
+      
       console.log("✅ Progress milestones checked for assignment:", assignmentId);
       res.status(200).json({ success: true, message: "Milestones checked successfully" });
     } catch (error) {
@@ -1812,7 +1808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/progress-monitor/update-task", async (req, res) => {
     try {
       const { assignmentId, taskId, completed } = req.body;
-
+      
       if (!assignmentId || !taskId || typeof completed !== 'boolean') {
         return res.status(400).json({ error: "Assignment ID, task ID, and completion status are required" });
       }
@@ -1820,7 +1816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { ProgressMonitor } = await import("./progress-monitor");
       const progressMonitor = new ProgressMonitor();
       await progressMonitor.updateTaskProgress(assignmentId, taskId, completed);
-
+      
       console.log("✅ Task progress updated:", { assignmentId, taskId, completed });
       res.status(200).json({ success: true, message: "Task progress updated" });
     } catch (error) {
@@ -1860,15 +1856,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/force-create-inspection", async (req, res) => {
     try {
       const { assignmentId, contractorName, notificationType } = req.body;
-
+      
       const inspection = await storage.createInspectionNotification({
         assignmentId: assignmentId || "test-assignment",
-        contractorName: contractorName || "Test Contractor",
+        contractorName: contractorName || "Test Contractor", 
         notificationType: notificationType || "50_percent_ready",
         notificationSent: true,
         inspectionCompleted: false
       });
-
+      
       console.log(`🚨 FORCE CREATED inspection notification:`, inspection);
       res.json({ success: true, inspection });
     } catch (error) {
@@ -1911,14 +1907,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { assignmentId, percentage } = req.params;
       const assignment = await storage.getJobAssignment(assignmentId);
-
+      
       if (!assignment) {
         return res.status(404).json({ error: "Assignment not found" });
       }
 
       const progressPercentage = parseInt(percentage);
       let notificationType = "";
-
+      
       if (progressPercentage >= 50 && progressPercentage < 100) {
         notificationType = "50_percent_ready";
       } else if (progressPercentage >= 100) {
@@ -1943,10 +1939,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       console.log(`🚨 DEMO: ${notificationType.replace('_', ' ')} inspection triggered for ${assignment.contractorName}`);
-      res.json({
-        success: true,
+      res.json({ 
+        success: true, 
         message: `${notificationType.replace('_', ' ')} inspection notification created`,
-        notification
+        notification 
       });
     } catch (error) {
       console.error("Error in demo trigger:", error);
@@ -1958,28 +1954,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/progress-update", async (req, res) => {
     try {
       const { assignmentId, completedTasks, totalTasks, percentage } = req.body;
-
+      
       console.log(`📊 Progress update received: ${completedTasks}/${totalTasks} tasks (${percentage}%) for assignment ${assignmentId}`);
-
+      
       // Import and use ProgressMonitor
       const { ProgressMonitor } = await import('./progress-monitor');
       const progressMonitor = new ProgressMonitor();
-
+      
       // Manually trigger milestone check with provided percentage
       if (percentage >= 50) {
         console.log(`🎯 50% milestone reached (${percentage}%) - triggering inspection`);
         await progressMonitor.checkProgressMilestones(assignmentId);
       }
-
+      
       if (percentage >= 100) {
         console.log(`🎯 100% milestone reached (${percentage}%) - triggering inspection`);
         await progressMonitor.checkProgressMilestones(assignmentId);
       }
-
-      res.json({
-        success: true,
+      
+      res.json({ 
+        success: true, 
         message: `Progress updated: ${percentage}%`,
-        milestonesChecked: percentage >= 50
+        milestonesChecked: percentage >= 50 
       });
     } catch (error) {
       console.error("❌ Error updating progress:", error);
@@ -2004,31 +2000,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { assignmentId } = req.params;
       console.log(`🤝 Fetching team task progress for assignment: ${assignmentId}`);
-
+      
       // Get all assignments to find teammates working on the same job
       const allAssignments = await storage.getJobAssignments();
       const currentAssignment = allAssignments.find((a: any) => a.id === assignmentId);
-
+      
       if (!currentAssignment) {
         console.log(`❌ Assignment ${assignmentId} not found`);
         return res.json([]);
       }
-
+      
       // Find all contractors working on the same job location (teammates)
-      const teamAssignments = allAssignments.filter((a: any) =>
-        a.hbxlJob === currentAssignment.hbxlJob &&
+      const teamAssignments = allAssignments.filter((a: any) => 
+        a.hbxlJob === currentAssignment.hbxlJob && 
         a.workLocation === currentAssignment.workLocation &&
         a.status === 'assigned'
       );
-
+      
       console.log(`🤝 Found ${teamAssignments.length} contractors working on job: ${currentAssignment.hbxlJob} at ${currentAssignment.workLocation}`);
-
+      
       // Get task progress from all team members
       const teamProgress: any[] = [];
-
+      
       for (const assignment of teamAssignments) {
         const contractorProgress = await storage.getTaskProgress(assignment.contractorName, assignment.id);
-
+        
         contractorProgress.forEach((progress: any) => {
           if (progress.completed) {
             teamProgress.push({
@@ -2039,7 +2035,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
       }
-
+      
       console.log(`🤝 Found ${teamProgress.length} completed tasks across ${teamAssignments.length} team members`);
       res.json(teamProgress);
     } catch (error) {
@@ -2062,13 +2058,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { contractorName, assignmentId, taskId } = req.params;
       const { completed } = req.body;
-
+      
       const progress = await storage.updateTaskCompletion(contractorName, assignmentId, taskId, completed);
-
+      
       if (!progress) {
         return res.status(404).json({ error: "Task progress not found" });
       }
-
+      
       res.json(progress);
     } catch (error) {
       console.error("Error updating task progress:", error);
@@ -2080,9 +2076,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/task-progress/update", async (req, res) => {
     try {
       const { contractorName, assignmentId, taskId, taskDescription, phase, completed } = req.body;
-
+      
       console.log(`📝 Processing task update: ${taskId} - ${completed ? 'completed' : 'incomplete'}`);
-
+      
       // Try to update existing record first
       try {
         const existing = await storage.updateTaskCompletion(contractorName, assignmentId, taskId, completed);
@@ -2093,14 +2089,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (updateError) {
         console.log(`📝 Task not found, creating new record: ${taskId}`);
       }
-
+      
       // Create new task progress record if update failed
       try {
         // Derive taskDescription and phase from taskId if not provided
         const description = taskDescription || taskId.replace(/^phase-\d+-item-\d+-/, '').replace(/-/g, ' ');
         const phaseMatch = taskId.match(/^phase-(\d+)/);
         const derivedPhase = phase || (phaseMatch ? `Phase ${phaseMatch[1]}` : 'Unknown Phase');
-
+        
         const newProgress = await storage.createTaskProgress({
           contractorName,
           assignmentId,
@@ -2109,7 +2105,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phase: derivedPhase,
           completed: completed || false
         });
-
+        
         console.log(`✅ Created new task progress: ${taskId} - ${completed ? 'completed' : 'in progress'}`);
         res.json({ success: true, action: 'created', data: newProgress });
       } catch (createError) {
@@ -2128,17 +2124,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { inspections } = req.body;
       console.log("📋 Processing batch inspection submission:", inspections?.length || 0, "tasks");
-
+      
       if (!inspections || !Array.isArray(inspections)) {
         return res.status(400).json({ error: "Invalid inspections data" });
       }
-
+      
       const results = [];
       for (const inspection of inspections) {
         const result = await storage.createTaskInspectionResult(inspection);
         results.push(result);
       }
-
+      
       console.log("✅ Created", results.length, "task inspection results");
       res.json({ success: true, results });
     } catch (error) {
@@ -2152,18 +2148,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { contractorName } = req.params;
       console.log("📋 Fetching task inspection results for contractor:", contractorName);
-
+      
       // Get admin inspections that are task-based and contain issues/feedback for this contractor
       const adminInspections = await storage.getAdminInspectionsForContractor(contractorName);
-
+      
       // Transform admin inspection data to match the task inspection format
       // Only show issues that haven't been marked as fixed by contractor
       const taskInspectionResults = adminInspections
-        .filter(inspection =>
-          inspection.inspectionType === 'task_inspection' &&
-          (inspection.progressComments?.includes('issues') ||
-            inspection.safetyNotes ||
-            inspection.materialsIssues) &&
+        .filter(inspection => 
+          inspection.inspectionType === 'task_inspection' && 
+          (inspection.progressComments?.includes('issues') || 
+           inspection.safetyNotes || 
+           inspection.materialsIssues) &&
           inspection.status !== 'contractor_fixed' && // Exclude already fixed issues
           inspection.status !== 'approved' // Exclude admin-approved issues to prevent infinite loop
         )
@@ -2172,7 +2168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const taskMatch = inspection.progressComments?.match(/Task: (.+?) - (approved|issues)/);
           const taskName = taskMatch ? taskMatch[1] : 'Unknown Task';
           const status = taskMatch ? taskMatch[2] : 'pending';
-
+          
           return {
             id: inspection.id,
             assignmentId: inspection.assignmentId,
@@ -2182,8 +2178,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             taskName: taskName,
             inspectionStatus: status,
             notes: [
-              inspection.safetyNotes,
-              inspection.materialsIssues,
+              inspection.safetyNotes, 
+              inspection.materialsIssues, 
               inspection.nextActions
             ].filter(Boolean).join(' | '),
             photos: inspection.photoUrls || [],
@@ -2193,7 +2189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             contractorViewedAt: inspection.createdAt
           };
         });
-
+      
       console.log("📋 Retrieved", taskInspectionResults.length, "task inspection results for", contractorName);
       res.json(taskInspectionResults);
     } catch (error) {
@@ -2207,22 +2203,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { inspectionId } = req.params;
       const { contractorName, fixNotes } = req.body;
-
+      
       console.log("✅ Contractor marking inspection as done:", { inspectionId, contractorName });
-
+      
       // Update the admin inspection with contractor resolution
       const updatedInspection = await storage.markInspectionResolvedByContractor(
-        inspectionId,
-        contractorName,
+        inspectionId, 
+        contractorName, 
         fixNotes
       );
-
+      
       if (!updatedInspection) {
         return res.status(404).json({ error: "Inspection not found" });
       }
-
-      res.json({
-        success: true,
+      
+      res.json({ 
+        success: true, 
         message: "Issue marked as resolved. Waiting for admin approval.",
         inspection: updatedInspection
       });
@@ -2236,10 +2232,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/contractor-fixed-inspections", async (req, res) => {
     try {
       console.log("📋 Fetching contractor-fixed inspections for admin review");
-
+      
       // Get all admin inspections that have been marked as fixed by contractors
       const fixedInspections = await storage.getContractorFixedInspections();
-
+      
       res.json(fixedInspections);
     } catch (error) {
       console.error("Error fetching contractor-fixed inspections:", error);
@@ -2252,17 +2248,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { inspectionId } = req.params;
       const { adminName } = req.body;
-
+      
       console.log("✅ Admin approving contractor fix:", { inspectionId, adminName });
-
+      
       const approvedInspection = await storage.approveContractorFix(inspectionId, adminName);
-
+      
       if (!approvedInspection) {
         return res.status(404).json({ error: "Inspection not found" });
       }
-
-      res.json({
-        success: true,
+      
+      res.json({ 
+        success: true, 
         message: "Contractor fix approved successfully",
         inspection: approvedInspection
       });
@@ -2273,24 +2269,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Real-time clock monitoring endpoints for admin dashboard
-
+  
   // Get active work sessions (currently clocked in contractors)
   app.get("/api/admin/active-sessions", async (req, res) => {
     try {
       console.log("📊 Fetching active work sessions for admin monitoring");
-
+      
       const activeSessions = await storage.getActiveWorkSessions();
-
+      
       // Clean up contractor names and filter to latest session per contractor
       const cleanedSessions = new Map();
-
+      
       activeSessions.forEach(session => {
         // Clean contractor name (trim whitespace, fix known issues)
         let cleanName = session.contractorName.trim();
         if (cleanName === 'Dalwayne Bailey') {
           cleanName = 'Dalwayne Diedericks';
         }
-
+        
         // Keep only the latest session for each contractor
         const existing = cleanedSessions.get(cleanName);
         if (!existing || new Date(session.startTime) > new Date(existing.startTime)) {
@@ -2300,7 +2296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       });
-
+      
       // Calculate session duration for each unique active session
       const sessionsWithDuration = Array.from(cleanedSessions.values()).map(session => {
         const startTime = new Date(session.startTime);
@@ -2308,7 +2304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const durationMs = now.getTime() - startTime.getTime();
         const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
         const durationMinutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
-
+        
         return {
           ...session,
           duration: `${durationHours}h ${durationMinutes}m`,
@@ -2324,7 +2320,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
         };
       });
-
+      
       console.log(`📈 Found ${sessionsWithDuration.length} active sessions`);
       res.json(sessionsWithDuration);
     } catch (error) {
@@ -2337,17 +2333,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/admin/recent-activities", async (req, res) => {
     try {
       console.log("📊 Fetching recent clock activities for admin monitoring");
-
+      
       const recentActivities = await storage.getRecentClockActivities();
-
+      
       // Debug logging for timestamp verification
       console.log(`🕐 Current server time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`);
       console.log(`📋 Recent activities found: ${recentActivities.length}`);
-
+      
       recentActivities.slice(0, 3).forEach((activity, index) => {
         console.log(`⏰ Activity ${index + 1}: ${activity.contractorName} ${activity.activity} at ${activity.actualTime || 'raw: ' + activity.timestamp}`);
       });
-
+      
       res.json(recentActivities);
     } catch (error) {
       console.error("Error fetching recent activities:", error);
@@ -2359,9 +2355,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/admin/today-sessions", async (req, res) => {
     try {
       console.log("📊 Fetching today's work sessions for admin monitoring");
-
+      
       const todaySessions = await storage.getTodayWorkSessions();
-
+      
       // Group sessions by contractor for daily totals
       const contractorDailyTotals = todaySessions.reduce((acc: any, session: any) => {
         const contractorName = session.contractorName;
@@ -2373,29 +2369,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             activeSession: null
           };
         }
-
+        
         const hours = parseFloat(session.totalHours || '0');
         acc[contractorName].sessions.push(session);
         acc[contractorName].totalDailyHours += hours;
-
+        
         if (session.status === 'active') {
           acc[contractorName].activeSession = session;
         }
-
+        
         return acc;
       }, {});
-
+      
       // Convert to array and format
       const dailySummary = Object.values(contractorDailyTotals).map((contractor: any) => ({
         ...contractor,
         totalDailyHours: contractor.totalDailyHours.toFixed(2)
       }));
-
+      
       console.log(`📊 Today's sessions: ${todaySessions.length} total, ${dailySummary.length} contractors`);
       dailySummary.forEach((contractor: any) => {
         console.log(`   👤 ${contractor.contractorName}: ${contractor.totalDailyHours}h (${contractor.sessions.length} sessions)`);
       });
-
+      
       res.json({
         sessions: todaySessions,
         dailySummary: dailySummary,
@@ -2413,22 +2409,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const weekEnding = req.query.weekEnding as string;
       console.log(`📊 Fetching time tracking data for week ending: ${weekEnding}`);
-
+      
       if (!weekEnding) {
         return res.status(400).json({ error: "weekEnding parameter required" });
       }
-
+      
       // Calculate week start and end dates
       const endDate = new Date(weekEnding);
       const startDate = new Date(endDate);
       startDate.setDate(endDate.getDate() - 6); // 7 days back
-
+      
       console.log(`📅 Week range: ${startDate.toDateString()} to ${endDate.toDateString()}`);
-
+      
       // Get all work sessions for the week
       const weekSessions = await storage.getWorkSessionsForWeek(startDate, endDate);
       console.log(`🕐 Found ${weekSessions.length} sessions for the week`);
-
+      
       // Group by contractor and calculate earnings with AUTHENTIC database pay rates
       const contractorEarnings = weekSessions.reduce(async (accPromise: any, session: any) => {
         const acc = await accPromise;
@@ -2449,31 +2445,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
             gpsVerified: true
           };
         }
-
+        
         // Use authentic database totalHours - Mandatory Rule #2: DATA INTEGRITY
         const sessionHours = parseFloat(session.totalHours || "0");
-
+        
         acc[contractorName].sessions.push({
           ...session,
           sessionHours: sessionHours.toFixed(2)
         });
         acc[contractorName].totalHours += sessionHours;
         acc[contractorName].hoursWorked += sessionHours;
-
+        
         return acc;
       }, Promise.resolve({}));
-
+      
       // Await the contractor earnings calculation
       const resolvedContractorEarnings = await contractorEarnings;
-
+      
       // Calculate earnings for each contractor
       Object.values(resolvedContractorEarnings).forEach((contractor: any) => {
         const hoursWorked = contractor.hoursWorked;
         const hourlyRate = contractor.hourlyRate;
-
+        
         // Weekend overtime disabled to match individual contractor calculations
         // Original hourlyRate used consistently
-
+        
         // Calculate gross earnings using same logic as individual contractor pages
         // Apply daily rate cap of hourlyRate * 8 for 8+ hour days, hourly rate for partial days
         let grossEarnings = 0;
@@ -2481,7 +2477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const sessionHours = parseFloat(session.sessionHours);
           const isFullDay = sessionHours >= 8;
           const dailyRate = hourlyRate * 8; // £150 for Dalwayne, £200 for Marius
-
+          
           if (isFullDay) {
             grossEarnings += dailyRate; // Pay daily rate for 8+ hours
           } else {
@@ -2489,20 +2485,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         });
         contractor.grossEarnings = grossEarnings;
-
+        
         // Calculate CIS deduction
         contractor.cisDeduction = contractor.grossEarnings * contractor.cisRate;
-
+        
         // Calculate net earnings - match individual contractor calculation method
         contractor.netEarnings = contractor.grossEarnings - contractor.cisDeduction;
-
+        
         // Round all monetary values
         contractor.grossEarnings = Math.round(contractor.grossEarnings * 100) / 100;
         contractor.cisDeduction = Math.round(contractor.cisDeduction * 100) / 100;
         contractor.netEarnings = Math.round(contractor.netEarnings * 100) / 100;
         contractor.totalHours = Math.round(contractor.totalHours * 100) / 100;
       });
-
+      
       // Calculate weekly totals
       const contractors = Object.values(resolvedContractorEarnings);
       const weeklyTotals = {
@@ -2512,9 +2508,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalNetEarnings: contractors.reduce((sum: number, c: any) => sum + c.netEarnings, 0),
         contractors: contractors.length
       };
-
+      
       console.log(`💰 Weekly totals: ${weeklyTotals.totalHours}h, £${weeklyTotals.totalGrossEarnings} gross, £${weeklyTotals.totalNetEarnings} net`);
-
+      
       res.json({
         weekEnding,
         weekStart: startDate.toISOString().split('T')[0],
@@ -2536,27 +2532,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!weekEnding) {
         return res.status(400).json({ error: "weekEnding parameter required" });
       }
-
+      
       console.log(`📤 Exporting time tracking data for week ending: ${weekEnding}`);
-
+      
       // Get the same data as the main endpoint
       const timeTrackingResponse = await fetch(`http://localhost:5000/api/admin/time-tracking?weekEnding=${weekEnding}`);
       const timeTrackingData = await timeTrackingResponse.json();
-
+      
       // Generate CSV content
       let csvContent = "Contractor Name,Total Hours,Hourly Rate,Gross Earnings,CIS Deduction,Net Earnings,Sessions Count,GPS Verified\n";
-
+      
       timeTrackingData.contractors.forEach((contractor: any) => {
         csvContent += `"${contractor.contractorName}",${contractor.totalHours},£${contractor.hourlyRate},£${contractor.grossEarnings},£${contractor.cisDeduction},£${contractor.netEarnings},${contractor.sessions.length},Yes\n`;
       });
-
+      
       // Add totals row
       csvContent += `\nTOTALS,${timeTrackingData.totals.totalHours},,£${timeTrackingData.totals.totalGrossEarnings},£${timeTrackingData.totals.totalCisDeduction},£${timeTrackingData.totals.totalNetEarnings},${timeTrackingData.sessionsCount},\n`;
-
+      
       // Set headers for CSV download
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="time-tracking-week-ending-${weekEnding}.csv"`);
-
+      
       res.send(csvContent);
     } catch (error) {
       console.error("Error exporting time tracking data:", error);
@@ -2568,18 +2564,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/project-cashflow", async (req, res) => {
     try {
       console.log("💰 Fetching project cashflow data - AUTHENTIC DATA ONLY");
-
+      
       // MANDATORY: Use ONLY authentic database sources and CSV uploads
       // Following Rule 2: DATA INTEGRITY - All data must come from authentic database sources
       // Following Rule 3: CSV DATA SUPREMACY - Only information in uploaded files must be used
-
+      
       // Check authentication context - only show data for current admin
       const session = req.session as any;
       const currentAdmin = session?.adminName;
       const currentContractor = session?.contractorName;
-
+      
       console.log("🔐 Auth context - Admin:", currentAdmin, "Contractor:", currentContractor);
-
+      
       // MANDATORY RULE: Account-specific data isolation
       if (currentContractor && currentContractor.toLowerCase().includes("earl")) {
         // Earl's contractor account - should only see his assigned work
@@ -2594,7 +2590,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return;
       }
-
+      
       // Admin account or other contractors continue with full processing
       if (!currentAdmin && !currentContractor) {
         console.log("❌ No valid authentication - returning empty data");
@@ -2608,11 +2604,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return;
       }
-
+      
       // Check for authentic job data in database
       const jobs = await storage.getJobs();
       const workSessions = await storage.getWorkSessions();
-
+      
       if (jobs.length === 0) {
         console.log("📊 No authentic job data found in database");
         res.json({
@@ -2625,11 +2621,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         return;
       }
-
+      
       // Filter data by account context - MANDATORY RULE: Account-specific data only
       let filteredJobs = jobs;
       let filteredWorkSessions = workSessions;
-
+      
       if (currentContractor) {
         // Contractor view: Only show jobs assigned to this contractor
         filteredJobs = jobs.filter(job => job.contractor?.name === currentContractor);
@@ -2639,19 +2635,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Admin view: Show all data (admin has full access)
         console.log(`🔒 Admin view: ${filteredJobs.length} jobs, ${filteredWorkSessions.length} sessions for admin ${currentAdmin}`);
       }
-
+      
       // Process authentic job data from database
       const projects = filteredJobs.map(job => {
         // Calculate contractor earnings from authentic work sessions
-        const jobWorkSessions = filteredWorkSessions.filter(session =>
-          session.contractorName === job.contractor?.name &&
-          session.location && job.location &&
+        const jobWorkSessions = filteredWorkSessions.filter(session => 
+          session.contractorName === job.contractor?.name && 
+          session.location && job.location && 
           session.location.toLowerCase().includes(job.location.toLowerCase())
         );
-
+        
         const totalHours = jobWorkSessions.reduce((sum, session) => sum + (session.totalHours || 0), 0);
         const contractorEarnings = Math.round(totalHours * 18); // £18/hour from authentic rate
-
+        
         return {
           id: job.id,
           projectName: `${job.title} - ${job.location}`,
@@ -2668,13 +2664,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalAuthenticHours: totalHours
         };
       });
-
+      
       const totalRevenue = projects.reduce((sum, p) => sum + p.totalBudget, 0);
       const totalCosts = projects.reduce((sum, p) => sum + p.actualSpend, 0);
       const netProfit = totalRevenue - totalCosts;
-
+      
       console.log(`📊 Processed ${projects.length} authentic projects from database`);
-
+      
       res.json({
         projects: projects,
         totalRevenue: totalRevenue,
@@ -2684,7 +2680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Authentic project data loaded from database",
         dataSource: `Database - ${jobs.length} jobs, ${workSessions.length} work sessions`
       });
-
+      
     } catch (error) {
       console.error("Error fetching project cashflow:", error);
       res.status(500).json({ error: "Failed to fetch project cashflow data" });
@@ -2692,25 +2688,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Enhanced Weekly Cash Flow Tracking System - MANDATORY RULE: AUTHENTIC DATA ONLY
-
+  
   // Project Master Management
   app.get("/api/weekly-cashflow/projects", async (req, res) => {
     try {
       console.log("📋 API: Fetching project masters for weekly cash flow tracking");
-
+      
       // Authentication check - MANDATORY RULE
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         console.log("❌ Unauthorized access to weekly cash flow data");
         res.status(401).json({ error: "Admin authentication required" });
         return;
       }
-
+      
       const projects = await storage.getProjectMasters();
       console.log(`✅ Retrieved ${projects.length} project masters`);
-
+      
       res.json({ projects, message: "Authentic project data loaded" });
     } catch (error) {
       console.error("Error fetching project masters:", error);
@@ -2721,10 +2717,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/weekly-cashflow/projects", async (req, res) => {
     try {
       console.log("🆕 API: Creating new project master");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
@@ -2738,7 +2734,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const project = await storage.createProjectMaster(projectData);
       console.log(`✅ Created project master: ${project.projectName}`);
-
+      
       res.json({ project, message: "Project created successfully" });
     } catch (error) {
       console.error("Error creating project master:", error);
@@ -2750,10 +2746,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/weekly-cashflow/weeks", async (req, res) => {
     try {
       console.log("📊 API: Fetching weekly cashflow data");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
@@ -2761,25 +2757,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const projectId = req.query.projectId as string;
       const weeklyData = await storage.getProjectCashflowWeekly(projectId);
-
+      
       // Enhance with calculated labour costs from authentic work sessions
       for (let week of weeklyData) {
         if (week.weekStartDate && week.weekEndDate && week.projectId) {
           const calculatedLabourCost = await storage.calculateWeeklyLabourCosts(
-            week.projectId,
-            week.weekStartDate,
+            week.projectId, 
+            week.weekStartDate, 
             week.weekEndDate
           );
-
+          
           // Update actual labour cost with authentic calculation
           week.actualLabourCostCalculated = calculatedLabourCost.toFixed(2);
-
+          
           // Calculate variance
           const forecastedLabour = parseFloat(week.forecastedLabourCost) || 0;
           week.labourVarianceCalculated = (calculatedLabourCost - forecastedLabour).toFixed(2);
         }
       }
-
+      
       console.log(`✅ Retrieved ${weeklyData.length} weekly cashflow records`);
       res.json({ weeklyData, message: "Authentic weekly data with calculated labour costs" });
     } catch (error) {
@@ -2791,10 +2787,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/weekly-cashflow/weeks", async (req, res) => {
     try {
       console.log("💰 API: Creating weekly cashflow forecast");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
@@ -2814,16 +2810,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           weeklyData.weekStartDate,
           weeklyData.weekEndDate
         );
-
+        
         weeklyData.actualLabourCost = actualLabourCost.toFixed(2);
         weeklyData.labourVariance = (actualLabourCost - (parseFloat(weeklyData.forecastedLabourCost) || 0)).toFixed(2);
-
+        
         console.log(`📊 Calculated actual labour cost: £${actualLabourCost.toFixed(2)}`);
       }
 
       const cashflow = await storage.createProjectCashflowWeekly(weeklyData);
       console.log(`✅ Created weekly cashflow: ${cashflow.projectName} - ${cashflow.weekStartDate}`);
-
+      
       res.json({ cashflow, message: "Weekly forecast created with authentic labour calculations" });
     } catch (error) {
       console.error("Error creating weekly cashflow:", error);
@@ -2835,10 +2831,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/weekly-cashflow/materials", async (req, res) => {
     try {
       console.log("🛒 API: Fetching material purchases");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
@@ -2846,10 +2842,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const projectId = req.query.projectId as string;
       const weekStart = req.query.weekStart as string;
-
+      
       const materials = await storage.getMaterialPurchases(projectId, weekStart);
       console.log(`✅ Retrieved ${materials.length} material purchase records`);
-
+      
       res.json({ materials, message: "Authentic material purchase data loaded" });
     } catch (error) {
       console.error("Error fetching material purchases:", error);
@@ -2860,10 +2856,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/weekly-cashflow/materials", async (req, res) => {
     try {
       console.log("🛒 API: Creating material purchase record");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
@@ -2877,7 +2873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const material = await storage.createMaterialPurchase(materialData);
       console.log(`✅ Created material purchase: ${material.supplierName} - £${material.totalCost}`);
-
+      
       res.json({ material, message: "Material purchase recorded successfully" });
     } catch (error) {
       console.error("Error creating material purchase:", error);
@@ -2889,17 +2885,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/weekly-cashflow/dashboard", async (req, res) => {
     try {
       console.log("📈 API: Generating weekly cash flow dashboard data");
-
+      
       const session = req.session as any;
       const currentAdmin = session?.adminName;
-
+      
       if (!currentAdmin) {
         res.status(401).json({ error: "Admin authentication required" });
         return;
       }
 
       const projectId = req.query.projectId as string;
-
+      
       // Fetch all related data
       const [projects, weeklyData, materials] = await Promise.all([
         storage.getProjectMasters(),
@@ -2919,13 +2915,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (week.weekStartDate && week.weekEndDate && week.projectId) {
           const calculatedLabourCost = await storage.calculateWeeklyLabourCosts(
             week.projectId,
-            week.weekStartDate,
+            week.weekStartDate, 
             week.weekEndDate
           );
-
+          
           week.actualLabourCostCalculated = calculatedLabourCost;
           totalActualSpend += calculatedLabourCost;
-
+          
           const forecastedLabour = parseFloat(week.forecastedLabourCost) || 0;
           totalForecastedSpend += forecastedLabour;
           totalLabourVariance += (calculatedLabourCost - forecastedLabour);
@@ -2969,7 +2965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`✅ Dashboard data generated - ${projects.length} projects, ${weeklyData.length} weeks`);
       res.json(dashboardData);
-
+      
     } catch (error) {
       console.error("Error generating dashboard data:", error);
       res.status(500).json({ error: "Failed to generate dashboard data" });
