@@ -53,6 +53,7 @@ export class DxfAgent {
             const extracted = this.extractEntities(flatEntities);
 
             return {
+                success: true,
                 svgPath: svgFilename,
                 rooms: extracted.rooms,
                 detailedElements: extracted.elements

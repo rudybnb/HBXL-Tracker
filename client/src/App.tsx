@@ -36,6 +36,9 @@ import ContractCashflow from "@/pages/contract-cashflow";
 import VoiceControl from "@/pages/voice-control";
 import FinancialDashboard from "@/pages/financial-dashboard";
 import RoomBuilder from "@/pages/room-builder";
+import ContractorTender from "@/pages/contractor-tender";
+import ContractorTenderNew from "@/pages/contractor-tender-new";
+import AdminTenderReview from "@/pages/admin-tender-review";
 
 import NotFound from "@/pages/not-found";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -117,9 +120,20 @@ function Router() {
             <Jobs />
           </ProtectedRoute>
         )} />
-        <Route path="/task-progress" component={() => (
-          <ProtectedRoute requiredRole="contractor">
+        <Route path="/task-progress/:assignmentId?" component={() => (
+          <ProtectedRoute requiredRole={["contractor", "admin"]}>
             <TaskProgress />
+          </ProtectedRoute>
+        )} />
+
+        <Route path="/contractor-tender/:assignmentId" component={() => (
+          <ProtectedRoute requiredRole={["contractor", "admin"]}>
+            <ContractorTender />
+          </ProtectedRoute>
+        )} />
+        <Route path="/contractor-tender" component={() => (
+          <ProtectedRoute requiredRole={["contractor", "admin"]}>
+            <ContractorTender />
           </ProtectedRoute>
         )} />
         <Route path="/more" component={() => (
@@ -127,6 +141,9 @@ function Router() {
             <More />
           </ProtectedRoute>
         )} />
+
+        {/* Public tender pricing page — submissionId acts as secret access token */}
+        <Route path="/contractor-tender-new/:submissionId" component={ContractorTenderNew} />
 
         <Route path="/foreman" component={() => (
           <ProtectedRoute requiredRole="contractor">
@@ -215,6 +232,12 @@ function Router() {
         <Route path="/jobs/:jobId/room-builder" component={() => (
           <ProtectedRoute requiredRole="admin">
             <RoomBuilder />
+          </ProtectedRoute>
+        )} />
+
+        <Route path="/admin/tender-review" component={() => (
+          <ProtectedRoute requiredRole="admin">
+            <AdminTenderReview />
           </ProtectedRoute>
         )} />
 

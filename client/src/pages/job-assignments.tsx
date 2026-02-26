@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 function LogoutButton() {
   const handleLogout = () => {
@@ -29,12 +29,57 @@ function LogoutButton() {
 }
 
 export default function JobAssignments() {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedAssignment, setExpandedAssignment] = useState<string | null>(null);
   const [completedTasks, setCompletedTasks] = useState<any[]>([]);
   const [inspectionStatus, setInspectionStatus] = useState<Record<string, 'approved' | 'issues'>>({});
   const [inspectionNotes, setInspectionNotes] = useState<Record<string, string>>({});
   const { toast } = useToast();
+
+  // ── Tender lifecycle helpers ──
+  const TENDER_STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+    DRAFT: { label: "Draft", bg: "bg-slate-600", text: "text-slate-200" },
+    SENT_FOR_PRICING: { label: "Sent for Pricing", bg: "bg-amber-600", text: "text-white" },
+    SUBMITTED: { label: "Submitted", bg: "bg-blue-600", text: "text-white" },
+    APPROVED: { label: "Approved", bg: "bg-green-600", text: "text-white" },
+  };
+
+  const handleSendForPricing = async (assignmentId: string) => {
+    if (!confirm("Send this tender to the contractor for pricing? They will be able to enter unit prices.")) return;
+    try {
+      const res = await fetch(`/api/job-assignments/${assignmentId}/send-for-pricing`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed");
+      toast({ title: "Tender Sent", description: "Contractor can now price the tender." });
+      refetch();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const handleApproveTender = async (assignmentId: string) => {
+    if (!confirm("Approve this tender? Pricing will be locked as the baseline.")) return;
+    try {
+      const res = await fetch(`/api/job-assignments/${assignmentId}/approve-tender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed");
+      toast({ title: "Tender Approved", description: "Pricing is now locked as the approved baseline." });
+      refetch();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  // ── Tender request state ──
+  const [showTenderDialog, setShowTenderDialog] = useState(false);
+  const [tenderJobId, setTenderJobId] = useState<string>('');
+  const [tenderJobTitle, setTenderJobTitle] = useState<string>('');
+  const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>([]);
+  const [selectedContractorIds, setSelectedContractorIds] = useState<string[]>([]);
+  const [jobPackages, setJobPackages] = useState<any[]>([]);
+  const [loadingPkgs, setLoadingPkgs] = useState(false);
+  const [creatingTender, setCreatingTender] = useState(false);
 
   // Fetch job assignments from the database
   const { data: assignments = [], isLoading, refetch } = useQuery({
@@ -60,6 +105,125 @@ export default function JobAssignments() {
     }
   });
 
+  // Fetch approved contractors
+  const { data: allContractors = [] } = useQuery({
+    queryKey: ['/api/contractor-applications'],
+    queryFn: async () => {
+      const response = await fetch('/api/contractor-applications');
+      return response.ok ? response.json() : [];
+    }
+  });
+  const approvedContractors = allContractors.filter((c: any) => c.status === 'approved');
+
+  // Fetch tender requests
+  const { data: tenderRequests = [], refetch: refetchTenders } = useQuery({
+    queryKey: ['/api/tenders'],
+    queryFn: async () => {
+      const response = await fetch('/api/tenders');
+      return response.ok ? response.json() : [];
+    }
+  });
+
+  // Open tender creation dialog
+  const openTenderDialog = async (jobId: string, jobTitle: string) => {
+    setTenderJobId(jobId);
+    setTenderJobTitle(jobTitle);
+    setSelectedPackageIds([]);
+    setSelectedContractorIds([]);
+    setShowTenderDialog(true);
+    setLoadingPkgs(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/packages`);
+      const pkgs = res.ok ? await res.json() : [];
+      // Show ALL packages, but separate ROOM_QTO from IFC
+      setJobPackages(pkgs);
+      // Pre-select ROOM packages by default
+      const tenderablePkgs = pkgs.filter((p: any) =>
+        p.source === 'ROOM_QTO' ||
+        p.source === 'ROOM_SCOPE_LABOUR_V1' ||
+        (p.type === 'ROOM' && p.source === 'AG_8000_ROOM_QTO')
+      );
+      setSelectedPackageIds(tenderablePkgs.map((p: any) => p.id));
+    } catch {
+      setJobPackages([]);
+    }
+    setLoadingPkgs(false);
+  };
+
+  // Create tender request
+  const [createdTenderLinks, setCreatedTenderLinks] = useState<{ contractorName: string; submissionId: string; link: string; telegram?: boolean }[]>([]);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+
+  const handleCreateTender = async () => {
+    if (selectedPackageIds.length === 0) {
+      toast({ title: 'Error', description: 'Select at least one package', variant: 'destructive' });
+      return;
+    }
+    if (selectedContractorIds.length === 0) {
+      toast({ title: 'Error', description: 'Select at least one contractor', variant: 'destructive' });
+      return;
+    }
+    setCreatingTender(true);
+    setCreatedTenderLinks([]);
+    try {
+      const res = await fetch('/api/tenders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: tenderJobId, packageIds: selectedPackageIds, contractorIds: selectedContractorIds }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message || d.error || 'Failed');
+
+      // Auto-send
+      const sendRes = await fetch(`/api/tenders/${d.tenderRequestId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const sendData = await sendRes.json();
+
+      // Build links with full URL for copying
+      const baseUrl = window.location.origin;
+      const links = (d.contractors || []).map((c: any) => {
+        const notif = (sendData.notifications || []).find((n: any) => n.contractorName === c.contractorName);
+        return {
+          contractorName: c.contractorName,
+          submissionId: c.submissionId,
+          link: `${baseUrl}/contractor-tender-new/${c.submissionId}`,
+          telegram: notif?.telegram || false,
+        };
+      });
+      setCreatedTenderLinks(links);
+
+      toast({ title: 'Tender Created & Sent', description: `${d.contractors.length} contractor(s) invited. ${d.itemCount} items to price.` });
+      refetchTenders();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+    setCreatingTender(false);
+  };
+
+  const handleCopyLink = (link: string, submissionId: string) => {
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedLinkId(submissionId);
+      toast({ title: 'Copied!', description: 'Tender link copied — paste into WhatsApp, email, etc.' });
+      setTimeout(() => setCopiedLinkId(null), 3000);
+    });
+  };
+
+  // Approve tender submission
+  const handleApproveTenderSubmission = async (tenderRequestId: string, submissionId: string) => {
+    if (!confirm('Approve this submission? An Assignment will be created from the approved pricing.')) return;
+    try {
+      const res = await fetch(`/api/tenders/${tenderRequestId}/submissions/${submissionId}/approve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed');
+      toast({ title: 'Tender Approved', description: `Assignment ${d.assignmentId.substring(0, 8)}... created. Grand total: £${d.grandTotal}` });
+      refetchTenders();
+      refetch();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
   const unassignedJobs = allJobs.filter((job: any) => job.status === 'pending');
   const filteredUnassignedJobs = unassignedJobs.filter((job: any) =>
     job.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -77,7 +241,8 @@ export default function JobAssignments() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to delete job');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete job');
       }
 
       // Invalidate queries to refresh the list
@@ -87,10 +252,10 @@ export default function JobAssignments() {
         title: "Job Deleted",
         description: "Job has been removed successfully.",
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "Failed to delete job. Please try again.",
+        description: error.message || "Failed to delete job. Please try again.",
         variant: "destructive",
       });
     }
@@ -248,6 +413,29 @@ export default function JobAssignments() {
           <h1 className="text-3xl font-bold text-yellow-400">Job Assignments</h1>
           <div className="flex gap-4">
             <Button
+              onClick={async () => {
+                try {
+                  // Trigger scan
+                  const res = await fetch('/api/jobs/scan-from-8000', { method: "POST" });
+                  const d = await res.json();
+                  if (d.success) {
+                    const details = (d.results || []).map((r: any) =>
+                      `  ${r.project_id}: ${r.success ? `✅ ${r.packages || 0} packages` : `❌ ${r.error}`}`
+                    ).join('\n');
+                    alert(`${d.message}\n\n${details || 'No projects found on Port 8000.'}`);
+                    queryClient.invalidateQueries({ queryKey: ['/api/jobs'] });
+                    queryClient.invalidateQueries({ queryKey: ['/api/job-assignments'] });
+                  } else {
+                    alert(d.error || "Scan failed");
+                  }
+                } catch (e: any) { alert(`Cannot connect to Port 8000: ${e.message}`); }
+              }}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg flex items-center"
+            >
+              <i className="fas fa-sync mr-2"></i>
+              Sync from Port 8000
+            </Button>
+            <Button
               onClick={() => window.location.href = '/upload'}
               className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg flex items-center"
             >
@@ -306,6 +494,37 @@ export default function JobAssignments() {
                           <Button
                             size="sm"
                             variant="outline"
+                            className="bg-green-900/20 text-green-400 border-green-500/50 hover:bg-green-900/40"
+                            onClick={async () => {
+                              if (!confirm(`Refresh job #${job.id} from Port 8000 shared data? This will overwrite rooms.`)) return;
+                              try {
+                                const res = await fetch(`/api/jobs/${job.id}/sync-packages`, { method: "POST" });
+                                const d = await res.json();
+                                if (d.success) {
+                                  if (d.packages === 0) {
+                                    alert(
+                                      `Synced 0 packages.\n\n` +
+                                      `Job Key: ${d.jobKey || 'N/A'}\n` +
+                                      `Job ID: ${d.jobId || 'N/A'}\n\n` +
+                                      `Upload a CSV with scope data on Port 8000 to generate packages.`
+                                    );
+                                  } else {
+                                    alert(`Synced ${d.packages} packages successfully for ${d.jobKey}.`);
+                                    window.location.reload();
+                                  }
+                                } else {
+                                  alert(d.error || "Failed");
+                                }
+                              } catch (e: any) { alert(`Sync Failed: ${e.message}\n\nEnsure the HBXL Sync Service (Python) is running on port 8000.`); }
+                            }}
+                            title="Refresh from Shared Folder"
+                          >
+                            <i className="fas fa-sync mr-2"></i>
+                            Refresh
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             className="bg-purple-900/20 text-purple-400 border-purple-500/50 hover:bg-purple-900/40"
                             onClick={() => window.location.href = `/jobs/${job.id}/room-builder`}
                           >
@@ -314,10 +533,19 @@ export default function JobAssignments() {
                           </Button>
                           <Button
                             size="sm"
+                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            onClick={() => openTenderDialog(job.id, job.title)}
+                          >
+                            <i className="fas fa-file-invoice mr-2"></i>
+                            Create Tender
+                          </Button>
+                          <Button
+                            size="sm"
                             className="bg-blue-600 hover:bg-blue-700"
                             onClick={() => window.location.href = `/create-assignment?jobId=${job.id}`}
+                            title="Manual assignment (skip tender)"
                           >
-                            Assign Contractor
+                            Assign Directly
                           </Button>
                           <Button
                             size="sm"
@@ -369,18 +597,32 @@ export default function JobAssignments() {
                         </div>
                       </div>
                       <div className="text-right flex items-center space-x-3">
+                        {/* Tender Status Badge */}
+                        <div className="text-center">
+                          <div className="text-xs text-slate-400 mb-1">Tender</div>
+                          {(() => {
+                            const ts = assignment.tenderStatus || 'DRAFT';
+                            const style = TENDER_STATUS_STYLES[ts] || TENDER_STATUS_STYLES.DRAFT;
+                            return (
+                              <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${style.bg} ${style.text}`}>
+                                {style.label}
+                              </span>
+                            );
+                          })()}
+                        </div>
                         <div className="text-center">
                           <div className="text-xs text-slate-400">Status</div>
                           <div className="text-green-400 font-medium text-sm">
                             {assignment.status || 'Assigned'}
                           </div>
                         </div>
-                        <div className="text-center">
-                          <div className="text-xs text-slate-400">Phases</div>
-                          <div className="text-blue-400 font-medium text-sm">
-                            {assignment.buildPhases?.length || 0}
-                          </div>
-                        </div>
+                        <button
+                          onClick={() => window.open(`/task-progress/${assignment.id}`, '_blank')}
+                          className="p-3 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20 rounded-lg transition-colors border border-blue-800 hover:border-blue-600"
+                          title="Preview Contractor View"
+                        >
+                          <i className="fas fa-eye text-lg"></i>
+                        </button>
                         <button
                           onClick={() => handleDeleteAssignment(assignment.id)}
                           className="p-3 text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors border border-red-800 hover:border-red-600"
@@ -408,6 +650,37 @@ export default function JobAssignments() {
                       <div>
                         <div className="text-xs text-slate-400">Actions</div>
                         <div className="flex flex-col gap-2 items-start">
+                          {/* ── TENDER ACTIONS ── */}
+                          {(assignment.tenderStatus || 'DRAFT') === 'DRAFT' && (
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white w-full justify-start"
+                              onClick={() => handleSendForPricing(assignment.id)}
+                            >
+                              <i className="fas fa-paper-plane mr-2"></i>
+                              Send for Pricing
+                            </Button>
+                          )}
+                          {(assignment.tenderStatus || 'DRAFT') === 'SUBMITTED' && (
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white w-full justify-start"
+                              onClick={() => handleApproveTender(assignment.id)}
+                            >
+                              <i className="fas fa-check-circle mr-2"></i>
+                              Approve Tender
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs border-cyan-500 text-cyan-400 hover:bg-cyan-900/20 w-full justify-start"
+                            onClick={() => window.open(`/contractor-tender/${assignment.id}`, '_blank')}
+                          >
+                            <i className="fas fa-file-invoice-dollar mr-2"></i>
+                            View Tender
+                          </Button>
+
                           <button
                             onClick={() => toggleInspectionView(assignment.id)}
                             className="text-yellow-400 hover:text-yellow-300 text-sm underline text-left"
@@ -415,13 +688,20 @@ export default function JobAssignments() {
                             {expandedAssignment === assignment.id ? 'Hide' : 'Show'} Task Inspection
                           </button>
 
-                          {/* New Agent Workflow Button */}
+                          {/* Agent Workflow Button */}
                           {assignment.jobId && (
                             <Button
                               size="sm"
                               variant="outline"
                               className="h-7 text-xs border-purple-500 text-purple-400 hover:bg-purple-900/20 w-full justify-start"
-                              onClick={() => window.location.href = `/jobs/${assignment.jobId}/room-builder`}
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(`/api/jobs/${assignment.jobId}/external-link`);
+                                  const d = await res.json();
+                                  if (d.url) window.open(d.url, '_blank');
+                                  else alert("No external link found (Job might be local-only)");
+                                } catch (e) { alert("Failed to open Agent Workflow"); }
+                              }}
                             >
                               <i className="fas fa-robot mr-2"></i>
                               Agent Workflow
@@ -666,8 +946,314 @@ export default function JobAssignments() {
         </div>
       </div>
 
+
+      {/* ══════════════════════════════════════════════════════ */}
+      {/*  TENDER REQUESTS SECTION                               */}
+      {/* ══════════════════════════════════════════════════════ */}
+      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 mb-4 mt-6">
+        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <i className="fas fa-file-invoice text-amber-400"></i>
+          Tender Requests
+          <span className="text-sm font-normal text-slate-400">({tenderRequests.length})</span>
+        </h2>
+
+        {tenderRequests.length === 0 ? (
+          <div className="text-center py-8 text-slate-400">
+            No tender requests yet. Click "Create Tender" on a job above to get started.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {tenderRequests.map((tr: any) => (
+              <div key={tr.id} className="bg-slate-700 rounded-lg p-4 border border-slate-600">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-white font-semibold">{tr.title}</h3>
+                    <p className="text-sm text-slate-400">Job: {tr.jobTitle}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${tr.status === 'DRAFT' ? 'bg-slate-600 text-slate-200' :
+                      tr.status === 'SENT' ? 'bg-amber-600 text-white' :
+                        tr.status === 'CLOSED' ? 'bg-green-600 text-white' : 'bg-slate-600 text-slate-200'
+                      }`}>
+                      {tr.status}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 w-7 p-0 bg-red-600 hover:bg-red-700"
+                      onClick={async () => {
+                        if (!confirm(`Delete tender "${tr.title}"? This will remove all submissions and pricing data.`)) return;
+                        try {
+                          const res = await fetch(`/api/tenders/${tr.id}`, { method: 'DELETE' });
+                          const d = await res.json();
+                          if (!res.ok) throw new Error(d.error || 'Failed');
+                          toast({ title: 'Deleted', description: 'Tender request removed.' });
+                          refetchTenders();
+                        } catch (e: any) {
+                          toast({ title: 'Error', description: e.message, variant: 'destructive' });
+                        }
+                      }}
+                      title="Delete tender request"
+                    >
+                      <i className="fas fa-trash text-xs"></i>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Submissions */}
+                <div className="space-y-2">
+                  {(tr.submissions || []).map((sub: any) => (
+                    <div key={sub.id} className="flex items-center justify-between bg-slate-800/50 rounded p-3 border border-slate-600/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                          {sub.contractorName?.charAt(0) || '?'}
+                        </div>
+                        <div>
+                          <div className="text-white text-sm font-medium">{sub.contractorName}</div>
+                          <div className="text-xs text-slate-400">
+                            {sub.status === 'SUBMITTED' && sub.submittedAt && `Submitted ${new Date(sub.submittedAt).toLocaleDateString()}`}
+                            {sub.status === 'DRAFT' && 'Awaiting pricing...'}
+                            {sub.status === 'APPROVED' && '✓ Approved'}
+                            {sub.status === 'REJECTED' && '✗ Rejected'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold ${sub.status === 'DRAFT' ? 'bg-slate-600 text-slate-300' :
+                          sub.status === 'SUBMITTED' ? 'bg-blue-600 text-white' :
+                            sub.status === 'APPROVED' ? 'bg-green-600 text-white' :
+                              'bg-red-600 text-white'
+                          }`}>
+                          {sub.status}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-cyan-500 text-cyan-400"
+                          onClick={() => window.open(`/contractor-tender-new/${sub.id}`, '_blank')}
+                        >
+                          <i className="fas fa-eye mr-1"></i> View
+                        </Button>
+                        {sub.status === 'SUBMITTED' && (
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => handleApproveTenderSubmission(tr.id, sub.id)}
+                          >
+                            <i className="fas fa-check-circle mr-1"></i> Approve
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════ */}
+      {/*  TENDER CREATION DIALOG (Modal)                       */}
+      {/* ══════════════════════════════════════════════════════ */}
+      {showTenderDialog && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setShowTenderDialog(false)}>
+          <div className="bg-slate-800 rounded-xl p-6 border border-slate-600 max-w-2xl w-full max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-bold text-white mb-1">Create Tender Request</h2>
+            <p className="text-sm text-slate-400 mb-4">Job: {tenderJobTitle}</p>
+
+            {/* Package selection */}
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">Select Packages</h3>
+              {loadingPkgs ? (
+                <div className="text-slate-400 text-sm">Loading packages...</div>
+              ) : jobPackages.length === 0 ? (
+                <div className="text-amber-400 text-sm">No packages found. Sync from Port 8000 first.</div>
+              ) : (
+                <div className="space-y-3">
+                  {/* ROOM_QTO packages */}
+                  {(() => {
+                    const roomQtoPkgs = jobPackages.filter((p: any) =>
+                      p.source === 'ROOM_QTO' ||
+                      p.source === 'ROOM_SCOPE_LABOUR_V1' ||
+                      (p.type === 'ROOM' && p.source === 'AG_8000_ROOM_QTO')
+                    );
+                    const baselinePkgs = jobPackages.filter((p: any) =>
+                      p.source === 'CSV_BOQ' ||
+                      p.type === 'IFC_PACKAGE'
+                    );
+                    return (
+                      <>
+                        {roomQtoPkgs.length > 0 && (
+                          <div className="mb-4">
+                            <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                              <i className="fas fa-ruler-combined"></i>
+                              Tenderable Room Scopes (QTO & Lab-Only V1)
+                            </div>
+                            <div className="space-y-1 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                              {roomQtoPkgs.map((pkg: any) => (
+                                <label key={pkg.id} className="flex items-center gap-3 text-sm text-white cursor-pointer hover:bg-slate-700/50 p-2 rounded-lg transition-colors border border-transparent hover:border-emerald-500/30">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedPackageIds.includes(pkg.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) setSelectedPackageIds(prev => [...prev, pkg.id]);
+                                      else setSelectedPackageIds(prev => prev.filter(id => id !== pkg.id));
+                                    }}
+                                    className="rounded border-slate-500 text-emerald-600 focus:ring-emerald-500"
+                                  />
+                                  <span className="flex-1">{pkg.name}</span>
+                                  {pkg.source === 'ROOM_SCOPE_LABOUR_V1' ? (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/40 text-purple-400 border border-purple-700/50">LAB-V1</span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900/40 text-emerald-400 border border-emerald-700/50">QTO</span>
+                                  )}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {baselinePkgs.length > 0 && (
+                          <div>
+                            <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2 mt-4 flex items-center gap-2">
+                              <i className="fas fa-database"></i>
+                              Build Packages (CSV_BOQ — Budget Baseline)
+                            </div>
+                            <div className="space-y-1 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                              {baselinePkgs.map((pkg: any) => (
+                                <label key={pkg.id} className="flex items-center gap-3 text-sm text-slate-300 p-2 rounded-lg border border-slate-700 hover:bg-slate-800/50 cursor-pointer transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedPackageIds.includes(pkg.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) setSelectedPackageIds(prev => [...prev, pkg.id]);
+                                      else setSelectedPackageIds(prev => prev.filter(id => id !== pkg.id));
+                                    }}
+                                    className="rounded border-slate-500 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="flex-1">{pkg.name}</span>
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-400 border border-slate-600">BASELINE</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  {/* Quick select buttons */}
+                  <div className="flex gap-4 pt-3 border-t border-slate-700 mt-4">
+                    <button
+                      onClick={() => setSelectedPackageIds(jobPackages.filter((p: any) =>
+                        p.source === 'ROOM_QTO' ||
+                        p.source === 'ROOM_SCOPE_LABOUR_V1' ||
+                        (p.type === 'ROOM' && p.source === 'AG_8000_ROOM_QTO')
+                      ).map((p: any) => p.id))}
+                      className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                    >
+                      <i className="fas fa-check-double mr-1"></i>
+                      Select All Rooms
+                    </button>
+                    <button onClick={() => setSelectedPackageIds(jobPackages.map((p: any) => p.id))} className="text-xs text-yellow-400 hover:text-yellow-300">Select All</button>
+                    <button onClick={() => setSelectedPackageIds([])} className="text-xs text-slate-400 hover:text-white">Clear</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Contractor selection */}
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">Select Contractors to Invite</h3>
+              {approvedContractors.length === 0 ? (
+                <div className="text-amber-400 text-sm">No approved contractors found. Approve contractor applications first.</div>
+              ) : (
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {approvedContractors.map((c: any) => (
+                    <label key={c.id} className="flex items-center gap-2 text-sm text-white cursor-pointer hover:bg-slate-700/50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={selectedContractorIds.includes(c.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedContractorIds(prev => [...prev, c.id]);
+                          else setSelectedContractorIds(prev => prev.filter(id => id !== c.id));
+                        }}
+                        className="rounded"
+                        disabled={createdTenderLinks.length > 0}
+                      />
+                      <span>{c.firstName} {c.lastName}</span>
+                      <span className="text-xs text-slate-400">({c.primaryTrade})</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── TENDER LINKS (shown after creation) ── */}
+            {createdTenderLinks.length > 0 && (
+              <div className="mb-6 p-4 rounded-lg border-2 border-green-600/40 bg-green-900/20">
+                <h3 className="text-sm font-bold text-green-400 mb-3">✅ Tender Created — Contractor Links</h3>
+                <p className="text-xs text-slate-400 mb-3">Copy the link and share via WhatsApp, SMS, email, or any messaging app.</p>
+                <div className="space-y-3">
+                  {createdTenderLinks.map((item) => (
+                    <div key={item.submissionId} className="p-3 rounded-md bg-slate-800/80 border border-slate-600">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="font-medium text-white text-sm">👷 {item.contractorName}</div>
+                        <div className="flex items-center gap-2">
+                          {item.telegram ? (
+                            <span className="text-xs text-green-400">✅ Telegram sent</span>
+                          ) : (
+                            <span className="text-xs text-amber-400">⚠️ Telegram failed</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={item.link}
+                          className="flex-1 bg-slate-900 text-slate-300 text-xs px-3 py-2 rounded border border-slate-600 font-mono"
+                          onClick={(e) => (e.target as HTMLInputElement).select()}
+                        />
+                        <Button
+                          size="sm"
+                          className={copiedLinkId === item.submissionId
+                            ? "bg-green-600 hover:bg-green-600 text-white min-w-[80px]"
+                            : "bg-indigo-600 hover:bg-indigo-700 text-white min-w-[80px]"
+                          }
+                          onClick={() => handleCopyLink(item.link, item.submissionId)}
+                        >
+                          {copiedLinkId === item.submissionId ? '✓ Copied!' : '📋 Copy'}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => { setShowTenderDialog(false); setCreatedTenderLinks([]); }} className="text-slate-300 border-slate-500">
+                {createdTenderLinks.length > 0 ? 'Done' : 'Cancel'}
+              </Button>
+              {createdTenderLinks.length === 0 && (
+                <Button
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={handleCreateTender}
+                  disabled={creatingTender || selectedPackageIds.length === 0 || selectedContractorIds.length === 0}
+                >
+                  {creatingTender ? 'Creating...' : `Create & Send Tender (${selectedPackageIds.length} pkgs, ${selectedContractorIds.length} contractors)`}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+      }
+
       {/* Add bottom padding to account for fixed navigation */}
       <div className="h-20"></div>
-    </div>
+    </div >
   );
 }

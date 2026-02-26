@@ -145,6 +145,23 @@ export default function JobsTable({ onAssignJob }: JobsTableProps) {
                     <i className="fas fa-robot mr-1"></i>
                     Room Builder
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      if (!confirm(`Refresh job #${job.id} from Port 8000 shared data? This will overwrite rooms.`)) return;
+                      try {
+                        const res = await fetch(`/api/jobs/${job.id}/refresh-from-8000`, { method: "POST" });
+                        const d = await res.json();
+                        if (d.success) alert(d.message); else alert(d.error || "Failed");
+                      } catch (e: any) { alert(e.message); }
+                    }}
+                    className="text-green-600 hover:text-green-900 mr-2"
+                    title="Refresh from Shared Folder"
+                  >
+                    <i className="fas fa-sync mr-1"></i>
+                    Refresh
+                  </Button>
                   {job.status === 'pending' ? (
                     <Button
                       variant="ghost"

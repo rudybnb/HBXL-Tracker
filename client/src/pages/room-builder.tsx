@@ -23,6 +23,11 @@ interface Room {
     geometry: any; // Legacy
     polygon: string; // JSON string of {x,y}[]
     isLocked: boolean;
+    fittings: string | null; // JSON string
+    fittingsSource: string | null;
+    source: string | null; // "IFC8000" | "MANUAL" | null
+    floor: string | null;
+    externalRoomKey: string | null;
 }
 
 export default function RoomBuilder() {
@@ -102,29 +107,44 @@ export default function RoomBuilder() {
 
     const fileUrl = activeFile?.fileUrl;
 
-    // Fetch SVG if needed
+    // Fetch SVG or DXF if needed
     useEffect(() => {
-        if (fileUrl && fileUrl.toLowerCase().endsWith('.svg')) {
+        if (!fileUrl) return;
+
+        const isSvg = fileUrl.toLowerCase().endsWith('.svg');
+        const isDxf = fileUrl.toLowerCase().endsWith('.dxf');
+
+        if (isSvg || isDxf) {
             // Cache-bust to ensure fresh content
             fetch(`${fileUrl}?t=${Date.now()}`)
                 .then(res => res.text())
                 .then(text => {
-                    // Fix black background from server agent to transparent or white for UI
-                    // AND invert line colors for visibility on white background
-                    const cleanText = text
-                        .replace(/fill="#0b0f19"/g, 'fill="#ffffff"')   // Background: Black -> White
-                        .replace(/stroke="white"/g, 'stroke="#334155"') // Lines: White -> Dark Slate
-                        .replace(/stroke="cyan"/g, 'stroke="#0ea5e9"')  // Polylines: Cyan -> Blue
-                        .replace(/stroke="yellow"/g, 'stroke="#ea580c"')// Circles: Yellow -> Orange
-                        .replace(/fill="lime"/g, 'fill="#15803d"');     // Text: Lime -> Green
-                    setSvgContent(cleanText);
-                    const match = text.match(/viewBox="([^"]+)"/);
-                    if (match) {
-                        const parts = match[1].split(' ').map(Number);
-                        setSvgViewBox({ x: parts[0], y: parts[1], w: parts[2], h: parts[3] });
+                    if (isSvg) {
+                        // Fix black background from server agent to transparent or white for UI
+                        // AND invert line colors for visibility on white background
+                        const cleanText = text
+                            .replace(/fill="#0b0f19"/g, 'fill="#ffffff"')   // Background: Black -> White
+                            .replace(/stroke="white"/g, 'stroke="#334155"') // Lines: White -> Dark Slate
+                            .replace(/stroke="cyan"/g, 'stroke="#0ea5e9"')  // Polylines: Cyan -> Blue
+                            .replace(/stroke="yellow"/g, 'stroke="#ea580c"')// Circles: Yellow -> Orange
+                            .replace(/fill="lime"/g, 'fill="#15803d"');     // Text: Lime -> Green
+                        setSvgContent(cleanText);
+                        const match = text.match(/viewBox="([^"]+)"/);
+                        if (match) {
+                            const parts = match[1].split(' ').map(Number);
+                            setSvgViewBox({ x: parts[0], y: parts[1], w: parts[2], h: parts[3] });
+                        }
+                    } else if (isDxf) {
+                        import('@/lib/dxf-converter').then(({ dxfToSvg }) => {
+                            const result = dxfToSvg(text);
+                            if (result) {
+                                setSvgContent(result.svg);
+                                setSvgViewBox(result.viewBox);
+                            }
+                        });
                     }
                 })
-                .catch(err => console.error("Failed to load SVG Plan", err));
+                .catch(err => console.error("Failed to load Plan", err));
         }
     }, [fileUrl]);
 
@@ -175,7 +195,10 @@ export default function RoomBuilder() {
                 method: 'POST',
                 body: formData,
             });
-            if (!res.ok) throw new Error("Upload failed");
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.error || "Upload failed");
+            }
             return res.json();
         },
         onSuccess: () => {
@@ -539,14 +562,19 @@ export default function RoomBuilder() {
                                     <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg p-4 text-center hover:bg-slate-100 transition-colors">
                                         <FileUp className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                                         <p className="text-xs text-slate-600 font-medium mb-3">Upload DXF/SVG to start</p>
-                                        <label className="cursor-pointer inline-block">
-                                            <div className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded shadow-sm transition-all">
-                                                Select File
+                                        <label className={`cursor-pointer inline-block ${uploadFileMutation.isLoading || uploadFileMutation.status === 'pending' ? 'opacity-50 pointer-events-none' : ''}`}>
+                                            <div className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded shadow-sm transition-all flex items-center gap-2">
+                                                {(uploadFileMutation.isLoading || uploadFileMutation.status === 'pending') ? (
+                                                    <><Loader2 className="w-3 h-3 animate-spin" /> Uploading...</>
+                                                ) : (
+                                                    "Select File"
+                                                )}
                                             </div>
                                             <input
                                                 type="file"
                                                 className="hidden"
                                                 accept=".dxf,.svg,.ifc"
+                                                disabled={uploadFileMutation.isLoading || uploadFileMutation.status === 'pending'}
                                                 onChange={(e) => {
                                                     const f = e.target.files?.[0];
                                                     if (f) uploadFileMutation.mutate(f);
@@ -566,12 +594,17 @@ export default function RoomBuilder() {
                                                 Active Reference
                                             </div>
                                         </div>
-                                        <label className="cursor-pointer p-1.5 hover:bg-white rounded transition-colors text-slate-400 hover:text-blue-600" title="Change Plan">
-                                            <FileUp className="w-4 h-4" />
+                                        <label className={`cursor-pointer p-1.5 hover:bg-white rounded transition-colors text-slate-400 hover:text-blue-600 flex items-center gap-1 ${uploadFileMutation.isLoading || uploadFileMutation.status === 'pending' ? 'opacity-50 pointer-events-none' : ''}`} title="Change Plan">
+                                            {(uploadFileMutation.isLoading || uploadFileMutation.status === 'pending') ? (
+                                                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                            ) : (
+                                                <FileUp className="w-4 h-4" />
+                                            )}
                                             <input
                                                 type="file"
                                                 className="hidden"
                                                 accept=".dxf,.svg,.ifc"
+                                                disabled={uploadFileMutation.isLoading || uploadFileMutation.status === 'pending'}
                                                 onChange={(e) => {
                                                     const f = e.target.files?.[0];
                                                     if (f) uploadFileMutation.mutate(f);
@@ -862,13 +895,42 @@ export default function RoomBuilder() {
                     {/* TENDER TAB CONTENT */}
                     {activeTab === 'tender' && (
                         <div className="flex flex-col h-full animate-in slide-in-from-left-4 fade-in duration-300">
-                            <div className="p-6 text-center text-slate-500 mt-10">
-                                <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">💷</div>
-                                <h3 className="font-bold text-lg text-slate-700 mb-2">Cost & Tender</h3>
-                                <p className="text-sm mb-6 max-w-[200px] mx-auto">Generate tender packages from the verified scope and CSV rates.</p>
-                                <Button disabled className="w-full bg-green-100 text-green-800 hover:bg-green-200 border border-green-200">
-                                    Generate Tender
-                                    <span className="ml-2 text-xs opacity-60">(Coming Soon)</span>
+                            <div className="p-4 overflow-auto flex-1">
+                                <h3 className="font-bold text-lg text-slate-700 mb-4 flex items-center gap-2">
+                                    <span className="text-2xl">📋</span> Tender Summary
+                                </h3>
+
+                                {rooms.length === 0 ? (
+                                    <div className="text-center text-slate-400 py-10">No rooms defined to tender.</div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {rooms.map(r => {
+                                            const fittings = r.fittings ? JSON.parse(typeof r.fittings === 'string' ? r.fittings : JSON.stringify(r.fittings)) : {};
+                                            const fittingCount = Object.values(fittings).reduce((a: any, b: any) => a + b, 0);
+                                            return (
+                                                <div key={r.id} className="bg-white p-3 rounded border shadow-sm">
+                                                    <div className="flex justify-between font-bold text-sm">
+                                                        <span>{r.name}</span>
+                                                        <span>{r.area}m²</span>
+                                                    </div>
+                                                    <div className="text-xs text-slate-500 mt-1 flex gap-4">
+                                                        <span>Perimeter: {r.perimeter}m</span>
+                                                        <span>Fittings: {fittingCount}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="p-4 border-t bg-slate-50">
+                                <Button
+                                    onClick={() => window.location.href = '/'}
+                                    className="w-full bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/20"
+                                >
+                                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                                    Finish & Return to Dashboard
                                 </Button>
                             </div>
                         </div>

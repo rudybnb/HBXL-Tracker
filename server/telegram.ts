@@ -7,7 +7,7 @@ export class TelegramService {
   constructor() {
     this.botToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
     this.baseUrl = `https://api.telegram.org/bot${this.botToken}`;
-    
+
     console.log('🤖 Telegram Service initialized with token:', this.botToken ? 'Available' : 'Missing');
     console.log('🔗 Base URL:', this.baseUrl);
   }
@@ -23,7 +23,7 @@ export class TelegramService {
   }) {
     try {
       console.log('📱 Sending Telegram job assignment notification...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating notification');
         return { success: true, simulated: true };
@@ -31,7 +31,7 @@ export class TelegramService {
 
       // Map contractor names to their specific chat IDs for job assignments
       let chatId = '7617462316'; // Default to admin
-      
+
       if (params.contractorName.toLowerCase().includes('marius')) {
         chatId = '8006717361'; // Marius Andronache
       } else if (params.contractorName.toLowerCase().includes('dalwayne')) {
@@ -43,14 +43,14 @@ export class TelegramService {
       } else if (params.contractorName.toLowerCase().includes('muhammed') || params.contractorName.toLowerCase().includes('midou')) {
         chatId = '5209713845'; // Muhammed/Midou
       }
-      
+
       const message = this.formatJobAssignmentMessage(params);
-      
+
       const url = `${this.baseUrl}/sendMessage`;
       console.log('📱 Telegram API URL:', url);
       console.log('📱 Chat ID:', chatId);
       console.log('📱 Message length:', message.length);
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -71,9 +71,9 @@ export class TelegramService {
 
       const result = await response.json();
       console.log('✅ Telegram message sent successfully:', result);
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Telegram service error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -84,7 +84,7 @@ export class TelegramService {
   async sendWelcomeMessage(contractorName: string, phone: string) {
     try {
       console.log('📱 Sending welcome Telegram message...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating welcome message');
         return { success: true, simulated: true };
@@ -92,7 +92,7 @@ export class TelegramService {
 
       // Use Rudy's actual Chat ID for welcome messages
       const chatId = '7617462316';
-      
+
       const message = `
 🎉 <b>Welcome to JobFlow, ${contractorName}!</b>
 
@@ -107,7 +107,7 @@ To get started, make sure to:
 
 Ready to receive your first job assignment!
       `.trim();
-      
+
       const response = await fetch(`${this.baseUrl}/sendMessage`, {
         method: 'POST',
         headers: {
@@ -128,9 +128,9 @@ Ready to receive your first job assignment!
 
       const result = await response.json();
       console.log('✅ Telegram welcome message sent:', result);
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Welcome message error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -146,11 +146,11 @@ Ready to receive your first job assignment!
     startDate: string;
   }) {
     const { contractorName, phone, hbxlJob, buildPhases, workLocation, startDate } = params;
-    
+
     const phasesText = Array.isArray(buildPhases) && buildPhases.length > 0
       ? buildPhases.map(phase => `• ${phase}`).join('\n')
       : '• No phases specified';
-    
+
     return `🔨 JOB ASSIGNMENT - ${hbxlJob}
 
 👤 Contractor: ${contractorName}
@@ -170,7 +170,7 @@ Good luck with the project! 💪`;
   async sendOnboardingForm(contractorName: string, contractorPhone?: string) {
     try {
       console.log('📱 Sending onboarding form to contractor...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating onboarding form');
         return { success: true, simulated: true };
@@ -178,10 +178,10 @@ Good luck with the project! 💪`;
 
       // Generate unique contractor ID
       const contractorId = `CTR-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-      
+
       // Map contractor names to their specific chat IDs
       let chatId = '7617462316'; // Default to Rudy
-      
+
       if (contractorName.toLowerCase().includes('marius')) {
         chatId = '8006717361'; // Marius Andronache
       } else if (contractorName.toLowerCase().includes('dalwayne')) {
@@ -191,7 +191,7 @@ Good luck with the project! 💪`;
       } else if (contractorName.toLowerCase().includes('muhammed') || contractorName.toLowerCase().includes('midou')) {
         chatId = '5209713845'; // Muhammed/Midou
       }
-      
+
       const message = `🎯 <b>New Contractor Onboarding Required</b>
 
 👤 Contractor: ${contractorName}
@@ -210,12 +210,12 @@ ${contractorPhone ? `📱 Phone: ${contractorPhone}` : ''}
 • You'll receive confirmation once approved
 
 Need help? Reply to this message! 💬`;
-      
+
       const url = `${this.baseUrl}/sendMessage`;
       console.log('📱 Onboarding URL:', url);
       console.log('📱 Chat ID:', chatId);
       console.log('📱 Message length:', message.length);
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -236,13 +236,13 @@ Need help? Reply to this message! 💬`;
 
       const result = await response.json();
       console.log('✅ Onboarding form sent with ID:', contractorId);
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         messageId: result.message_id,
         contractorId: contractorId
       };
-      
+
     } catch (error) {
       console.error('❌ Onboarding form error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -253,7 +253,7 @@ Need help? Reply to this message! 💬`;
   async sendContractorHello(contractorName: string = 'James Carpenter') {
     try {
       console.log('📱 Sending contractor hello message...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating hello message');
         return { success: true, simulated: true };
@@ -261,7 +261,7 @@ Need help? Reply to this message! 💬`;
 
       // Use Rudy's Chat ID
       const chatId = '7617462316';
-      
+
       const message = `👋 Hello from ${contractorName}!
 
 🔧 I'm ready to start work today
@@ -270,7 +270,7 @@ Need help? Reply to this message! 💬`;
 📱 All systems are ready for GPS tracking
 
 Looking forward to today's assignments! 💪`;
-      
+
       const response = await fetch(`${this.baseUrl}/sendMessage`, {
         method: 'POST',
         headers: {
@@ -291,9 +291,9 @@ Looking forward to today's assignments! 💪`;
 
       const result = await response.json();
       console.log('✅ Contractor hello message sent:', result);
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Hello message error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -304,7 +304,7 @@ Looking forward to today's assignments! 💪`;
   async sendCustomMessage(chatId: string, message: string) {
     try {
       console.log('📱 Sending custom Telegram message...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating message');
         return { success: true, simulated: true };
@@ -330,11 +330,55 @@ Looking forward to today's assignments! 💪`;
 
       const result = await response.json();
       console.log('✅ Custom message sent successfully:', result);
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Custom message error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // Send message with an inline keyboard URL button (always tappable)
+  async sendMessageWithButton(chatId: string, message: string, buttonText: string, buttonUrl: string) {
+    try {
+      console.log(`📱 Sending Telegram message with button to ${chatId}...`);
+
+      if (!this.botToken) {
+        console.log('⚠️ No bot token - simulating message');
+        return { success: true, simulated: true };
+      }
+
+      const response = await fetch(`${this.baseUrl}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: buttonText, url: buttonUrl }
+            ]]
+          }
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('❌ Telegram button message error:', response.status, errorData);
+        return { success: false, error: `Telegram API error: ${response.status}` };
+      }
+
+      const result = await response.json();
+      console.log('✅ Button message sent successfully:', result);
+
+      return { success: true, messageId: result.result?.message_id };
+
+    } catch (error) {
+      console.error('❌ Button message error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
@@ -347,9 +391,9 @@ Looking forward to today's assignments! 💪`;
       }
 
       console.log('📥 Checking for recent messages...');
-      
+
       const response = await fetch(`${this.baseUrl}/getUpdates?limit=${limit}`);
-      
+
       if (!response.ok) {
         const errorData = await response.text();
         console.error('❌ Failed to get updates:', response.status, errorData);
@@ -358,7 +402,7 @@ Looking forward to today's assignments! 💪`;
 
       const result: any = await response.json();
       console.log('✅ Retrieved updates:', result);
-      
+
       if (result.ok && result.result.length > 0) {
         const messages = result.result.map((update: any) => ({
           messageId: update.message?.message_id,
@@ -371,19 +415,19 @@ Looking forward to today's assignments! 💪`;
         // Auto-register new contractor Telegram IDs
         await this.autoRegisterContractorTelegramIds(messages);
 
-        return { 
-          success: true, 
+        return {
+          success: true,
           messages,
           totalUpdates: result.result.length
         };
       }
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         messages: [],
         totalUpdates: 0
       };
-      
+
     } catch (error) {
       console.error('❌ Error getting messages:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -395,27 +439,27 @@ Looking forward to today's assignments! 💪`;
     try {
       const { DatabaseStorage } = await import('./database-storage');
       const storage = new DatabaseStorage();
-      
+
       const knownIds = ['8006717361', '8016744652', '6792554033', '5209713845'];
-      
+
       for (const message of messages) {
         const chatId = message.chatId?.toString();
         const firstName = message.from?.first_name;
-        
+
         if (chatId && firstName && !knownIds.includes(chatId)) {
           console.log(`🆕 New contractor detected: ${firstName} (ID: ${chatId})`);
-          
+
           // Try to find contractor by name and update their Telegram ID
           const contractors = await storage.getContractors();
-          const matchingContractor = contractors.find(c => 
+          const matchingContractor = contractors.find(c =>
             c.name.toLowerCase().includes(firstName.toLowerCase())
           );
-          
+
           if (matchingContractor) {
             console.log(`🔗 Linking ${firstName} to contractor: ${matchingContractor.name}`);
             // Update contractor with Telegram ID
-            await storage.updateContractor(matchingContractor.id, { 
-              telegramId: chatId 
+            await storage.updateContractor(matchingContractor.id, {
+              telegramId: chatId
             });
             knownIds.push(chatId);
           } else {
@@ -436,9 +480,9 @@ Looking forward to today's assignments! 💪`;
       }
 
       console.log('🧪 Testing Telegram bot connection...');
-      
+
       const response = await fetch(`${this.baseUrl}/getMe`);
-      
+
       if (!response.ok) {
         const errorData = await response.text();
         console.error('❌ Bot connection test failed:', response.status, errorData);
@@ -447,12 +491,12 @@ Looking forward to today's assignments! 💪`;
 
       const botInfo = await response.json();
       console.log('✅ Bot connection successful:', botInfo.result);
-      
-      return { 
-        success: true, 
-        botInfo: botInfo.result 
+
+      return {
+        success: true,
+        botInfo: botInfo.result
       };
-      
+
     } catch (error) {
       console.error('❌ Bot connection error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -471,7 +515,7 @@ Looking forward to today's assignments! 💪`;
   }) {
     try {
       console.log('📱 Sending approval notification to contractor...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating approval notification');
         return { success: true, simulated: true };
@@ -479,11 +523,11 @@ Looking forward to today's assignments! 💪`;
 
       // Use contractor's actual Telegram ID if available, otherwise use known Dalwayne's ID
       const chatId = contractorData.telegramId || '8016744652'; // Dalwayne's actual chat ID
-      
-      const payRateInfo = contractorData.adminPayRate 
+
+      const payRateInfo = contractorData.adminPayRate
         ? `💰 <b>Pay Rate:</b> £${contractorData.adminPayRate}/hour`
         : '';
-      
+
       const message = `
 ✅ <b>APPLICATION APPROVED!</b>
 
@@ -521,9 +565,9 @@ ${payRateInfo}
 
       const result = await response.json();
       console.log('✅ Approval notification sent successfully');
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Approval notification error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -541,18 +585,18 @@ ${payRateInfo}
   }) {
     try {
       console.log('📱 Sending rejection notification to contractor...');
-      
+
       if (!this.botToken) {
         console.log('⚠️ No bot token - simulating rejection notification');
         return { success: true, simulated: true };
       }
 
       const chatId = '7617462316';
-      
-      const reasonInfo = contractorData.rejectionReason 
+
+      const reasonInfo = contractorData.rejectionReason
         ? `\n📋 <b>Reason:</b> ${contractorData.rejectionReason}`
         : '';
-      
+
       const message = `
 ❌ <b>APPLICATION UPDATE</b>
 
@@ -591,9 +635,9 @@ Thank you for your interest in our contractor network.
 
       const result = await response.json();
       console.log('✅ Rejection notification sent successfully');
-      
+
       return { success: true, messageId: result.message_id };
-      
+
     } catch (error) {
       console.error('❌ Rejection notification error:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };

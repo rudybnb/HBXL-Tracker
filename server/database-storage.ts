@@ -84,35 +84,15 @@ export class DatabaseStorage implements IStorage {
     return contractor;
   }
 
+  // Contractor Applications
+  async getContractorApplications(): Promise<ContractorApplication[]> {
+    return db.select().from(contractorApplications);
+  }
+
   // Jobs
   async getJobs(): Promise<JobWithContractor[]> {
-    const jobsWithContractors = await db
-      .select({
-        id: jobs.id,
-        title: jobs.title,
-        description: jobs.description,
-        location: jobs.location,
-        status: jobs.status,
-        contractorId: jobs.contractorId,
-        contractorName: jobs.contractorName,
-        dueDate: jobs.dueDate,
-        startDate: jobs.startDate,
-        notes: jobs.notes,
-        uploadId: jobs.uploadId,
-        phases: jobs.phases,
-        phaseTaskData: jobs.phaseTaskData,
-        telegramNotified: jobs.telegramNotified,
-        latitude: jobs.latitude,
-        longitude: jobs.longitude,
-        contractor: contractors
-      })
-      .from(jobs)
-      .leftJoin(contractors, eq(jobs.contractorId, contractors.id));
-
-    return jobsWithContractors.map(row => ({
-      ...row,
-      contractor: row.contractor || undefined
-    }));
+    const allJobs = await db.select().from(jobs);
+    return allJobs as JobWithContractor[];
   }
 
   async getJob(id: string): Promise<JobWithContractor | undefined> {
@@ -177,6 +157,36 @@ export class DatabaseStorage implements IStorage {
 
       // 3. Delete job cost items
       await db.delete(jobCostItems).where(eq(jobCostItems.jobId, id));
+
+      // 3.5. Delete job assignments and all related records (Cascading Delete)
+      // COMMENTED OUT: DB schema mismatch - job_assignments table missing job_id column in current prod DB
+      /*
+      const assignments = await db.select().from(jobAssignments).where(eq(jobAssignments.jobId, id));
+      const assignmentIds = assignments.map(a => a.id);
+
+      if (assignmentIds.length > 0) {
+        console.log(`🗑️ Deleting ${assignmentIds.length} assignments linked to job ${id}...`);
+
+        // Delete ALL related records for these assignments
+        await db.delete(taskProgress).where(inArray(taskProgress.assignmentId, assignmentIds));
+        await db.delete(adminInspections).where(inArray(adminInspections.assignmentId, assignmentIds));
+        await db.delete(taskInspectionResults).where(inArray(taskInspectionResults.assignmentId, assignmentIds));
+        await db.delete(contractorReports).where(inArray(contractorReports.assignmentId, assignmentIds));
+        await db.delete(inspectionNotifications).where(inArray(inspectionNotifications.assignmentId, assignmentIds));
+
+        // Finally delete the assignments themselves
+        await db.delete(jobAssignments).where(inArray(jobAssignments.id, assignmentIds));
+      }
+      */
+
+      // 3.6 Delete project accounting data (if any) linked to this job
+      // Note: projectId in these tables is a semantic link to jobs.id
+      try {
+        await db.delete(projectCashflowWeekly).where(eq(projectCashflowWeekly.projectId, id));
+        await db.delete(materialPurchases).where(eq(materialPurchases.projectId, id));
+      } catch (e) {
+        console.warn("⚠️ Could not clean up project cashflow/materials (might be missing columns in DB)", e);
+      }
 
       // 4. Handle rooms and related entities
       const jobRooms = await db.select().from(rooms).where(eq(rooms.jobId, id));

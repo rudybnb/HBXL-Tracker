@@ -129,6 +129,7 @@ export interface IfcExtractionResult {
     success: boolean;
     rooms: any[];
     elements: any[];
+    svgPath?: string;
     error?: string;
 }
 
@@ -138,30 +139,15 @@ export class IfcAgent {
 
     // Lazy initialization — called at start of process()
     private async init() {
+        console.log("!!! FRESH IFC AGENT LOADED !!!");
         this.WebIFC = await getWebIFC();
         this.ifcApi = new this.WebIFC.IfcAPI();
 
-        // ROBUST WASM PATH RESOLUTION (The "New Way" Fix)
-        // 1. Try node_modules in CWD (Dev)
-        let wasmPath = path.join(process.cwd(), "node_modules", "web-ifc");
-
-        // 2. Try adjacent to script (Prod/Bundled)
-        if (!fs.existsSync(wasmPath)) {
-            wasmPath = path.join(__dirname, "..", "node_modules", "web-ifc");
-        }
-
-        // 3. Try standard node resolution (Best practice)
-        if (!fs.existsSync(wasmPath)) {
-            try {
-                const pkgPath = require.resolve("web-ifc/package.json");
-                wasmPath = path.dirname(pkgPath);
-            } catch (e) {
-                console.warn("[ARCHITECT] Could not resolve web-ifc via require.resolve");
-            }
-        }
-
+        // ROBUST WASM PATH: Use simple "./" relative to script
+        // This avoids Windows drive letter confusion and duplicate path errors
+        const wasmPath = "./";
         console.log(`[ARCHITECT] Setting WASM path to: ${wasmPath}`);
-        this.ifcApi.SetWasmPath(wasmPath + "/");
+        this.ifcApi.SetWasmPath(wasmPath);
     }
 
     public async process(ifcPath: string): Promise<IfcExtractionResult> {
@@ -655,8 +641,13 @@ export class IfcAgent {
             log(`\n${globalReport}`);
             log("------------------------");
 
+            // 6. GENERATE SVG
+            const svgFileName = path.basename(ifcPath) + '.svg';
+            const svgPath = path.join(path.dirname(ifcPath), svgFileName);
+            this.generateSVG(elements, rooms, svgPath);
+
             this.ifcApi.CloseModel(modelID);
-            return { success: true, rooms, elements };
+            return { success: true, rooms, elements, svgPath: svgFileName };
         } catch (err: any) {
             console.error("IfcAgent Error:", err);
             log(`CRITICAL FAILURE: ${err.message}`);
@@ -981,5 +972,163 @@ export class IfcAgent {
             });
         }
         return segments;
+    }
+
+    private generateSVG(elements: any[], rooms: any[], outputPath: string) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        const updateBounds = (x: number, y: number) => {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+        };
+
+        const allItems = [...elements, ...rooms];
+        allItems.forEach(el => {
+            if (el.geometry && Array.isArray(el.geometry)) {
+                el.geometry.forEach((p: any) => updateBounds(p.x, p.y));
+            } else if (el.geometry && typeof el.geometry.x === 'number') {
+                updateBounds(el.geometry.x, el.geometry.y);
+            } else if (el.bbox) {
+                updateBounds(el.bbox[0], el.bbox[1]);
+                updateBounds(el.bbox[2], el.bbox[3]);
+            }
+        });
+
+        if (minX === Infinity) { minX = 0; minY = 0; maxX = 1000; maxY = 1000; }
+
+        const padding = (maxX - minX) * 0.05;
+        minX -= padding; maxX += padding;
+        minY -= padding; maxY += padding;
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        const mapY = (y: number) => height - (y - minY);
+        const mapX = (x: number) => x - minX;
+
+        // Convex Hull Algorithm (Monotone Chain)
+        const convexHull = (points: any[]) => {
+            if (points.length < 3) return points;
+            const sorted = [...points].sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+            const cross = (o: any, a: any, b: any) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+            const lower: any[] = [];
+            for (const p of sorted) {
+                while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+                lower.push(p);
+            }
+            const upper: any[] = [];
+            for (let i = sorted.length - 1; i >= 0; i--) {
+                while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], sorted[i]) <= 0) upper.pop();
+                upper.push(sorted[i]);
+            }
+            upper.pop(); lower.pop();
+            return lower.concat(upper);
+        };
+
+        // --- LAYERING SYSTEM ---
+        const layers = {
+            slabs: [] as any[],
+            walls: [] as any[],
+            openings: [] as any[], // Windows, Doors
+            others: [] as any[]
+        };
+
+        // Classify Elements
+        elements.forEach(el => {
+            const t = el.type.toLowerCase();
+            if (t.includes('slab') || t.includes('floor')) layers.slabs.push(el);
+            else if (t.includes('wall')) layers.walls.push(el);
+            else if (t.includes('window') || t.includes('door')) layers.openings.push(el);
+            else layers.others.push(el);
+        });
+
+        let svgContent = '';
+
+        // Helper to draw element
+        const drawElement = (el: any, style: any) => {
+            let pts = '';
+            if (el.geometry && Array.isArray(el.geometry)) {
+                // Use Convex Hull for clean geometry
+                const hull = convexHull(el.geometry);
+                pts = hull.map((p: any) => `${mapX(p.x)},${mapY(p.y)}`).join(' ');
+            } else if (el.bbox) {
+                const x1 = mapX(el.bbox[0]); const y1 = mapY(el.bbox[3]);
+                const w = Math.abs(mapX(el.bbox[2]) - mapX(el.bbox[0]));
+                const h = Math.abs(mapY(el.bbox[3]) - mapY(el.bbox[1]));
+                // Draw as rect polygon for consistency
+                pts = `${x1},${y1} ${x1 + w},${y1} ${x1 + w},${y1 + h} ${x1},${y1 + h}`;
+            }
+
+            if (!pts) return '';
+
+            // Metadata Attributes
+            const idAttr = el.expressID ? `id="${el.expressID}"` : '';
+            const nameAttr = el.Name ? `data-name="${el.Name}"` : '';
+            const guidAttr = el.GlobalId ? `data-guid="${el.GlobalId}"` : '';
+            const classAttr = el.type ? `class="${el.type} ${style.cssClass}"` : `class="${style.cssClass}"`;
+
+            return `<polygon points="${pts}" fill="${style.fill}" fill-opacity="${style.opacity}" stroke="${style.stroke}" stroke-width="${style.strokeWidth}" vector-effect="non-scaling-stroke" ${idAttr} ${classAttr} ${nameAttr} ${guidAttr} />\n`;
+        };
+
+        // 1. Draw Slabs/Floors (Background)
+        layers.slabs.forEach(el => {
+            svgContent += drawElement(el, { fill: '#f8fafc', stroke: '#e2e8f0', strokeWidth: 0.5, opacity: 1, cssClass: 'ifc-slab' });
+        });
+
+        // 2. Draw Walls (Grey Architectural Look)
+        layers.walls.forEach(el => {
+            // Standard Grey Walls
+            svgContent += drawElement(el, { fill: '#b0b0b0', stroke: '#404040', strokeWidth: 1.5, opacity: 1, cssClass: 'ifc-wall' });
+        });
+
+        // 3. Draw Openings (Windows=Blue, Doors=Red) - ON TOP of walls
+        layers.openings.forEach(el => {
+            const t = el.type.toLowerCase();
+            if (t.includes('window')) {
+                // Thin Blue Linework
+                svgContent += drawElement(el, { fill: '#e0f2fe', stroke: '#0000ff', strokeWidth: 1.0, opacity: 0.8, cssClass: 'ifc-window' });
+            } else {
+                // Thin Red Linework
+                svgContent += drawElement(el, { fill: '#fff7ed', stroke: '#ff0000', strokeWidth: 1.0, opacity: 0.8, cssClass: 'ifc-door' });
+            }
+        });
+
+        // 4. Draw Others
+        layers.others.forEach(el => {
+            if (el.type === 'space') return; // Handled in rooms
+            svgContent += drawElement(el, { fill: '#eee', stroke: '#ccc', strokeWidth: 0.5, opacity: 0.5, cssClass: 'ifc-other' });
+        });
+
+        // 5. Draw Rooms (Top Layer, Transparent, Strong Outline)
+        rooms.forEach(r => {
+            if (r.geometry && Array.isArray(r.geometry)) {
+                const hull = convexHull(r.geometry);
+                const pts = hull.map((p: any) => `${mapX(p.x)},${mapY(p.y)}`).join(' ');
+
+                const nameAttr = r.roomName ? `data-name="${r.roomName}"` : '';
+                const uidAttr = r.expressID ? `id="${r.expressID}"` : '';
+
+                // STYLE: Pale Blue Fill (#dbeafe), Strong Blue Stroke (#1d4ed8), Thick (2.5)
+                // pointer-events="none" allows clicking through to walls
+                svgContent += `<polygon points="${pts}" fill="#dbeafe" fill-opacity="0.4" stroke="#1d4ed8" stroke-width="2.5" pointer-events="none" class="IfcSpace room-poly" ${uidAttr} ${nameAttr} />\n`;
+
+                if (r.roomName) {
+                    const cx = hull.reduce((sum: number, p: any) => sum + p.x, 0) / hull.length;
+                    const cy = hull.reduce((sum: number, p: any) => sum + p.y, 0) / hull.length;
+
+                    // Centered Room Name
+                    svgContent += `<text x="${mapX(cx)}" y="${mapY(cy)}" font-family="Arial" font-size="12" text-anchor="middle" fill="#0f172a" font-weight="bold" pointer-events="none" class="room-label">${r.roomName}</text>\n`;
+                }
+            }
+        });
+
+        const svgFile = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
+<rect width="100%" height="100%" fill="white" />
+${svgContent}
+</svg>`;
+
+        fs.writeFileSync(outputPath, svgFile);
     }
 }

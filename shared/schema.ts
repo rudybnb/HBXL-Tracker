@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, serial, bigint, json } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -11,6 +11,73 @@ export const eventStatusEnum = pgEnum("event_status", ["scheduled", "completed",
 
 // Manus-n8n Integration - Cost Category Types
 export const costCategoryEnum = pgEnum("cost_category", ["LABOUR", "MATERIAL", "PLANT", "SUBCONTRACTOR"]);
+export const packageTypeEnum = pgEnum("package_type", ["ROOM", "STRUCTURE"]);
+export const packageSourceEnum = pgEnum("package_source", ["IFC", "MANUAL", "CSV"]);
+
+// PACKAGES: Rooms or Building Elements
+export const packages = pgTable("packages", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`), // Changed from varchar to text for consistency
+  jobId: text("job_id").references(() => jobs.id),
+  originalId: text("original_id"), // ID from Port 8000 (usually Room ID)
+  name: text("name").notNull(),
+  type: text("type").default("ROOM"), // "ROOM", "ELEMENT"
+  source: text("source").default("MANUAL"), // "IFC", "MANUAL", "CSV"
+  status: text("status").default("pending"),
+  // roomUid: text("room_uid"), // If link to room (Disabled as not in DB)
+  ifcType: text("ifc_type"), // If ELEMENT e.g. IfcRoof
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const packageAssignments = pgTable("package_assignments", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  packageId: text("package_id").references(() => packages.id),
+  contractorId: text("contractor_id").references(() => contractors.id),
+  status: text("status").default("assigned"),
+  assignedAt: timestamp("assigned_at").defaultNow(),
+});
+
+export const insertPackageSchema = createInsertSchema(packages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPackageAssignmentSchema = createInsertSchema(packageAssignments).omit({
+  id: true,
+  assignedAt: true,
+});
+
+// PACKAGE ITEMS: Detailed line items within a package
+export const packageItems = pgTable("package_items", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  packageId: text("package_id").references(() => packages.id).notNull(),
+  description: text("description").notNull(),
+  quantity: text("quantity").default("0"), // Legacy: used as Qty Total String
+  qtyTotal: text("qty_total").default("0"), // New explicit total
+  unit: text("unit").default(""),
+  source: text("source").default(""),
+  fix: text("fix"), // First Fix, Second Fix etc.
+  trade: text("trade"),
+  completedQuantity: text("completed_quantity").default("0"),
+  rate: text("rate"),
+  total: text("total"),
+  sourceTag: text("source_tag"), // IFC, DXF, GEO, REQ, MANUAL, CSV
+  // ADDITIVE: Pricing fields (all nullable for backwards compatibility)
+  unitPrice: text("unit_price"),         // numeric as string, default "0"
+  totalPrice: text("total_price"),       // numeric as string, default "0"
+  pricingSource: text("pricing_source"), // "manual" | "rate_card" | "csv" | "hbxl" | "unknown"
+  currency: text("currency"),            // "GBP" default
+  labourOnly: text("labour_only"),       // "true" | "false" as string
+  notes: text("notes"),                  // optional notes
+  flagsJson: json("flags_json"),         // metadata flags e.g. {allowance: true}
+  sortOrder: serial("sort_order"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPackageItemSchema = createInsertSchema(packageItems).omit({
+  id: true,
+  createdAt: true,
+  sortOrder: true
+});
 
 export const contractors = pgTable("contractors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -49,8 +116,16 @@ export const jobs = pgTable("jobs", {
   postcode: text("postcode"), // e.g., "DA7 4RW"
   quotedAmount: text("quoted_amount"), // Total quoted value in pence
 
+  // Port 8000 Integration (Strict Identity)
+  externalJobKey: text("external_job_key").unique(), // Stable ID from 8000
+  externalSource: text("external_source").default("AG_8000"),
+  externalManifestPath: text("external_manifest_path"),
+
   // Financial Summary (JSON with category totals)
   financialSummary: text("financial_summary"), // JSON: {labour: 0, material: 0, plant: 0, subcontractor: 0, total: 0}
+
+  // HBXL CSV Budget Ledger (parsed CSV stored as JSON)
+  budgetLedger: text("budget_ledger"), // JSON: BudgetLedger from csv-budget-parser.ts
 });
 
 // Manus-n8n Integration - Job Cost Items Table
@@ -102,6 +177,8 @@ export const rooms = pgTable("rooms", {
   isLocked: boolean("is_locked").default(false),
   fittings: text("fittings"), // JSON string: {lights, sockets, switches, extractor_fans, ...}
   fittingsSource: text("fittings_source"), // "MANUAL" | "DXF_AUTO" | null
+  externalRoomKey: text("external_room_key"), // stable room_uid from Port 8000
+  source: text("source"), // "IFC8000" | "MANUAL" | null
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -357,15 +434,28 @@ export const jobAssignments = pgTable("job_assignments", {
   phone: text("phone").notNull(),
   workLocation: text("work_location").notNull(),
   hbxlJob: text("hbxl_job").notNull(),
-  buildPhases: text("build_phases").array().notNull(),
+  jobId: text("job_id"), // Link to jobs table
+  buildPhases: text("build_phases").array(), // Made nullable as we move to packages
+  assignedPackages: text("assigned_packages").array(), // Array of Package IDs
   startDate: text("start_date").notNull(),
   endDate: text("end_date").notNull(),
   specialInstructions: text("special_instructions"),
   status: text("status").notNull().default("assigned"),
+  tenderStatus: text("tender_status").default("DRAFT"), // DRAFT | SENT_FOR_PRICING | SUBMITTED | APPROVED
   sendTelegramNotification: boolean("send_telegram_notification").default(false),
   latitude: text("latitude"), // GPS latitude for work site
   longitude: text("longitude"), // GPS longitude for work site
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Assignment-scoped contractor tender pricing (does NOT mutate packageItems)
+export const assignmentTenderItems = pgTable("assignment_tender_items", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  assignmentId: text("assignment_id").references(() => jobAssignments.id).notNull(),
+  packageItemId: text("package_item_id").references(() => packageItems.id).notNull(),
+  unitPrice: text("unit_price").default("0"),
+  totalPrice: text("total_price").default("0"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -397,6 +487,32 @@ export const insertTaskProgressSchema = createInsertSchema(taskProgress).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+// NEW: Progress Logs for granular tracking (incremental updates)
+export const progressLogs = pgTable("progress_logs", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  assignmentId: text("assignment_id").references(() => jobAssignments.id),
+  packageItemId: text("package_item_id").references(() => packageItems.id),
+  qtyDone: text("qty_done").notNull(), // Numeric stored as text for precision
+  note: text("note"),
+  photoUrls: text("photo_urls").array(), // JSONB or Array of strings
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertProgressLogSchema = createInsertSchema(progressLogs).omit({
+  id: true,
+  createdAt: true
+});
+
+// NEW: Assignment Packages Join Table (Many-to-Many)
+export const assignmentPackages = pgTable("assignment_packages", {
+  assignmentId: text("assignment_id").references(() => jobAssignments.id).notNull(),
+  packageId: text("package_id").references(() => packages.id).notNull(),
+});
+// Composite key could be added or just rely on row uniqueness if needed, but Drizzle simple definition is fine for now.
+
+export const insertAssignmentPackageSchema = createInsertSchema(assignmentPackages);
+
 
 
 
@@ -514,6 +630,9 @@ export const projectCashflowWeekly = pgTable("project_cashflow_weekly", {
   dataValidated: boolean("data_validated").default(false).notNull(),
   validatedBy: text("validated_by"),
   validatedAt: timestamp("validated_at"),
+
+  // ADDITIVE: HBXL budget ledger JSON (parsed from CSV)
+  budgetLedger: text("budget_ledger"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -756,3 +875,81 @@ export interface JobWithFinancials extends Job {
   costItems?: JobCostItem[];
   financialBreakdown?: FinancialSummary;
 }
+
+// ============================================================
+// PRE-AWARD TENDER SYSTEM (additive — does not modify existing tables)
+// ============================================================
+
+// TENDER REQUESTS: Admin creates a tender invitation for a job
+export const tenderRequests = pgTable("tender_requests", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: text("job_id").references(() => jobs.id).notNull(),
+  title: text("title").notNull(),
+  packageIds: text("package_ids"), // JSON array of ROOM package IDs
+  status: text("status").notNull().default("DRAFT"), // DRAFT | SENT | CLOSED
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// TENDER REQUEST CONTRACTORS: Which contractors are invited to a tender
+export const tenderRequestContractors = pgTable("tender_request_contractors", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenderRequestId: text("tender_request_id").references(() => tenderRequests.id, { onDelete: "cascade" }).notNull(),
+  contractorId: text("contractor_id").notNull(), // contractor_applications.id
+  contractorName: text("contractor_name").notNull(),
+  contractorEmail: text("contractor_email"),
+  status: text("status").notNull().default("INVITED"), // INVITED | VIEWED | SUBMITTED | WITHDRAWN
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// TENDER SUBMISSIONS: Each contractor's pricing response
+export const tenderSubmissions = pgTable("tender_submissions", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenderRequestId: text("tender_request_id").references(() => tenderRequests.id, { onDelete: "cascade" }).notNull(),
+  contractorId: text("contractor_id").notNull(),
+  contractorName: text("contractor_name").notNull(),
+  status: text("status").notNull().default("DRAFT"), // DRAFT | SUBMITTED | APPROVED | REJECTED
+  submittedAt: timestamp("submitted_at"),
+  approvedAt: timestamp("approved_at"),
+  notes: text("notes"),
+  currency: text("currency").default("GBP"),
+  totalsJson: text("totals_json"), // JSON: room totals, section subtotals, grand total
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// TENDER SUBMISSION ITEMS: Individual line items with contractor pricing
+export const tenderSubmissionItems = pgTable("tender_submission_items", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  submissionId: text("submission_id").references(() => tenderSubmissions.id, { onDelete: "cascade" }).notNull(),
+  packageId: text("package_id").references(() => packages.id, { onDelete: "cascade" }).notNull(),
+  packageItemId: text("package_item_id").references(() => packageItems.id, { onDelete: "cascade" }).notNull(),
+  description: text("description").notNull(),
+  qty: text("qty").default("0"),
+  unit: text("unit").default(""),
+  fix: text("fix"),
+  trade: text("trade"),
+  unitPrice: text("unit_price"), // nullable until contractor fills in
+  totalPrice: text("total_price"), // qty * unitPrice
+  pricingSource: text("pricing_source").default("CONTRACTOR"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ASSIGNMENT PRICING BASELINE: Approved pricing copied to assignment (post-award)
+export const assignmentPricingBaseline = pgTable("assignment_pricing_baseline", {
+  id: text("id").primaryKey().default(sql`gen_random_uuid()`),
+  assignmentId: text("assignment_id").references(() => jobAssignments.id, { onDelete: "cascade" }).notNull(),
+  packageItemId: text("package_item_id").references(() => packageItems.id, { onDelete: "cascade" }).notNull(),
+  unitPrice: text("unit_price").default("0"),
+  totalPrice: text("total_price").default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Type exports for the new tables
+export type TenderRequest = typeof tenderRequests.$inferSelect;
+export type TenderRequestContractor = typeof tenderRequestContractors.$inferSelect;
+export type TenderSubmission = typeof tenderSubmissions.$inferSelect;
+export type TenderSubmissionItem = typeof tenderSubmissionItems.$inferSelect;
+export type AssignmentPricingBaseline = typeof assignmentPricingBaseline.$inferSelect;

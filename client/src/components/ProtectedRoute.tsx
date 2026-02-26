@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: "admin" | "contractor";
+  requiredRole?: "admin" | "contractor" | string[];
 }
 
 export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
@@ -16,16 +16,22 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     }
 
     // Enforce role-based access if requiredRole is specified
-    if (requiredRole && userRole !== requiredRole) {
-      // Redirect to appropriate dashboard based on user's actual role
-      if (userRole === 'admin') {
-        window.location.href = '/admin';
-      } else if (userRole === 'contractor') {
-        window.location.href = '/';
-      } else {
-        window.location.href = '/login';
+    if (requiredRole) {
+      const allowed = Array.isArray(requiredRole)
+        ? requiredRole.includes(userRole || '')
+        : userRole === requiredRole;
+
+      if (!allowed) {
+        // Redirect to appropriate dashboard based on user's actual role
+        if (userRole === 'admin') {
+          window.location.href = '/admin';
+        } else if (userRole === 'contractor') {
+          window.location.href = '/';
+        } else {
+          window.location.href = '/login';
+        }
+        return;
       }
-      return;
     }
   }, [requiredRole]);
 
