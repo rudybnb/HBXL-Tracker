@@ -45,6 +45,7 @@ Thumbs.db
 .cache/
 vite.config.ts.*
 *.tar.gz
+uploads/
 
 # Replit specific
 .replit
