@@ -27,6 +27,8 @@ services:
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      - key: DXF_SCANNER_URL
+        value: https://erdesignandbuild-telegram-api.onrender.com
     healthCheckPath: /api/health
     autoDeploy: true
 

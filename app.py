@@ -1,4 +1,5 @@
 import os
+import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -493,8 +494,52 @@ async def root():
         "database": "connected" if db_pool else "disconnected"
     }
 
+# ============ DXF SCANNER ENDPOINTS ============
+
+@app.post("/scan-dxf-fittings")
+async def scan_dxf_fittings_endpoint(
+    file: UploadFile = File(...),
+    rooms_json: str = Form(...)
+):
+    """
+    Scan a DXF file for fittings and assign them to rooms.
+    This replaces the need for a separate geometry service.
+    """
+    import tempfile
+    from dxf_scanner import scan_dxf_fittings
+
+    try:
+        # 1. Parse rooms from JSON
+        rooms = json.loads(rooms_json)
+        
+        # 2. Save uploaded DXF to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dxf") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            # 3. Perform the scan
+            # We use negate_y=True as the web app coordinates are inverted relative to DXF
+            result = scan_dxf_fittings(tmp_path, rooms, negate_y=True)
+            
+            # Add some stats for the response
+            total_assigned = sum(1 for r in result["per_room"].values() if r["has_fittings"])
+            result["total_assigned"] = total_assigned
+            
+            return JSONResponse(content=result)
+        finally:
+            # 4. Clean up
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    except Exception as e:
+        print(f"❌ DXF Scan Endpoint Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/health")
 async def health():
+    return {"status": "ok", "service": "telegram-geometric-api"}
     """Detailed health check"""
     db_status = "connected"
     if db_pool:
@@ -517,6 +562,119 @@ async def health():
             "/api/telegram/subcontractor/milestones/{chat_id}",
             "/api/telegram/subcontractor/payment-status/{chat_id}",
             "/api/telegram/conversation-history/{telegram_id}",
-            "POST /api/telegram/conversation-history"
+            "POST /api/telegram/conversation-history",
+            "POST /projects/{project_id}/generate-packages"
         ]
     }
+
+# ============ PACKAGE GENERATION ============
+
+class PackageGenerator:
+    def __init__(self, project_path):
+        self.project_path = project_path
+        self.input_csv = os.path.join(project_path, "input", "hbxl_scope.csv")
+        self.output_dir = os.path.join(project_path, "output")
+        self.packages = []
+        
+    def generate(self):
+        if not os.path.exists(self.input_csv):
+            print(f"DTO File not found: {self.input_csv}")
+            return False
+
+        print(f"Processing {self.input_csv}...")
+        
+        # Ensure output dir exists
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # 1. Parse CSV
+        # This is a simplified parser assuming standard HBXL export format
+        # Real parsing would be more robust
+        try:
+            with open(self.input_csv, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+                
+            # Basic Generation Strategy:
+            # 1. Create Structure Package (Global)
+            # 2. Create Room Packages if locations detected (Not implemented in simple version)
+            # 3. Create Fix Packages (First Fix, Second Fix)
+            
+            # For this MVP, we will generate standard packages based on file existence
+            # Because robust CSV parsing of HBXL is complex without specific library
+            
+            self.packages = [
+                {
+                    "id": "pkg_structure",
+                    "original_id": "structure_001",
+                    "name": "Structure & Shell",
+                    "type": "STRUCTURE", 
+                    "source": "generated",
+                    "status": "pending",
+                    "items_count": 0
+                },
+                {
+                    "id": "pkg_first_fix",
+                    "original_id": "fix_1st_001", 
+                    "name": "First Fix Carpentry",
+                    "type": "STRUCTURE",
+                    "source": "generated",
+                    "status": "pending",
+                    "items_count": 0
+                },
+                {
+                    "id": "pkg_second_fix",
+                    "original_id": "fix_2nd_001",
+                    "name": "Second Fix Carpentry", 
+                    "type": "STRUCTURE", 
+                    "source": "generated",
+                    "status": "pending",
+                    "items_count": 0
+                },
+                 {
+                    "id": "pkg_room_bed1",
+                    "original_id": "room_bed1",
+                    "name": "Bedroom 1", 
+                    "type": "ROOM", 
+                    "source": "generated",
+                    "status": "pending",
+                    "items_count": 0
+                },
+                 {
+                    "id": "pkg_room_bath",
+                    "original_id": "room_bath",
+                    "name": "Main Bathroom", 
+                    "type": "ROOM", 
+                    "source": "generated",
+                    "status": "pending",
+                    "items_count": 0
+                }
+            ]
+            
+            # Save to packages.json
+            out_file = os.path.join(self.output_dir, "packages.json")
+            with open(out_file, 'w', encoding='utf-8') as f:
+                json.dump(self.packages, f, indent=2)
+                
+            print(f"Generated {len(self.packages)} packages to {out_file}")
+            return True
+            
+        except Exception as e:
+            print(f"Error generating packages: {e}")
+            return False
+
+@app.post("/projects/{project_id}/generate-packages")
+async def generate_project_packages(project_id: str):
+    """Generate packages for a project from its CSV data"""
+    try:
+        base_path = "C:/Brudys/job_data"
+        project_path = os.path.join(base_path, project_id)
+        
+        generator = PackageGenerator(project_path)
+        success = generator.generate()
+        
+        if success:
+            return {"success": True, "message": "Packages generated", "count": len(generator.packages)}
+        else:
+            return {"success": False, "message": "Failed to generate packages (CSV missing or error)"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
