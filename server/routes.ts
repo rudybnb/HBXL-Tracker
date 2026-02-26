@@ -59,6 +59,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const { registerTenderRoutes } = await import("./tender-routes");
   registerTenderRoutes(app);
 
+  const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+
+
   // TEMPORARY: One-off migration to add DXF fittings columns
   app.get("/api/migrate-dxf", async (req, res) => {
     try {
@@ -147,7 +150,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`📤 Sending CSV to Port 8000 for project: ${projectId}`);
       try {
-        const port8000Url = `http://localhost:8000/projects/${projectId}/csv`; // Corrected endpoint
+        const port8000Url = `${PYTHON_API_URL}/projects/${projectId}/csv`; // Corrected endpoint
         const p8Response = await fetch(port8000Url, {
           method: 'POST',
           body: formData
@@ -410,8 +413,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const key = job.externalJobKey || job.externalCode;
 
       const url = key
-        ? `http://localhost:8000/?project_id=${encodeURIComponent(key)}&source=jt5000`
-        : `http://localhost:8000/`;
+        ? `${PYTHON_API_URL}/?project_id=${encodeURIComponent(key)}&source=jt5000`
+        : `${PYTHON_API_URL}/`;
 
       res.json({ url });
     } catch (e: any) {
@@ -922,7 +925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       // Use new export endpoint
-      const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(project_id)}/export`;
+      const exportUrl = `${PYTHON_API_URL}/api/projects/${encodeURIComponent(project_id)}/export`;
       console.log(`[IMPORT] Fetching export: ${exportUrl}`);
       const resp = await fetch(exportUrl);
       if (!resp.ok) {
@@ -951,7 +954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log(`[WEBHOOK] Triggered by 8000 for project_id=${pid}`);
 
     try {
-      const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(pid)}/export`;
+      const exportUrl = `${PYTHON_API_URL}/api/projects/${encodeURIComponent(pid)}/export`;
       const resp = await fetch(exportUrl);
       if (!resp.ok) {
         const errText = await resp.text();
@@ -972,8 +975,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/jobs/scan-from-8000", async (req, res) => {
     try {
       // 1. List Projects from 8000 using NEW strict endpoint
-      console.log("[SCAN] Listing projects via http://localhost:8000/api/projects...");
-      const listResp = await fetch("http://localhost:8000/api/projects");
+      console.log(`[SCAN] Listing projects via ${PYTHON_API_URL}/api/projects...`);
+      const listResp = await fetch(`${PYTHON_API_URL}/api/projects`);
       if (!listResp.ok) return res.status(502).json({ error: "Cannot connect to Geometry Service (Port 8000)" });
 
       const projects: any[] = await listResp.json();
@@ -1004,7 +1007,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[SCAN] Importing project: ${pid} (${p.display_name})...`);
 
         try {
-          const exportUrl = `http://localhost:8000/api/projects/${encodeURIComponent(pid)}/export`;
+          const exportUrl = `${PYTHON_API_URL}/api/projects/${encodeURIComponent(pid)}/export`;
           const exportResp = await fetch(exportUrl);
           if (!exportResp.ok) {
             console.error(`[SCAN] Export fetch failed for ${pid}: ${exportResp.status}`);
@@ -2532,7 +2535,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // --- DXF MICROSERVICE INTEGRATION ---
   // Proxies DXF file + room polygons to Python scanner
-  const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
 
   app.post("/api/jobs/:jobId/scan-dxf", uploadJobFile.single('file'), async (req, res) => {
     try {
